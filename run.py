@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 
 
 def main() -> int:
@@ -35,7 +36,14 @@ def main() -> int:
                     continue
                 jarvis.say = lambda t, force=False: print(f"jarvis > {t}\n")  # type: ignore
                 jarvis.say_blocking = lambda t: print(f"jarvis > {t}\n")      # type: ignore
-                jarvis.process(text)
+                # Dispatch on its own thread rather than calling inline: a
+                # RED confirmation or AMBER stop-window makes jarvis.process()
+                # block until it's answered, and the answer is itself a later
+                # call to jarvis.process() (see app.py's _awaiting_confirmation
+                # handling). Calling it inline here would mean input() can
+                # never be reached again to type that answer — every
+                # confirmation would just time out. See HANDOFFPROMPT §3/§7.
+                threading.Thread(target=jarvis.process, args=(text,), daemon=True).start()
         except KeyboardInterrupt:
             pass
         finally:
