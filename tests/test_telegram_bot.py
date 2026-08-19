@@ -14,8 +14,6 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock
-
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -48,11 +46,34 @@ class _FakeUser:
         self.id = user_id
 
 
+class _FakeAnswerCall:
+    """Mimics the real aiogram Message.answer()'s actual return shape: a
+    plain (non-async) method returning an object that's awaitable via
+    __await__ but is NOT a native coroutine — asyncio.iscoroutine() is
+    False for it, same as aiogram's real Request wrapper. An AsyncMock
+    here would NOT have caught the real bug this once shipped with:
+    run_coroutine_threadsafe requires a native coroutine and rejected
+    aiogram's actual return type with "TypeError: A coroutine object is
+    required" on every live reply, undetected by the previous version of
+    this test because AsyncMock()'s calls return real coroutines."""
+
+    def __init__(self, calls: list):
+        self._calls = calls
+
+    def __call__(self, text):
+        self._calls.append(text)
+        return self
+
+    def __await__(self):
+        return iter(())  # resolves immediately, no-op
+
+
 class _FakeMessage:
     def __init__(self, user_id, text):
         self.from_user = _FakeUser(user_id) if user_id is not None else None
         self.text = text
-        self.answer = AsyncMock()
+        self.answer_calls: list[str] = []
+        self.answer = _FakeAnswerCall(self.answer_calls)
 
 
 class _FakeJarvis:
@@ -78,7 +99,7 @@ def test_unauthorized_message_never_reaches_process():
     asyncio.run(handler(message))
 
     assert jarvis.processed == []
-    message.answer.assert_not_called()
+    assert message.answer_calls == []
 
 
 def test_authorized_message_dispatches_to_process():
@@ -128,4 +149,4 @@ def test_authorized_message_overrides_say_to_reply_on_this_chat():
 
     asyncio.run(scenario())
 
-    message.answer.assert_called_with("a reply")
+    assert message.answer_calls == ["a reply"]
