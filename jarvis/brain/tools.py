@@ -127,6 +127,21 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "delete_file": ("Delete a file. Irreversible — always requires spoken confirmation first.", {
         "path": ("string", "file path", True),
     }),
+    # ---- launcher.py --------------------------------------------------------
+    "open_target": (
+        "Open anything by name: an application, a file, or a folder. Handles "
+        "approximate names, nicknames and misspellings, and resolves the app "
+        "actually installed on this machine (e.g. 'Telegram' opens AyuGram "
+        "here). Prefer this over open_app/open_folder for any 'open X' request.",
+        {"name": ("string", "what to open: app name, file name, or full path", True)},
+    ),
+    "remember_alias": (
+        "Teach a nickname for an app, file or folder so it can be opened by "
+        "that name later. Persists across restarts.",
+        {"name": ("string", "the nickname to remember", True),
+         "target": ("string", "full path, or the app name it should mean", True)},
+    ),
+    "list_aliases": ("List every nickname taught so far.", {}),
     # ---- memory.py ----------------------------------------------------------
     "remember": ("Store a fact or preference for later recall. Refuses anything that looks like a credential.", {
         "text": ("string", "what to remember", True),

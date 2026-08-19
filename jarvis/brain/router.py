@@ -85,6 +85,12 @@ def _rules() -> list[Rule]:
         # with no hint that nothing happened. It falls through to open_app now.
         (R(r"^(play|resume|continue) (the )?(music|song|track|player)$", re.I),
          "media_play_pause", n, None),
+        # "play timeless" — a partial song name, not a media-key press. Sits
+        # after the generic "play the music" rule above so that still toggles
+        # playback, and resolves through open_target's file search so a rough
+        # name finds the actual track.
+        (R(r"^(?:play|put on) (.+)$", re.I),
+         "open_target", lambda m: {"name": m.group(1).strip()}, None),
         (R(r"^(next|skip)( song| track| this)?$", re.I), "media_next", n, None),
         (R(r"^(previous|back|last) (song|track)$", re.I), "media_previous", n, None),
         (R(r"^volume (up|down)$", re.I),
@@ -108,8 +114,12 @@ def _rules() -> list[Rule]:
         # "open X" is the common phrasing, but people say launch/start/fire up
         # /bring up too — these all fell through to Claude before, turning a
         # 1ms local action into a multi-second round trip.
-        (R(r"^(?:open|launch|start|run|fire up|boot up|pull up)(?: up)? (.+)$", re.I),
-         "open_app", lambda m: {"name": m.group(1).strip()}, None),
+        # open_target, not open_app: "open X" is a file or folder at least as
+        # often as it's an app, and the old app-only path failed outright on
+        # "open my CV" / "open changes.pdf". open_target resolves an explicit
+        # path, then a known/learned/fuzzy app, then a file search.
+        (R(r"^(?:open|launch|start|run|fire up|boot up|pull up|show me)(?: up)? (.+)$", re.I),
+         "open_target", lambda m: {"name": m.group(1).strip()}, None),
         (R(r"^(close|quit|exit) (.+)$", re.I), "close_app", lambda m: {"name": m.group(2).strip()}, None),
         (R(r"^(switch to|go to|focus|bring up) (.+)$", re.I),
          "focus_window", lambda m: {"name": m.group(2).strip()}, None),

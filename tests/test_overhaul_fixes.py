@@ -40,14 +40,14 @@ def route_tool(router, text):
 def test_every_launch_verb_routes_locally(router, phrase):
     """Only "open" was recognised; the rest paid a full Claude round-trip
     (seconds) for something the router does in under a millisecond."""
-    assert route_tool(router, phrase) == "open_app"
+    assert route_tool(router, phrase) == "open_target"
 
 
 def test_trailing_self_address_is_stripped(router):
     """"open chrome, Jarvis" reached open_app as name="chrome, jarvis" and
     tried to launch an app by that literal name."""
     intent = router.route("open chrome, jarvis")
-    assert intent.tool == "open_app"
+    assert intent.tool == "open_target"
     assert intent.args["name"] == "chrome"
 
 
@@ -55,7 +55,7 @@ def test_trailing_self_address_is_stripped(router):
                                     "could you please open chrome"])
 def test_leading_politeness_is_stripped(router, phrase):
     intent = router.route(phrase)
-    assert intent.tool == "open_app"
+    assert intent.tool == "open_target"
     assert intent.args["name"] == "chrome"
 
 
@@ -243,3 +243,59 @@ def test_private_mode_default_is_honoured(tmp_path):
                   "jsonl_path": str(tmp_path / "a.jsonl")},
     })
     assert AuditLog(cfg, "test-private").private is True
+
+
+# ------------------------------------------------- open anything (launcher)
+def test_generic_client_name_resolves_to_whats_installed():
+    """"Open Telegram" must open whichever Telegram client is actually here —
+    AyuGram on this machine. String similarity alone never gets there
+    ("telegram" vs "ayugram" scores below any safe cutoff), which is why an
+    explicit equivalence family exists."""
+    from jarvis.tools.launcher import resolve_app
+
+    target, _matched = resolve_app("telegram")
+    assert target, "no installed Telegram-family client resolved"
+
+
+def test_filler_words_do_not_defeat_app_lookup():
+    from jarvis.tools.launcher import resolve_app
+
+    assert resolve_app("my chrome")[1] == resolve_app("chrome")[1]
+
+
+def test_open_target_is_honest_when_nothing_matches():
+    from jarvis.tools.launcher import open_target
+
+    assert "couldn't find" in open_target("zzz_no_such_thing_9x7").lower()
+
+
+def test_learned_alias_survives_and_resolves(tmp_path, monkeypatch):
+    """A nickname you have to re-teach every restart is worthless."""
+    from jarvis.tools import launcher
+
+    monkeypatch.setattr(launcher, "ALIASES_PATH", tmp_path / "aliases.json")
+    desktop = str(Path.home() / "Desktop")
+    launcher.remember_alias("my beats", desktop)
+    assert "my beats" in launcher.list_aliases()
+    assert launcher.resolve_app("my beats")[0] == desktop
+
+
+def test_file_search_ignores_filler_words():
+    """"open my CV" must search for "cv", not the literal phrase "my cv"."""
+    from jarvis.tools.launcher import find_files
+
+    assert find_files("my cv") == find_files("cv")
+
+
+def test_open_target_is_registered_and_amber():
+    """It launches things, so it announces first — but must be an explicit
+    tier, never the unclassified default."""
+    from jarvis import tools
+    from jarvis.safety import SafetyEngine
+
+    assert "open_target" in tools.REGISTRY
+    engine = SafetyEngine(CONFIG)
+    engine.paranoid = False
+    verdict = engine.classify("open_target", {"name": "chrome"})
+    assert verdict.tier.value == "amber"
+    assert not verdict.detail.get("unclassified")

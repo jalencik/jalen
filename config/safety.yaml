@@ -21,6 +21,7 @@ green:
     - read_file
     - search_files
     - list_directory
+    - list_aliases         # read-only: what nicknames are known
     - screenshot
     - read_screen          # UI accessibility tree
     - get_window_list
@@ -44,6 +45,7 @@ green:
                            # Was unclassified, so it defaulted to AMBER and paid a
                            # mandatory 4s announce-and-wait to minimise a window.
     - open_folder          # opens Explorer at a path; reads nothing, changes nothing
+    - remember_alias       # stores a name->path note; nothing is executed
     - get_time
     - get_date             # same shape as get_time — a read-only fact, missing before
     - get_battery          # same shape as get_system_status — ditto
@@ -65,6 +67,7 @@ amber:
     - click_element
     - keyboard_shortcut
     - open_url
+    - open_target          # launches an app or opens a file with its default program
     - create_calendar_event
     - draft_email          # drafting is amber, sending is red
     - draft_message
