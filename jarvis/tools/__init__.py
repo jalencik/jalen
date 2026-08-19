@@ -1,11 +1,12 @@
 """
 Unified tool dispatch. system.py (Phase 0/1), desktop.py and filesystem.py
-(Phase C) each own a REGISTRY of their own tools; this module merges them
-into one name -> function map so callers (the router's handle_local(), and
-the Brain's SDK tool wrappers) have a single place to call any tool by name
-without needing to know which module it lives in.
+(Phase C), and memory.py (Phase E) each own a REGISTRY of their own tools;
+this module merges them into one name -> function map so callers (the
+router's handle_local(), and the Brain's SDK tool wrappers) have a single
+place to call any tool by name without needing to know which module it
+lives in.
 
-Tool names must be unique across all three registries — a collision would
+Tool names must be unique across all registries — a collision would
 silently shadow one implementation with another, so it's asserted at import
 time rather than left to be discovered at call time.
 """
@@ -14,7 +15,7 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
-from . import desktop, filesystem, system
+from . import desktop, filesystem, memory, system
 
 
 @contextlib.contextmanager
@@ -48,7 +49,7 @@ def com_initialized():
         initializer.Uninitialize()
 
 REGISTRY: dict[str, Any] = {}
-for _module in (system, desktop, filesystem):
+for _module in (system, desktop, filesystem, memory):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:
         raise RuntimeError(f"Tool name collision across modules: {_collisions}")
