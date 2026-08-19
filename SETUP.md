@@ -240,6 +240,33 @@ Starts muted, as you asked. Say "unmute" or press the tray icon to wake it.
 
 ---
 
+## Starting and stopping
+
+Always use the project's `.venv` (see the troubleshooting table below if you
+get a `ModuleNotFoundError`):
+
+```powershell
+.venv\Scripts\python.exe run.py --unmuted     # voice
+.venv\Scripts\python.exe run.py --text        # typed, no mic
+.venv\Scripts\python.exe run.py --telegram    # control from your phone
+.venv\Scripts\python.exe run.py --check       # diagnostics
+```
+
+To stop it — you never need Task Manager:
+
+```powershell
+.venv\Scripts\python.exe run.py --stop        # stop it
+.venv\Scripts\python.exe run.py --status      # is it running?
+.venv\Scripts\python.exe run.py --restart     # stop, then start fresh
+```
+
+Or just say so: **"Jarvis, quit"**, **"Jarvis, pause"** (stops listening but
+stays running — say "Hey Jarvis" to come back), **"Jarvis, resume"**.
+
+Only one Jarvis can run at a time. A second launch tells you one is already
+running and exits, rather than quietly starting a second copy that fights the
+first one for your microphone.
+
 ## Everyday use
 
 | You say | What happens |

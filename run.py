@@ -68,7 +68,15 @@ def _serve(args) -> int:
         jarvis.orb.start()
         try:
             while True:
-                text = input("you > ").strip()
+                if jarvis._quit.is_set():
+                    break
+                try:
+                    text = input("you > ").strip()
+                except EOFError:
+                    # No terminal attached (piped/background). Text mode is
+                    # interactive by definition — exit cleanly instead of
+                    # spinning on a stream that will never produce input.
+                    break
                 if text.lower() in ("quit", "exit"):
                     break
                 if not text:

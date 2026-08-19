@@ -18,6 +18,7 @@ security control shouldn't hand out for free.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 from typing import Any
 
@@ -103,12 +104,41 @@ def build_dispatcher(jarvis: Any, allowed_user_ids: list[int]):
 
 
 async def run_bot(jarvis: Any, bot_token: str, allowed_user_ids: list[int]) -> None:
-    """Start the bot and poll for updates until cancelled."""
+    """
+    Start the bot and poll until cancelled or asked to stop.
+
+    The stop-watcher matters: `python run.py --stop` writes a sentinel and
+    waits for the process to exit on its own before resorting to a hard
+    kill. Only the voice loop polled that sentinel, so stopping Telegram
+    mode always fell through to force-termination — which works, but skips
+    the orderly release of the audit DB and the bot session. Racing polling
+    against the watcher lets it shut down properly.
+    """
     from aiogram import Bot
+
+    from .. import runtime
 
     bot = Bot(token=bot_token)
     dp = build_dispatcher(jarvis, allowed_user_ids)
+
+    async def watch_for_stop() -> None:
+        while not runtime.stop_requested() and not jarvis._quit.is_set():
+            await asyncio.sleep(0.25)
+
+    polling = asyncio.create_task(dp.start_polling(bot))
+    watcher = asyncio.create_task(watch_for_stop())
     try:
-        await dp.start_polling(bot)
+        done, pending = await asyncio.wait(
+            {polling, watcher}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        # Surface a real polling failure rather than exiting silently.
+        if polling in done:
+            polling.result()
+    except asyncio.CancelledError:
+        pass
     finally:
+        with contextlib.suppress(Exception):
+            await dp.stop_polling()
         await bot.session.close()
