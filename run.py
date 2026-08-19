@@ -11,6 +11,7 @@ def main() -> int:
     parser.add_argument("--text", action="store_true", help="type instead of talk (no mic needed)")
     parser.add_argument("--check", action="store_true", help="run diagnostics and exit")
     parser.add_argument("--unmuted", action="store_true", help="start with voice on")
+    parser.add_argument("--telegram", action="store_true", help="control Jarvis from the Telegram bot instead of voice/text")
     args = parser.parse_args()
 
     if args.check:
@@ -55,6 +56,34 @@ def main() -> int:
                         jarvis.process(t)
 
                 threading.Thread(target=_run_turn, daemon=True).start()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            jarvis.shutdown()
+        return 0
+
+    if args.telegram:
+        if not jarvis.secrets.telegram_bot_token:
+            print("TELEGRAM_BOT_TOKEN isn't set in .env — see CREDENTIALS.md.")
+            jarvis.shutdown()
+            return 1
+        if not jarvis.secrets.telegram_allowed_user_ids:
+            print(
+                "TELEGRAM_ALLOWED_USER_IDS is empty — the bot would refuse everyone. "
+                "Add your numeric Telegram ID (from @userinfobot) to .env first."
+            )
+            jarvis.shutdown()
+            return 1
+
+        import asyncio
+
+        from jarvis.integrations.telegram_bot import run_bot
+
+        print("Jarvis — Telegram mode. Ctrl+C to quit.\n")
+        jarvis.muted = True
+        jarvis.orb.start()
+        try:
+            asyncio.run(run_bot(jarvis, jarvis.secrets.telegram_bot_token, jarvis.secrets.telegram_allowed_user_ids))
         except KeyboardInterrupt:
             pass
         finally:

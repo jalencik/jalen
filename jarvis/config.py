@@ -43,6 +43,7 @@ class Secrets:
     telegram_bot_token: str = ""
     telegram_api_id: str = ""
     telegram_api_hash: str = ""
+    telegram_allowed_user_ids: list[int] = field(default_factory=list)
     github_token: str = ""
     notion_token: str = ""
     missing: list[str] = field(default_factory=list)
@@ -59,6 +60,20 @@ class Secrets:
         return bool(getattr(self, name, ""))
 
 
+def _parse_user_ids(raw: str) -> list[int]:
+    """Comma/space-separated numeric Telegram user IDs. Anything that
+    doesn't parse as an int is dropped rather than crashing config load —
+    a malformed .env line should degrade to 'nobody's allowed', the safe
+    default, not take the whole app down."""
+    ids: list[int] = []
+    for part in raw.replace(",", " ").split():
+        try:
+            ids.append(int(part))
+        except ValueError:
+            continue
+    return ids
+
+
 def load_secrets() -> Secrets:
     load_dotenv(ROOT / ".env")
     s = Secrets(
@@ -68,6 +83,7 @@ def load_secrets() -> Secrets:
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         telegram_api_id=os.getenv("TELEGRAM_API_ID", ""),
         telegram_api_hash=os.getenv("TELEGRAM_API_HASH", ""),
+        telegram_allowed_user_ids=_parse_user_ids(os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")),
         github_token=os.getenv("GITHUB_TOKEN", ""),
         notion_token=os.getenv("NOTION_TOKEN", ""),
     )
