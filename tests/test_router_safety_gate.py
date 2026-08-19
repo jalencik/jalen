@@ -77,15 +77,17 @@ def test_amber_tier_router_tool_is_announced_before_executing(jarvis, monkeypatc
 
     monkeypatch.setattr(Jarvis, "announce", fake_announce)
 
-    # close_app is unclassified in safety.yaml -> defaults to AMBER, and
-    # isn't in the tools REGISTRY yet, so this exercises the announce step
-    # and then cleanly no-ops (KeyError -> None) rather than doing anything.
-    reply = jarvis.handle_local(Intent(tool="close_app", args={"name": "notepad"}))
+    # A synthetic, never-implemented tool name: unclassified in safety.yaml
+    # (defaults to AMBER) and absent from every REGISTRY, so this exercises
+    # the announce step and then cleanly no-ops (KeyError -> None) rather
+    # than doing anything. Deliberately not a real tool name (e.g.
+    # close_app used to serve this role, until Phase C actually implemented
+    # it) — a real tool's implementation status can change; this can't.
+    reply = jarvis.handle_local(Intent(tool="some_undefined_amber_tool_xyz", args={"name": "notepad"}))
 
     assert announced.get("text"), "AMBER tool executed without ever calling announce()"
-    assert "close app" in announced["text"].lower()
     assert "stop" in announced["text"].lower()
-    assert reply is None  # not implemented yet — the announce is what's under test
+    assert reply is None  # not implemented — the announce is what's under test
 
 
 def test_amber_tier_stop_cancels_before_executing(jarvis, monkeypatch):
@@ -97,7 +99,7 @@ def test_amber_tier_stop_cancels_before_executing(jarvis, monkeypatch):
 
     monkeypatch.setattr(Jarvis, "announce", instantly_stopped_announce)
 
-    reply = jarvis.handle_local(Intent(tool="close_app", args={"name": "notepad"}))
+    reply = jarvis.handle_local(Intent(tool="some_undefined_amber_tool_xyz", args={"name": "notepad"}))
 
     assert reply == "Cancelled."
 

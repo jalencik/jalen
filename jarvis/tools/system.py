@@ -134,6 +134,28 @@ def open_app(name: str) -> str:
         return f"Couldn't open {name}: {exc}"
 
 
+def close_app(name: str) -> str:
+    """
+    Close a running app's window by (partial) title — AMBER; closing can
+    lose unsaved work (a real save-prompt can appear and just sit there),
+    which is exactly why this isn't GREEN. Referenced by the router since
+    Phase 0/1 but never actually implemented until now — a real gap, found
+    while building Phase C's tool inventory.
+    """
+    try:
+        import uiautomation as auto
+
+        window = auto.WindowControl(searchDepth=1, RegexName=f".*{name}.*")
+        if not window.Exists(2, 0.3):
+            return f"I can't find a window called {name}."
+        window.SendKeys("{Alt}{F4}")
+        return f"Closed {name}."
+    except ImportError:
+        return "Window control isn't installed yet."
+    except Exception as exc:
+        return f"Couldn't close {name}: {exc}"
+
+
 def open_folder(path: str) -> str:
     try:
         os.startfile(os.path.expandvars(os.path.expanduser(path)))  # noqa: S606
@@ -238,6 +260,7 @@ REGISTRY = {
     "volume_set": volume_set,
     "volume_mute_toggle": volume_mute_toggle,
     "open_app": open_app,
+    "close_app": close_app,
     "open_folder": open_folder,
     "focus_window": focus_window,
     "window_state": window_state,

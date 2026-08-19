@@ -23,6 +23,16 @@ from ..safety import SafetyEngine, Tier
 ConfirmFn = Callable[[str], Awaitable[bool]]
 AnnounceFn = Callable[[str], Awaitable[None]]
 
+MCP_SERVER_NAME = "jarvis"
+# SDK MCP tools are reported to PreToolUse hooks as "mcp__<server>__<tool>",
+# not the bare name safety.yaml classifies by — confirmed empirically with a
+# live SDK call: a tool registered as "delete_file" on this server arrived at
+# the hook as "mcp__jarvis__delete_file". Strip exactly this prefix (and only
+# this one — an unrelated third-party MCP server's tool name should never be
+# silently reinterpreted as one of ours) before classifying, or every real
+# tool call misclassifies as unclassified-AMBER regardless of its true tier.
+MCP_TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
+
 
 class Brain:
     def __init__(
@@ -78,7 +88,8 @@ class Brain:
     # -------------------------------------------------------------- safety hook
     def _make_hook(self):
         async def pre_tool_use(input_data: dict, tool_use_id: str, context: Any):
-            tool = input_data.get("tool_name") or input_data.get("name") or "unknown"
+            raw_tool = input_data.get("tool_name") or input_data.get("name") or "unknown"
+            tool = raw_tool[len(MCP_TOOL_PREFIX):] if raw_tool.startswith(MCP_TOOL_PREFIX) else raw_tool
             args = input_data.get("tool_input") or input_data.get("input") or {}
             origin = "content" if input_data.get("_from_content") else "user"
 
@@ -133,7 +144,35 @@ class Brain:
         options = ClaudeAgentOptions(
             model=self.model,
             system_prompt=self.system_prompt(),
-            permission_mode="default",
+            # CRITICAL: with `tools` left unset, Claude gets the SDK's full
+            # built-in toolset — Bash, PowerShell, Write, Edit, Read, Agent,
+            # and more — in addition to (and entirely separate from) the
+            # jarvis MCP tools below. Confirmed live: with tools left at its
+            # default, a probe call could see and successfully invoke a raw
+            # Bash tool. Those built-in names aren't in safety.yaml, so
+            # they'd fall to unclassified — RED only while
+            # paranoid_first_week is on; plain AMBER (announce, then
+            # auto-proceed in 4s, no real confirmation) the moment it's
+            # turned off, which the handoff explicitly expects to happen
+            # "once you trust it." That's arbitrary shell execution behind
+            # a single generic-sounding confirmation, completely bypassing
+            # every tier boundary this project is built around. tools=[]
+            # disables the built-in set entirely — Claude can only call
+            # what's registered on the jarvis MCP server, nothing else.
+            tools=[],
+            # "default" prompts interactively for "dangerous" operations —
+            # there is no interactive terminal here to answer that prompt, so
+            # every non-trivial tool call just hung/denied forever. Confirmed
+            # live: with "default", every registered tool call failed with
+            # "permission wasn't granted," including plain GREEN-tier reads.
+            # bypassPermissions removes that separate, unanswerable gate.
+            # It does NOT touch PreToolUse hooks — confirmed straight from
+            # the SDK's own source (types.py's shadowing-warning helper):
+            # bypassPermissions shadows the (unused, here) can_use_tool
+            # callback specifically, and its own message says "To gate every
+            # tool call, use a PreToolUse hook instead" — which is exactly
+            # the mechanism below. The hook remains the sole, real gate.
+            permission_mode="bypassPermissions",
             max_turns=int(self.cfg.get_path("brain.max_turns_per_request", 12)),
             mcp_servers=self._mcp_servers(),
             hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self._make_hook()])]},
@@ -146,8 +185,8 @@ class Brain:
 
         servers: dict[str, Any] = {}
         if self.tools:
-            servers["jarvis"] = create_sdk_mcp_server(
-                name="jarvis", version="1.0.0", tools=self.tools
+            servers[MCP_SERVER_NAME] = create_sdk_mcp_server(
+                name=MCP_SERVER_NAME, version="1.0.0", tools=self.tools
             )
         return servers
 

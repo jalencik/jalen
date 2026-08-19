@@ -18,6 +18,7 @@ def main() -> int:
         return check()
 
     from jarvis.app import Jarvis
+    from jarvis import tools as jarvis_tools
 
     jarvis = Jarvis()
     if args.unmuted:
@@ -43,7 +44,17 @@ def main() -> int:
                 # handling). Calling it inline here would mean input() can
                 # never be reached again to type that answer — every
                 # confirmation would just time out. See HANDOFFPROMPT §3/§7.
-                threading.Thread(target=jarvis.process, args=(text,), daemon=True).start()
+                #
+                # com_initialized(): a fresh thread has no COM apartment, so
+                # any UIA-based tool (focus_window, window_state, and Phase C's
+                # desktop.py) fails with "CoInitialize has not been called" —
+                # not a crash, just silently never doing what was asked. See
+                # jarvis/tools/__init__.py's com_initialized() docstring.
+                def _run_turn(t=text):
+                    with jarvis_tools.com_initialized():
+                        jarvis.process(t)
+
+                threading.Thread(target=_run_turn, daemon=True).start()
         except KeyboardInterrupt:
             pass
         finally:
