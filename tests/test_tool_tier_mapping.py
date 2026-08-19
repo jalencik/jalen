@@ -27,12 +27,12 @@ EXPECTED_TIERS = {
     "read_file": Tier.GREEN,
     "list_directory": Tier.GREEN,
     "search_files": Tier.GREEN,
-    "create_file": Tier.AMBER,
+    "create_file": Tier.GREEN,   # makes something NEW; nothing existing is lost
     "edit_file": Tier.AMBER,
     "move_file": Tier.AMBER,
     "rename_file": Tier.AMBER,
     "copy_file": Tier.AMBER,
-    "create_folder": Tier.AMBER,
+    "create_folder": Tier.GREEN,  # ditto
     "delete_file": Tier.RED,
     # desktop.py
     "get_window_list": Tier.GREEN,

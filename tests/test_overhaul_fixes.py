@@ -287,9 +287,9 @@ def test_file_search_ignores_filler_words():
     assert find_files("my cv") == find_files("cv")
 
 
-def test_open_target_is_registered_and_amber():
-    """It launches things, so it announces first — but must be an explicit
-    tier, never the unclassified default."""
+def test_open_target_is_registered_and_green():
+    """Opening destroys nothing and closing the window undoes it, so it must
+    just run — but as an EXPLICIT tier, never the unclassified default."""
     from jarvis import tools
     from jarvis.safety import SafetyEngine
 
@@ -297,5 +297,46 @@ def test_open_target_is_registered_and_amber():
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False
     verdict = engine.classify("open_target", {"name": "chrome"})
-    assert verdict.tier.value == "amber"
+    assert verdict.tier.value == "green"
     assert not verdict.detail.get("unclassified")
+
+
+# ------------------------------------------------- confirmation discipline
+def test_non_destructive_actions_never_ask(router):
+    """
+    Reported verbatim: "it is asking me confirmation for even the simplest
+    tasks... if it is not deleting something it should not ask me."
+
+    paranoid_first_week promoted every AMBER to RED, so opening a file asked
+    exactly like sending an email. The rule now is destructive-vs-not:
+    opening, creating and reading just happen.
+    """
+    from jarvis.safety import SafetyEngine
+
+    engine = SafetyEngine(CONFIG)
+    silent = ["open_target", "open_app", "open_folder", "create_file", "create_folder",
+              "read_file", "search_files", "get_time", "list_directory", "screenshot",
+              "window_state", "focus_window", "media_play_pause", "volume_set"]
+    asking = {t: engine.classify(t, {}).tier.value for t in silent
+              if engine.classify(t, {}).tier.value != "green"}
+    assert not asking, f"these should just run, but they gate: {asking}"
+
+
+def test_destructive_actions_still_ask(router):
+    """The other half of the same rule — speed must not cost the gate."""
+    from jarvis.safety import SafetyEngine
+
+    engine = SafetyEngine(CONFIG)
+    must_ask = ["delete_file", "send_email", "send_telegram_message", "run_powershell",
+                "install_software", "post_public", "git_push"]
+    not_asking = {t: engine.classify(t, {}).tier.value for t in must_ask
+                  if engine.classify(t, {}).tier.value != "red"}
+    assert not not_asking, f"these must confirm first: {not_asking}"
+
+
+def test_black_tier_is_still_absolute():
+    from jarvis.safety import SafetyEngine
+
+    engine = SafetyEngine(CONFIG)
+    for tool in ("transfer_funds", "execute_payment", "enter_password", "vps_access"):
+        assert engine.classify(tool, {}).blocked is True, tool

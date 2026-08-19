@@ -45,7 +45,12 @@ green:
                            # Was unclassified, so it defaulted to AMBER and paid a
                            # mandatory 4s announce-and-wait to minimise a window.
     - open_folder          # opens Explorer at a path; reads nothing, changes nothing
+    - open_target          # opens an app/file/folder. Destroys nothing; closing the
+                           # window undoes it. Asking here is pure friction.
     - remember_alias       # stores a name->path note; nothing is executed
+    - create_file          # makes something NEW; nothing existing is lost.
+                           # Overwriting is edit_file, which stays gated.
+    - create_folder        # ditto
     - get_time
     - get_date             # same shape as get_time — a read-only fact, missing before
     - get_battery          # same shape as get_system_status — ditto
@@ -57,17 +62,14 @@ amber:
   reason: "Changes something, but you can undo it."
   announce_template: "{summary}. Say stop if you don't want that."
   tools:
-    - create_file
     - edit_file
     - move_file
     - rename_file
     - copy_file
-    - create_folder
     - type_text            # typing into an app
     - click_element
     - keyboard_shortcut
     - open_url
-    - open_target          # launches an app or opens a file with its default program
     - create_calendar_event
     - draft_email          # drafting is amber, sending is red
     - draft_message

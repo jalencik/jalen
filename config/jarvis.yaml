@@ -142,10 +142,10 @@ brain:
 # ---------------------------------------------------------------------------
 safety:
   posture: "irreversible_only"     # F45. paranoid | irreversible_only | autonomous
-  paranoid_first_week: true        # while true, AMBER actions are promoted to RED.
+  paranoid_first_week: false        # while true, AMBER actions are promoted to RED.
                                    # Set false once you trust it. This is the one dial
                                    # to turn when confirmations get annoying.
-  undo_window_s: 4                 # AMBER actions announce, then wait this long for "stop"
+  undo_window_s: 2                 # AMBER actions announce, then wait this long for "stop"
   confirm_timeout_s: 20            # RED actions cancel if you don't answer in time
   # [NOT IMPLEMENTED] no global hotkey listener exists. The SPOKEN kill
   # phrases below DO work, as does `run.py --stop`.
