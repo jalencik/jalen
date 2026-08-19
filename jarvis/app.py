@@ -75,6 +75,7 @@ class Jarvis:
         self.kill = threading.Event()
         self._answer_q: queue.Queue[Optional[bool]] = queue.Queue()
         self._awaiting_confirmation = False
+        self._awaiting_stop = False
 
         self.end_phrases = [p.lower() for p in cfg.get_path("conversation.end_phrases", [])]
         self.kill_phrases = [p.lower() for p in cfg.get_path("safety.kill_phrases", [])]
@@ -160,10 +161,14 @@ class Jarvis:
         """AMBER tier: say it, then give a short window to say stop."""
         window = float(self.cfg.get_path("safety.undo_window_s", 4))
         self.say_blocking(text)
+        self._awaiting_stop = True
         self._drain_answers()
-        stopped = await asyncio.get_running_loop().run_in_executor(
-            None, self._wait_for_stop, window
-        )
+        try:
+            stopped = await asyncio.get_running_loop().run_in_executor(
+                None, self._wait_for_stop, window
+            )
+        finally:
+            self._awaiting_stop = False
         if stopped:
             raise RuntimeError("cancelled by user")
 
@@ -243,6 +248,22 @@ class Jarvis:
             self.audit.action(verdict, "executed" if approved else "cancelled")
             if not approved:
                 return "Cancelled."
+        elif verdict.tier is Tier.AMBER:
+            # Router tools used to skip straight to execution here — AMBER's
+            # announce+undo-window (spec: "say stop if you don't want that")
+            # was only ever wired on the Brain/agent-hook path. Anything
+            # reached through the router ran as if it were GREEN, with no
+            # announcement and no chance to say stop. Caught live while
+            # driving the app for the Phase B checkpoint.
+            template = self.cfg.get_path(
+                "safety_tiers.amber.announce_template",
+                "{summary}. Say stop if you don't want that.",
+            )
+            try:
+                self._run_coro(self.announce(template.format(summary=verdict.summary)))
+            except RuntimeError:
+                self.audit.action(verdict, "cancelled")
+                return "Cancelled."
 
         try:
             result = systools.call(tool, intent.args)
@@ -291,7 +312,12 @@ class Jarvis:
                 self._answer_q.put(answer)
                 return
 
-        if any(p in low for p in self.end_phrases):
+        # Exact match, not substring: "...just the number, nothing else." is a
+        # real question, not a request to end the conversation, but "nothing
+        # else" is a configured end phrase — `in` would swallow it silently
+        # before it ever reached the router or the brain. Caught live while
+        # driving the app for the Phase B checkpoint (handoff §1 rule).
+        if low in self.end_phrases:
             self.say("Any time.")
             return
 
@@ -324,6 +350,25 @@ class Jarvis:
 
         self.audit.write("system", summary=f"Jarvis started (session {self.session_id})")
 
+        def dispatch_turn(text: str) -> None:
+            """
+            Run process() on its own thread so this loop keeps reading mic
+            frames while a turn is in flight — including while it's stuck
+            inside a RED confirmation or an AMBER stop-window. Calling
+            process() inline here would freeze this exact loop until the
+            turn returns, and since answering a confirmation means calling
+            process() AGAIN (see _awaiting_confirmation below and in
+            confirm()/announce()), that second call could never happen: the
+            loop that would deliver it is the one blocked waiting for it.
+            Every RED action would silently time out and "no" would be the
+            only possible outcome, no matter what you said.
+            """
+            nonlocal follow_up_until
+            self.process(text)
+            if self.cfg.get_path("conversation.follow_up", True):
+                follow_up_until = time.monotonic() + follow_up_s
+            self.orb.set_state("muted" if self.muted else "idle")
+
         with self.mic:
             for frame in self.mic.frames():
                 if self.kill.is_set():
@@ -344,7 +389,12 @@ class Jarvis:
 
                 if not listening:
                     in_follow_up = time.monotonic() < follow_up_until
-                    if in_follow_up and self.vad.probability(frame) >= self.vad.threshold:
+                    # A pending RED confirmation or AMBER stop-window is
+                    # itself a listening window — you shouldn't have to say
+                    # "hey jarvis" again just to answer a question it just
+                    # asked you.
+                    awaiting_reply = self._awaiting_confirmation or self._awaiting_stop
+                    if (in_follow_up or awaiting_reply) and self.vad.probability(frame) >= self.vad.threshold:
                         listening = True
                         self.orb.set_state("listening")
                     elif self.wake.feed(frame):
@@ -378,11 +428,7 @@ class Jarvis:
                     self.orb.set_state("idle")
                     continue
 
-                self.process(text)
-
-                if self.cfg.get_path("conversation.follow_up", True):
-                    follow_up_until = time.monotonic() + follow_up_s
-                self.orb.set_state("muted" if self.muted else "idle")
+                threading.Thread(target=dispatch_turn, args=(text,), daemon=True).start()
 
     def shutdown(self) -> None:
         self.running.clear()
