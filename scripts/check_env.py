@@ -115,19 +115,26 @@ def main() -> int:
     import shutil
     import subprocess
 
-    if shutil.which("claude"):
+    claude_path = shutil.which("claude")
+    if claude_path:
         print(f"{OK}claude CLI found")
         try:
+            # Windows: "claude" resolves to an npm-installed claude.CMD shim.
+            # subprocess.run(["claude", ...], shell=False) can't launch a bare
+            # name with an implicit .CMD extension — it raises FileNotFoundError
+            # (WinError 2), silently swallowed below as "couldn't verify" even
+            # though auth is fine. Passing the already-resolved full path (which
+            # includes the extension) works on every platform.
             result = subprocess.run(
-                ["claude", "-p", "reply with the single word: ok"],
+                [claude_path, "-p", "reply with the single word: ok"],
                 capture_output=True, text=True, timeout=60,
             )
             if result.returncode == 0 and "ok" in result.stdout.lower():
                 print(f"{OK}authenticated — your Claude plan is working")
             else:
                 print(f"{WARN}claude CLI is installed but not authenticated. Run: claude setup-token")
-        except Exception:
-            print(f"{WARN}couldn't verify — run `claude setup-token` if the brain fails")
+        except Exception as exc:
+            print(f"{WARN}couldn't verify ({type(exc).__name__}: {exc}) — run `claude setup-token` if the brain fails")
     else:
         print(f"{WARN}claude CLI not on PATH. Install from https://claude.com/download,")
         print("      then run: claude setup-token")

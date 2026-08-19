@@ -18,7 +18,17 @@ import numpy as np
 MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "models"
 MODEL_PATH = MODELS_DIR / "silero_vad.onnx"
 
-WINDOW = 512  # samples @16k — the model's fixed input size
+WINDOW = 512   # samples @16k — new samples consumed per inference call
+CONTEXT = 64   # samples @16k — this onnx export (Silero VAD v5+, opset 16) wants
+               # each call's input to be the tail of the PREVIOUS chunk plus the
+               # new one: 64 context samples + 512 new = 576 total. Feed it a bare
+               # 512-sample window with no continuity and it doesn't error — it
+               # just returns near-zero for everything, silently. Confirmed against
+               # the reference OnnxWrapper in the silero-vad package's own
+               # utils_vad.py (self._context = x[..., -context_size:], concatenated
+               # before every session.run). Selftest §5 caught this: real speech
+               # was scoring ~0.03 against a 0.5 threshold before this fix, ~0.9+
+               # after.
 
 
 class VAD:
@@ -31,6 +41,7 @@ class VAD:
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
         self._sr = np.array(self.sample_rate, dtype=np.int64)
         self._tail = np.zeros(0, dtype=np.float32)
+        self._context = np.zeros(CONTEXT, dtype=np.float32)
         self.last_prob = 0.0
 
     def load(self) -> None:
@@ -52,6 +63,7 @@ class VAD:
     def reset(self) -> None:
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
         self._tail = np.zeros(0, dtype=np.float32)
+        self._context = np.zeros(CONTEXT, dtype=np.float32)
         self.last_prob = 0.0
 
     def probability(self, frame: np.ndarray) -> float:
@@ -61,11 +73,13 @@ class VAD:
         self._tail = np.concatenate([self._tail, frame.astype(np.float32)])
         prob = self.last_prob
         while len(self._tail) >= WINDOW:
-            chunk = self._tail[:WINDOW].reshape(1, WINDOW)
+            chunk = self._tail[:WINDOW]
             self._tail = self._tail[WINDOW:]
+            windowed = np.concatenate([self._context, chunk]).reshape(1, CONTEXT + WINDOW)
             out, self._state = self._sess.run(
-                None, {"input": chunk, "state": self._state, "sr": self._sr}
+                None, {"input": windowed, "state": self._state, "sr": self._sr}
             )
+            self._context = chunk[-CONTEXT:]
             prob = float(out[0][0])
         self.last_prob = prob
         return prob

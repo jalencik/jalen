@@ -63,18 +63,35 @@ class Transcriber:
     # ------------------------------------------------------------- moonshine
     def _moonshine_model(self):
         if self._moonshine is None:
-            from moonshine_voice import ModelArch, Transcriber as MoonTranscriber
+            from moonshine_voice import (
+                ModelArch,
+                Transcriber as MoonTranscriber,
+                get_model_for_language,
+            )
 
+            # Transcriber(model_path, model_arch) — model_path is a required
+            # directory of .ort weights, not something you can skip. The
+            # original code passed the ModelArch enum as the first (path)
+            # argument instead, which the C API stringified into the literal
+            # path "2" (ModelArch.TINY_STREAMING.value) and then failed to
+            # find. get_model_for_language() downloads (once, then caches
+            # via moonshine_voice's own cache dir) and resolves the real path.
             name = self.cfg.get_path("stt.moonshine_model", "TINY_STREAMING")
-            self._moonshine = MoonTranscriber(getattr(ModelArch, name))
+            wanted_arch = getattr(ModelArch, name)
+            model_path, resolved_arch = get_model_for_language(self.language, wanted_arch)
+            self._moonshine = MoonTranscriber(model_path, resolved_arch)
         return self._moonshine
 
     def _via_moonshine(self, audio: np.ndarray) -> str:
         model = self._moonshine_model()
-        result = model.transcribe(audio.astype(np.float32))
-        if isinstance(result, str):
-            return result.strip()
-        return str(getattr(result, "text", "")).strip()
+        # Transcriber has no .transcribe() — the one-shot (non-streaming) API
+        # is transcribe_without_streaming(list[float], sample_rate), returning
+        # a Transcript whose .lines is a list of TranscriptLine, each with
+        # its own .text.
+        result = model.transcribe_without_streaming(
+            audio.astype(np.float32).tolist(), sample_rate=self.sample_rate
+        )
+        return " ".join(line.text for line in result.lines).strip()
 
     # -------------------------------------------------------------- dispatch
     def transcribe(self, audio: np.ndarray) -> str:
