@@ -184,6 +184,43 @@ click-through orb, and the scheduled 21:00 daily review.
 
 ---
 
+## 6b. Round two — fixed from your actual recorded session
+
+I read the audit log of your real test. Everything below was a genuine bug it exposed.
+
+**"open changes.pdf" wasted ~38 seconds and then failed.** There was **no
+tool to open a file at all**. Jarvis found the file, had no way to open it,
+opened the containing folder instead, told you to double-click it yourself,
+and eventually rendered the PDF through an unrelated browser tool. Now:
+`"Opened Changes.pdf"` in **0.76 s**.
+
+**"open my Igram" / "open my CV" failed.** Everything was treated as an *app*
+name, matched exactly. Now names resolve as: exact path → nickname you taught
+→ known alias (only if actually installed) → your Start Menu (162 apps here)
+→ equivalence family → fuzzy → file search.
+
+**"open Telegram" now opens AyuGram in ~1 second.** The shipped alias pointed
+at `Telegram.exe`, which isn't installed on your machine. Aliases are now
+verified before use, and AyuGram is registered as a Telegram client — that
+part is knowledge, not spelling, because no amount of string similarity
+connects "telegram" to "ayugram".
+
+**"play timeless"** now finds and opens the actual track instead of pressing
+a media key into nothing.
+
+**You can name things yourself.** *"Remember my beats folder is …"* persists
+across restarts, and the name you chose is matched exactly — even if it starts
+with "my".
+
+**A real security finding.** Jarvis was inheriting this machine's Claude Code
+configuration — including MCP servers from an unrelated developer setup (that
+is what it used to open your PDF). Those tools were not in the safety file, so
+they landed in the weakest category. Jarvis now runs in isolation mode with
+only its own 37 tools. Verified.
+
+**Also fixed:** "brief me" used to produce total silence; it now reports date,
+time and battery and says plainly that email/calendar need Google connected.
+
 ## 7. What I could NOT complete
 
 Honest list — these are genuinely blocked or not built.
@@ -238,7 +275,7 @@ thing to report.
 
 ## 9. Current state
 
-- **172 automated tests passing** (134 before this work + 38 new)
+- **179 automated tests passing** (134 before this work + 45 new)
 - **Health check:** all green, no warnings
 - **Code compiles clean**, no stray processes
 - **5 commits** on `main`, all work committed
