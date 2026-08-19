@@ -23,6 +23,16 @@ from ..safety import SafetyEngine, Tier
 ConfirmFn = Callable[[str], Awaitable[bool]]
 AnnounceFn = Callable[[str], Awaitable[None]]
 
+MCP_SERVER_NAME = "jarvis"
+# SDK MCP tools are reported to PreToolUse hooks as "mcp__<server>__<tool>",
+# not the bare name safety.yaml classifies by — confirmed empirically with a
+# live SDK call: a tool registered as "delete_file" on this server arrived at
+# the hook as "mcp__jarvis__delete_file". Strip exactly this prefix (and only
+# this one — an unrelated third-party MCP server's tool name should never be
+# silently reinterpreted as one of ours) before classifying, or every real
+# tool call misclassifies as unclassified-AMBER regardless of its true tier.
+MCP_TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
+
 
 class Brain:
     def __init__(
@@ -78,7 +88,8 @@ class Brain:
     # -------------------------------------------------------------- safety hook
     def _make_hook(self):
         async def pre_tool_use(input_data: dict, tool_use_id: str, context: Any):
-            tool = input_data.get("tool_name") or input_data.get("name") or "unknown"
+            raw_tool = input_data.get("tool_name") or input_data.get("name") or "unknown"
+            tool = raw_tool[len(MCP_TOOL_PREFIX):] if raw_tool.startswith(MCP_TOOL_PREFIX) else raw_tool
             args = input_data.get("tool_input") or input_data.get("input") or {}
             origin = "content" if input_data.get("_from_content") else "user"
 
@@ -146,8 +157,8 @@ class Brain:
 
         servers: dict[str, Any] = {}
         if self.tools:
-            servers["jarvis"] = create_sdk_mcp_server(
-                name="jarvis", version="1.0.0", tools=self.tools
+            servers[MCP_SERVER_NAME] = create_sdk_mcp_server(
+                name=MCP_SERVER_NAME, version="1.0.0", tools=self.tools
             )
         return servers
 
