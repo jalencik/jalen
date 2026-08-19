@@ -127,6 +127,13 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "delete_file": ("Delete a file. Irreversible — always requires spoken confirmation first.", {
         "path": ("string", "file path", True),
     }),
+    # ---- memory.py ----------------------------------------------------------
+    "remember": ("Store a fact or preference for later recall. Refuses anything that looks like a credential.", {
+        "text": ("string", "what to remember", True),
+    }),
+    "recall_memory": ("Search remembered facts and preferences by meaning, not exact wording.", {
+        "query": ("string", "what to recall", True),
+    }),
 }
 
 
