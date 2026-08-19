@@ -33,7 +33,7 @@ from .audit import AuditLog
 from .brain.router import IntentRouter
 from .config import CONFIG, SECRETS
 from .safety import SafetyEngine, Tier
-from .tools import system as systools
+from . import tools as systools
 from .ui.orb import Orb, TranscriptWindow
 
 
