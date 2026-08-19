@@ -259,6 +259,7 @@ Starts muted, as you asked. Say "unmute" or press the tray icon to wake it.
 
 | Symptom | Cause |
 |---|---|
+| `ModuleNotFoundError: No module named 'numpy'` (or any package) even though setup succeeded | This terminal's `python` isn't the project's `.venv` one. Every *new* terminal starts without it — you have to run `.venv\Scripts\Activate.ps1` again each time (Step 3), or skip activation entirely and call `.venv\Scripts\python.exe run.py ...` directly. Check which one you're running with: `Get-Command python \| Select-Object Source` should print a path inside `...\jarvis\.venv\Scripts\`. If it prints anything else (e.g. `AppData\Local\Programs\Python\...`), that's the bug — activate, or use the full `.venv` path. |
 | Doesn't hear "Hey Jarvis" | Lower `wake.threshold` to 0.45 in the config |
 | Triggers when the TV is on | Raise it to 0.65 |
 | `tflite-runtime` error | You have openwakeword 0.4.0 — `pip install openwakeword==0.6.0` |
