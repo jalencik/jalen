@@ -58,6 +58,18 @@ class Jarvis:
 
         self.brain = None  # lazily started — costs nothing until first real question
 
+        # One persistent event loop, on its own thread, for the whole process
+        # lifetime. Brain's ClaudeSDKClient (and anything else async) is
+        # created and awaited on THIS loop only — never a fresh asyncio.run()
+        # loop per turn, which used to orphan the client from turn 2 onward
+        # (see HANDOFFPROMPT §3). process() and handle_local() are sync
+        # methods called from the mic thread or the text-mode input loop;
+        # _run_coro() is how they hand async work to this loop and block for
+        # the result.
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_thread: Optional[threading.Thread] = None
+        self._start_loop()
+
         self.muted = bool(cfg.get_path("startup.start_muted", True))
         self.running = threading.Event()
         self.kill = threading.Event()
@@ -69,6 +81,41 @@ class Jarvis:
         self.address = cfg.get_path("identity.address_user_as", "")
 
         self.speaker.on_state = self.orb.set_state
+
+    # -------------------------------------------------------------- event loop
+    def _start_loop(self) -> None:
+        ready = threading.Event()
+
+        def runner() -> None:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._loop = loop
+            ready.set()
+            loop.run_forever()
+
+        self._loop_thread = threading.Thread(target=runner, name="jarvis-asyncio", daemon=True)
+        self._loop_thread.start()
+        ready.wait()
+
+    def _run_coro(self, coro):
+        """
+        Submit a coroutine to the persistent loop from any other thread and
+        block until it finishes. This is the only way async work (brain
+        turns, confirmations, announces) should run — never asyncio.run().
+        """
+        if self._loop is None:
+            raise RuntimeError("Jarvis's event loop isn't running")
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result()
+
+    def _stop_loop(self) -> None:
+        if self._loop is None:
+            return
+        loop, self._loop = self._loop, None
+        loop.call_soon_threadsafe(loop.stop)
+        if self._loop_thread is not None:
+            self._loop_thread.join(timeout=5)
+        loop.close()
 
     # ------------------------------------------------------------------ speech
     def say(self, text: str, *, force: bool = False) -> None:
@@ -192,7 +239,7 @@ class Jarvis:
             self.audit.action(verdict, "blocked")
             return f"I won't do that — {verdict.reason}."
         if verdict.tier is Tier.RED:
-            approved = asyncio.run(self.confirm(f"{verdict.summary}. Confirm?"))
+            approved = self._run_coro(self.confirm(f"{verdict.summary}. Confirm?"))
             self.audit.action(verdict, "executed" if approved else "cancelled")
             if not approved:
                 return "Cancelled."
@@ -257,7 +304,7 @@ class Jarvis:
                 return
 
         self.orb.set_state("thinking")
-        reply = asyncio.run(self.handle_with_brain(text))
+        reply = self._run_coro(self.handle_with_brain(text))
         self.say(reply)
 
     # -------------------------------------------------------------------- loop
@@ -344,8 +391,9 @@ class Jarvis:
         self.mic.stop()
         self.audit.write("system", summary="Jarvis stopped")
         self.audit.close()
-        if self.brain is not None:
+        if self.brain is not None and self._loop is not None:
             try:
-                asyncio.run(self.brain.stop())
+                self._run_coro(self.brain.stop())
             except Exception:
                 pass
+        self._stop_loop()

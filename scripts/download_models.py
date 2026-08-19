@@ -29,8 +29,15 @@ def download_wake_models() -> bool:
         print("      openwakeword not installed. Run: pip install -r requirements.txt")
         return False
     try:
-        # Pulls hey_jarvis_v0.1 plus the shared melspectrogram + embedding models
+        # Pulls hey_jarvis_v0.1 plus the shared melspectrogram + embedding models.
+        # openwakeword defaults target_directory to its OWN package resources dir
+        # (site-packages/openwakeword/resources/models) — Model() always reads the
+        # melspectrogram/embedding feature models from there regardless, so that
+        # copy is required either way. But wake.py looks for the wake-word model
+        # itself in THIS project's models/ first, so we also fetch a copy there:
+        # explicit, visible in `models/`, and matches what this script promises.
         utils.download_models(model_names=["hey_jarvis_v0.1"])
+        utils.download_models(model_names=["hey_jarvis_v0.1"], target_directory=str(MODELS))
         print("      done.")
         return True
     except Exception as exc:
