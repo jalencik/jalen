@@ -40,6 +40,10 @@ green:
     - volume_set
     - volume_step          # same reversibility as volume_set — just missing before
     - volume_mute_toggle   # ditto
+    - window_state         # minimise/maximise: same reversibility class as volume_step.
+                           # Was unclassified, so it defaulted to AMBER and paid a
+                           # mandatory 4s announce-and-wait to minimise a window.
+    - open_folder          # opens Explorer at a path; reads nothing, changes nothing
     - get_time
     - get_date             # same shape as get_time — a read-only fact, missing before
     - get_battery          # same shape as get_system_status — ditto

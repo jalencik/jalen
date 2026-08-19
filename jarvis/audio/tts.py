@@ -61,8 +61,10 @@ class Speaker:
         self.pitch = cfg.get_path("tts.pitch", "+0Hz")
         self.retries = int(cfg.get_path("tts.retry_attempts", 3))
         self.max_spoken = int(cfg.get_path("tts.max_spoken_chars", 700))
+        self.sentence_streaming = bool(cfg.get_path("tts.sentence_streaming", True))
         self._interrupt = threading.Event()
         self._speaking = threading.Event()
+        self._say_lock = threading.Lock()
         self.on_state = lambda state: None  # set by the orchestrator to drive the orb
 
     # --------------------------------------------------------------- control
@@ -144,34 +146,100 @@ class Speaker:
             except Exception:
                 pass
 
+    def warmup(self) -> None:
+        """
+        Pay edge-tts's first-connection cost up front (measured 4562ms cold
+        vs ~2000ms warm), and pre-import PyAV so the first decode doesn't
+        also pay an import. Synthesises one short throwaway word and never
+        plays it.
+        """
+        try:
+            import av  # noqa: F401  — import cost paid here, not mid-reply
+        except ImportError:
+            pass
+        asyncio.run(self._synthesise("ready"))
+
     def say(self, text: str) -> bool:
         """
         Speak text. Blocks until finished or interrupted.
         Returns False if barge-in cut it short.
+
+        Serialized on _say_lock: two turns finishing at once used to call
+        this concurrently, and since _interrupt/_speaking are instance
+        state, one call's cleanup would clear the other's flags mid-playback
+        while both wrote to the output device — audible as overlapping,
+        garbled speech.
         """
         text = clean_for_speech(text)
         if not text:
             return True
 
-        self._interrupt.clear()
-        self._speaking.set()
-        self.on_state("speaking")
-        try:
-            for sentence in split_sentences(text):
+        with self._say_lock:
+            self._interrupt.clear()
+            self._speaking.set()
+            self.on_state("speaking")
+            try:
+                sentences = split_sentences(text)
+                if self.sentence_streaming and len(sentences) > 1:
+                    return self._say_streaming(sentences)
+                return self._say_sequential(sentences)
+            finally:
+                self._speaking.clear()
+                self._interrupt.clear()
+                self.on_state("idle")
+
+    def _say_sequential(self, sentences: list[str]) -> bool:
+        for sentence in sentences:
+            if self._interrupt.is_set():
+                return False
+            try:
+                pcm, rate = self._decode_mp3(asyncio.run(self._synthesise(sentence)))
+            except Exception:
+                continue  # one bad sentence shouldn't kill the whole reply
+            if not self._play(pcm, rate):
+                return False
+        return True
+
+    def _say_streaming(self, sentences: list[str]) -> bool:
+        """
+        Synthesise sentence N+1 while sentence N is still playing.
+
+        This is what `tts.sentence_streaming: true` in jarvis.yaml always
+        claimed to do and never did — synthesis and playback were strictly
+        serial, so every sentence boundary cost a full network round-trip of
+        silence (~2s each, measured warm). Overlapping them means only the
+        FIRST sentence's synthesis is ever on the critical path; the rest is
+        hidden behind audio that's already playing.
+        """
+        import concurrent.futures as cf
+
+        with cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts-synth") as pool:
+            pending = pool.submit(self._render, sentences[0])
+            for index in range(len(sentences)):
                 if self._interrupt.is_set():
                     return False
+                current, pending = pending, None
+                # Kick off the NEXT synthesis before playing this one, so the
+                # network round-trip overlaps playback instead of following it.
+                if index + 1 < len(sentences):
+                    pending = pool.submit(self._render, sentences[index + 1])
                 try:
-                    mp3 = asyncio.run(self._synthesise(sentence))
-                    pcm, rate = self._decode_mp3(mp3)
+                    rendered = current.result()
                 except Exception:
-                    continue  # one bad sentence shouldn't kill the whole reply
+                    rendered = None
+                if rendered is None:
+                    continue
+                pcm, rate = rendered
                 if not self._play(pcm, rate):
                     return False
             return True
-        finally:
-            self._speaking.clear()
-            self._interrupt.clear()
-            self.on_state("idle")
+
+    def _render(self, sentence: str) -> tuple[np.ndarray, int] | None:
+        """Synthesise + decode one sentence. Runs on the synth worker thread."""
+        try:
+            return self._decode_mp3(asyncio.run(self._synthesise(sentence)))
+        except Exception:
+            return None
 
     def summarise_if_long(self, text: str) -> tuple[str, str | None]:
         """

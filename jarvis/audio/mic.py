@@ -95,6 +95,15 @@ class Microphone:
             except queue.Empty:
                 continue
 
+    def queued_seconds(self) -> float:
+        """
+        How much un-consumed audio is sitting in the queue. The caller uses
+        this to tell "the rest of the sentence you're still saying" (a few
+        hundred ms, keep it) from "the machine stalled and frames piled up"
+        (stale, drop it) — draining unconditionally destroys the former.
+        """
+        return self._q.qsize() * self.blocksize / self.sample_rate
+
     def drain(self) -> None:
         while not self._q.empty():
             try:

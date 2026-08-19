@@ -12,12 +12,49 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="run diagnostics and exit")
     parser.add_argument("--unmuted", action="store_true", help="start with voice on")
     parser.add_argument("--telegram", action="store_true", help="control Jarvis from the Telegram bot instead of voice/text")
+    parser.add_argument("--stop", action="store_true", help="stop the running Jarvis and exit")
+    parser.add_argument("--status", action="store_true", help="say whether Jarvis is running, and exit")
+    parser.add_argument("--restart", action="store_true", help="stop the running Jarvis, then start fresh")
     args = parser.parse_args()
 
     if args.check:
         from scripts.check_env import main as check
         return check()
 
+    from jarvis import runtime
+
+    if args.status:
+        print(runtime.status())
+        return 0
+
+    if args.stop:
+        print(runtime.stop_running_instance())
+        return 0
+
+    if args.restart:
+        print(runtime.stop_running_instance())
+
+    # Single instance, always. A second launch would otherwise open a second
+    # microphone listener, a second Telegram poller and a second TTS output
+    # on the same devices — which is what "I saw two Jarvis instances" and
+    # the doubled/competing replies actually were.
+    mode = "telegram" if args.telegram else "text" if args.text else "voice"
+    already = runtime.acquire(mode)
+    if already is not None:
+        print(f"Jarvis is already running (pid {already.pid}, mode {already.mode}).")
+        print("  stop it:     python run.py --stop")
+        print("  restart it:  python run.py --restart")
+        return 1
+
+    try:
+        return _serve(args)
+    finally:
+        # Every exit path — clean quit, Ctrl+C, or an unhandled error — must
+        # drop the lock, or the next launch refuses to start.
+        runtime.release()
+
+
+def _serve(args) -> int:
     from jarvis.app import Jarvis
     from jarvis import tools as jarvis_tools
 
@@ -90,6 +127,10 @@ def main() -> int:
             jarvis.shutdown()
         return 0
 
+    print("Jarvis — listening for \"Hey Jarvis\".")
+    print("  stop:     say \"Jarvis, quit\"  ·  Ctrl+C  ·  python run.py --stop")
+    print("  pause:    say \"Jarvis, pause\" (stops listening, stays running)")
+    print("  status:   python run.py --status\n")
     try:
         jarvis.run()
     except KeyboardInterrupt:

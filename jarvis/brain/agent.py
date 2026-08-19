@@ -128,7 +128,22 @@ class Brain:
                     "safety_tiers.amber.announce_template",
                     "{summary}. Say stop if you don't want that.",
                 )
-                await self.announce(template.format(summary=verdict.summary))
+                try:
+                    await self.announce(template.format(summary=verdict.summary))
+                except RuntimeError:
+                    # announce() raises when the user says "stop" inside the
+                    # undo window. The router path already honoured that; this
+                    # path did not, so saying "stop" to an AMBER action the
+                    # BRAIN initiated announced the cancellation and then went
+                    # ahead and did it anyway. Deny it, like the RED "no" branch.
+                    self.audit.action(verdict, "cancelled")
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": "He said stop. Don't retry.",
+                        }
+                    }
                 self.audit.action(verdict, "executed")
                 return {}
 

@@ -15,8 +15,11 @@ from __future__ import annotations
 import ctypes
 import os
 import platform
+import re
+import shutil
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -121,17 +124,136 @@ _APP_ALIASES = {
 }
 
 
-def open_app(name: str) -> str:
+def _title_pattern(name: str) -> "re.Pattern":
+    """
+    Case-insensitive window-title matcher.
+
+    This mattered more than it looks. The router lowercases every utterance
+    (_normalise does .lower()), so "close Chrome" reaches these tools as
+    "chrome" — and a plain f".*{name}.*" is CASE-SENSITIVE, so it never
+    matched the real window titled "… - Google Chrome". Verified live:
+    RegexName=".*notepad.*" -> not found, ".*Notepad.*" -> found. Every
+    close/focus/window command was silently failing this way, which is a
+    large part of "basic commands don't work". uiautomation accepts a
+    compiled pattern, so re.I fixes it; re.escape stops an app name with
+    regex characters from being interpreted as a pattern.
+    """
+    return re.compile(f".*{re.escape(name)}.*", re.I)
+
+
+def _resolve_executable(name: str) -> str | None:
+    """
+    Turn a spoken app name into something Windows can actually launch,
+    deterministically — never by asking an LLM to guess an .exe name.
+
+    Order: explicit aliases -> PATH -> the App Paths registry (how the Run
+    dialog resolves names) -> Start Menu shortcuts. Returns None if nothing
+    matched, so the caller can say so honestly instead of firing a
+    subprocess at a name that doesn't exist and reporting success anyway.
+    """
     key = (name or "").strip().lower()
-    target = _APP_ALIASES.get(key, name)
+    if not key:
+        return None
+
+    alias = _APP_ALIASES.get(key)
+    if alias:
+        if alias.startswith("ms-settings:") or alias.startswith("http"):
+            return alias
+        if shutil.which(alias):
+            return alias
+
+    for candidate in (key, f"{key}.exe", key.replace(" ", "")):
+        found = shutil.which(candidate)
+        if found:
+            return found
+
+    if IS_WINDOWS:
+        try:
+            import winreg
+
+            exe = key if key.endswith(".exe") else f"{key}.exe"
+            for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                try:
+                    path = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe}"
+                    with winreg.OpenKey(root, path) as hkey:
+                        value, _ = winreg.QueryValueEx(hkey, "")
+                        if value and Path(value).exists():
+                            return value
+                except OSError:
+                    continue
+        except ImportError:
+            pass
+
+        for base in (
+            os.path.expandvars(r"%ProgramData%\Microsoft\Windows\Start Menu\Programs"),
+            os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"),
+        ):
+            root = Path(base)
+            if not root.is_dir():
+                continue
+            try:
+                for lnk in root.rglob("*.lnk"):
+                    if lnk.stem.lower() == key or key in lnk.stem.lower():
+                        return str(lnk)
+            except OSError:
+                continue
+    return alias if alias else None
+
+
+def open_app(name: str) -> str:
+    """
+    Launch an app and CONFIRM it launched.
+
+    The old version called Popen on the raw spoken name and unconditionally
+    replied "Opening X" as long as Popen itself didn't raise — which it
+    doesn't for a nonexistent program, since `cmd /c start` succeeds and the
+    failure surfaces in a window the user never sees. So Jarvis cheerfully
+    claimed success while nothing opened. Now: resolve deterministically,
+    then verify a process or window actually appeared before saying so.
+    """
+    target = _resolve_executable(name)
+    if target is None:
+        return f"I couldn't find an app called {name} on this machine."
+
     try:
-        if target.startswith("ms-settings:") or target.startswith("http"):
+        if target.startswith("ms-settings:") or target.startswith("http") or target.endswith(".lnk"):
             os.startfile(target)  # noqa: S606
         else:
-            subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
-        return f"Opening {name}."
+            subprocess.Popen([target], shell=False, close_fds=True)
     except Exception as exc:
         return f"Couldn't open {name}: {exc}"
+
+    if _wait_for_app(name, target):
+        return f"Opening {name}."
+    return f"I tried to open {name} but nothing came up."
+
+
+def _wait_for_app(spoken: str, target: str, timeout: float = 6.0) -> bool:
+    """True once a matching process or visible window shows up."""
+    import time as _time
+
+    stem = Path(target).stem.lower()
+    spoken_low = (spoken or "").strip().lower()
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        try:
+            import psutil
+
+            for proc in psutil.process_iter(["name"]):
+                pname = (proc.info.get("name") or "").lower()
+                if pname.startswith(stem) or (spoken_low and spoken_low in pname):
+                    return True
+        except Exception:
+            pass
+        try:
+            import uiautomation as auto
+
+            if auto.WindowControl(searchDepth=1, RegexName=_title_pattern(spoken)).Exists(0.4, 0.2):
+                return True
+        except Exception:
+            pass
+        _time.sleep(0.25)
+    return False
 
 
 def close_app(name: str) -> str:
@@ -145,7 +267,7 @@ def close_app(name: str) -> str:
     try:
         import uiautomation as auto
 
-        window = auto.WindowControl(searchDepth=1, RegexName=f".*{name}.*")
+        window = auto.WindowControl(searchDepth=1, RegexName=_title_pattern(name))
         if not window.Exists(2, 0.3):
             return f"I can't find a window called {name}."
         window.SendKeys("{Alt}{F4}")
@@ -173,7 +295,7 @@ def focus_window(name: str) -> str:
     try:
         import uiautomation as auto
 
-        window = auto.WindowControl(searchDepth=1, RegexName=f".*{name}.*")
+        window = auto.WindowControl(searchDepth=1, RegexName=_title_pattern(name))
         if not window.Exists(2, 0.3):
             return f"I can't find a window called {name}."
         window.SetActive()

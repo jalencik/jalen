@@ -93,6 +93,29 @@ class Transcriber:
         )
         return " ".join(line.text for line in result.lines).strip()
 
+    # -------------------------------------------------------------- warmup
+    def warmup(self) -> None:
+        """
+        Pay the Groq client's construction + DNS + TLS cost up front. Measured
+        cold-vs-warm on this machine: 3988ms -> ~330ms, and that ~3.7s was
+        landing on the user's very first spoken command.
+
+        Deliberately does not send a transcription request: building the
+        client and opening the connection is what's slow, and a real request
+        would spend quota to save nothing extra.
+        """
+        client = self._groq_client()
+        try:
+            # Cheapest authenticated round-trip available — completes the TLS
+            # handshake and connection-pool setup that the first real call
+            # would otherwise pay for.
+            client.models.list()
+        except Exception:
+            # Offline, or the endpoint changed. The client object is built
+            # either way, which is most of the win; the real call will report
+            # any genuine problem properly.
+            pass
+
     # -------------------------------------------------------------- dispatch
     def transcribe(self, audio: np.ndarray) -> str:
         if audio is None or len(audio) < self.sample_rate * 0.2:

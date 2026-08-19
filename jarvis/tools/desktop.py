@@ -66,7 +66,12 @@ def _require_uia() -> None:
 
 
 def _find_window(name: str):
-    win = auto.WindowControl(searchDepth=1, RegexName=f".*{name}.*")
+    # Case-insensitive: the router lowercases every utterance, so a
+    # case-sensitive pattern never matched real window titles. See
+    # system.py's _title_pattern for the full explanation.
+    import re as _re
+
+    win = auto.WindowControl(searchDepth=1, RegexName=_re.compile(f".*{_re.escape(name)}.*", _re.I))
     return win if win.Exists(2, 0.3) else None
 
 
