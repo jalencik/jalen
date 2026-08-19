@@ -63,15 +63,26 @@ def build_dispatcher(jarvis: Any, allowed_user_ids: list[int]):
 
         loop = asyncio.get_running_loop()  # aiogram's own loop, captured per message
 
+        async def _send(t: str) -> None:
+            await message.answer(t)
+
+        # message.answer() is `def`, not `async def` — it returns aiogram's
+        # own awaitable Request wrapper, not a native coroutine object.
+        # run_coroutine_threadsafe requires the latter (asyncio.iscoroutine()
+        # rejects anything else) and raised "TypeError: A coroutine object is
+        # required" on every real reply until this was wrapped in an actual
+        # async def. Found live: the very first real Telegram messages sent
+        # to the bot all hit this — the safety gate itself worked (process()
+        # ran, replies were computed), but no reply ever reached the chat.
         def say(t: str, force: bool = False) -> None:
             if not t:
                 return
-            asyncio.run_coroutine_threadsafe(message.answer(t), loop)
+            asyncio.run_coroutine_threadsafe(_send(t), loop)
 
         def say_blocking(t: str) -> None:
             if not t:
                 return
-            future = asyncio.run_coroutine_threadsafe(message.answer(t), loop)
+            future = asyncio.run_coroutine_threadsafe(_send(t), loop)
             future.result(timeout=15)
 
         jarvis.say = say
