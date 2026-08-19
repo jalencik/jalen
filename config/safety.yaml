@@ -184,6 +184,11 @@ never_touch:
 # quoted back to him, never obeyed.
 injection_guard:
   enabled: true
+  # [NOT IMPLEMENTED] quote_and_ask is never read, and scan_for_injection()
+  # is never called by any tool — nothing currently tags its output as
+  # externally-sourced content. The hard protection below IS enforced:
+  # SafetyEngine.classify(origin="content") blocks RED/AMBER tools outright,
+  # and that path is covered by tests.
   quote_and_ask: true              # surface the suspicious text, ask, never act
   suspicious_markers:
     - "ignore previous instructions"

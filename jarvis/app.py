@@ -306,6 +306,25 @@ class Jarvis:
             self.safety.posture = intent.args.get("posture", "irreversible_only")
             self.safety.paranoid = self.safety.posture == "paranoid"
             return intent.reply
+        if tool == "morning_brief":
+            # This rule existed with reply=None and no implementation, so
+            # "brief me" produced total silence — indistinguishable from
+            # Jarvis being broken. Report what's actually wired, and say
+            # plainly what isn't, rather than pretending or staying quiet.
+            from .tools import system as _sys
+
+            parts = [_sys.get_date(), _sys.get_time(), _sys.get_battery()]
+            missing = []
+            if not self.cfg.get_path("integrations.gmail.enabled", False):
+                missing.append("email")
+            if not self.cfg.get_path("integrations.calendar.enabled", False):
+                missing.append("calendar")
+            if missing:
+                parts.append(
+                    f"I can't include {' or '.join(missing)} yet — "
+                    "that needs Google connected first."
+                )
+            return " ".join(parts)
         if tool == "audit_digest":
             digest = self.audit.daily_digest()
             self.transcript.show("Audit", digest)

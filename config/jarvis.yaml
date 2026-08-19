@@ -106,6 +106,9 @@ conversation:
 # ---------------------------------------------------------------------------
 router:
   enabled: true
+  # [NOT IMPLEMENTED] read into IntentRouter but never used — matching is
+  # exact-regex only, so near-miss phrasing is NOT caught. Left in place
+  # because the fuzzy layer is still wanted; it just doesn't exist yet.
   fuzzy_threshold: 86              # 0-100; how close the match must be
   log_misses: true                 # writes unmatched phrases to data/router_misses.log
                                    # -> read it weekly, promote your common ones into rules
@@ -116,11 +119,17 @@ router:
 brain:
   provider: "claude"               # claude | gemini
   # Model tiering. Simple turns cost you less of your monthly allowance.
+  # [NOT IMPLEMENTED] model tiering. pick_model() exists and reads these
+  # three keys, but nothing ever calls it — every turn uses model_default.
+  # (The SDK client is created per-model, so switching mid-session means
+  # reconnecting, which is why this wasn't wired up.)
   model_fast: "claude-haiku-4-5"       # short factual turns, rewrites, classification
   model_default: "claude-sonnet-5"     # normal conversation + tool use
   model_deep: "claude-opus-4-5"        # multi-step planning, hard debugging
   escalate_on_keywords: ["plan", "design", "debug", "why does", "architecture", "refactor"]
   max_turns_per_request: 12        # runaway guard
+  # [NOT IMPLEMENTED] never read; history is not trimmed. The Agent SDK
+  # keeps its own conversation context, which is what actually applies.
   context_window_turns: 20         # how much conversation it keeps in working memory
 
   # Free-tier offload: send cheap, tool-free questions to Gemini instead of
@@ -138,6 +147,8 @@ safety:
                                    # to turn when confirmations get annoying.
   undo_window_s: 4                 # AMBER actions announce, then wait this long for "stop"
   confirm_timeout_s: 20            # RED actions cancel if you don't answer in time
+  # [NOT IMPLEMENTED] no global hotkey listener exists. The SPOKEN kill
+  # phrases below DO work, as does `run.py --stop`.
   kill_switch_hotkey: "ctrl+alt+space"   # F47 "both" - hotkey and voice
   kill_phrases: ["stop", "stop stop", "cancel", "abort", "jarvis stop"]
 
@@ -149,6 +160,8 @@ memory:
   db_path: "data/jarvis.db"
   embed_model: "BAAI/bge-small-en-v1.5"   # local, 384-dim, no API, no quota
   recall_top_k: 6
+  # [NOT IMPLEMENTED] habit learning was never built. remember/recall
+  # (explicit memory) do work.
   learn_habits: true               # G55
   announce_learning: true          # G55 "tell me what it learned" -> daily digest, not interruptions
   private_mode_default: false      # G58 - say "private mode" to pause all logging + memory
@@ -163,6 +176,8 @@ index:
     - "C:/Users/user/Documents"
     - "C:/Users/user/Downloads"
     - "C:/Users/user/Desktop"
+  # [NOT IMPLEMENTED] search_files matches FILENAMES only; file contents
+  # are never indexed, so these two keys have no effect.
   content_index_extensions: [".txt", ".md", ".pdf", ".docx", ".pptx", ".xlsx", ".py", ".js", ".ts", ".json", ".csv"]
   exclude_dirs: ["node_modules", ".git", "venv", ".venv", "__pycache__", "AppData", "$Recycle.Bin"]
   max_file_mb: 25
@@ -191,6 +206,7 @@ projects:
 startup:
   autostart: true                  # C23
   start_muted: true                # C23 "yes but start muted"
+  # [NOT IMPLEMENTED] no tray icon exists.
   minimise_to_tray: true
 
 ui:
@@ -217,6 +233,10 @@ ui:
 proactive:
   speak_unprompted: false          # H59 - hard rule
   notify_channel: "telegram"       # telegram | orb | both
+  # [PARTLY IMPLEMENTED] "brief me" works and reports date, time and battery,
+  # and says plainly which sources aren't connected. The SCHEDULED 07:30
+  # delivery below does not fire — no scheduler exists — and email/calendar
+  # need Google credentials (see CREDENTIALS.md) before they can be included.
   morning_brief:
     enabled: true                  # H60
     time: "07:30"
@@ -267,6 +287,8 @@ audit:
   jsonl_path: "data/audit.jsonl"
   keep_transcripts: true           # F52
   keep_audio: false                # F52 "discard audio" - audio is never written to disk
+  # [NOT IMPLEMENTED] no scheduler exists, so the 21:00 review never
+  # fires. Ask "what did you do today" to get the same digest on demand.
   daily_review: true               # F48
   daily_review_time: "21:00"
   daily_review_to: "telegram"
