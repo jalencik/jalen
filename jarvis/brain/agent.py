@@ -175,6 +175,18 @@ class Brain:
             # disables the built-in set entirely — Claude can only call
             # what's registered on the jarvis MCP server, nothing else.
             tools=[],
+            # Jarvis must run on ITS OWN tools only. Left at the default
+            # (None), the SDK loads every filesystem settings source —
+            # ~/.claude/settings.json included — so whatever MCP servers and
+            # skills happen to be configured for Claude Code on this machine
+            # get injected into Jarvis. Seen for real in the audit log: asked
+            # to open a local PDF, it reached for a chrome-devtools MCP tool
+            # from an unrelated developer setup. Those tools aren't in
+            # safety.yaml, so they classify as unclassified-AMBER — powerful
+            # capability arriving through a door the tier system never
+            # designed for. [] is the SDK's isolation mode.
+            setting_sources=[],
+            skills=[],
             # "default" prompts interactively for "dangerous" operations —
             # there is no interactive terminal here to answer that prompt, so
             # every non-trivial tool call just hung/denied forever. Confirmed

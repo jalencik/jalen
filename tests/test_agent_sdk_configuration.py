@@ -111,3 +111,20 @@ def test_pre_tool_use_hook_is_still_registered(started_brain):
     """The actual gate. bypassPermissions must never ship without this."""
     assert "PreToolUse" in started_brain.hooks
     assert len(started_brain.hooks["PreToolUse"]) >= 1
+
+
+def test_jarvis_does_not_inherit_the_machines_claude_code_setup(started_brain):
+    """
+    Seen in a real audit log: asked to open a local PDF, Jarvis reached for a
+    `chrome-devtools` MCP tool belonging to an unrelated developer setup on
+    this machine.
+
+    With setting_sources at its default (None) the SDK loads every filesystem
+    settings source, ~/.claude/settings.json included, so whatever MCP servers
+    and skills are configured for Claude Code get injected into Jarvis. Those
+    tools appear under names safety.yaml has never heard of, so they classify
+    as unclassified-AMBER — real capability arriving through a door the tier
+    system was never designed for. [] is the SDK's isolation mode.
+    """
+    assert started_brain.setting_sources == []
+    assert started_brain.skills == []
