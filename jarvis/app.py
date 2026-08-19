@@ -278,10 +278,12 @@ class Jarvis:
     async def handle_with_brain(self, text: str) -> str:
         if self.brain is None:
             from .brain.agent import Brain
+            from .brain.tools import build_sdk_tools
 
             self.brain = Brain(
                 self.cfg, self.safety, self.audit,
                 confirm=self.confirm, announce=self.announce,
+                tools=build_sdk_tools(),
             )
             await self.brain.start()
         try:
@@ -364,7 +366,8 @@ class Jarvis:
             only possible outcome, no matter what you said.
             """
             nonlocal follow_up_until
-            self.process(text)
+            with systools.com_initialized():
+                self.process(text)
             if self.cfg.get_path("conversation.follow_up", True):
                 follow_up_until = time.monotonic() + follow_up_s
             self.orb.set_state("muted" if self.muted else "idle")

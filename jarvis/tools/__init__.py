@@ -11,9 +11,41 @@ time rather than left to be discovered at call time.
 """
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from . import desktop, filesystem, system
+
+
+@contextlib.contextmanager
+def com_initialized():
+    """
+    COM must be explicitly initialized (CoInitialize) on any thread that's
+    going to touch a COM-based tool — desktop.py's UIA calls, and
+    system.py's focus_window/window_state/volume_set. Python does not do
+    this automatically on a freshly spawned thread; it only appears to work
+    on a process's original thread. Confirmed live: calling focus_window()
+    from a plain threading.Thread (exactly what app.py's per-turn dispatch
+    and the SDK tool wrapper both do) raised "CoInitialize has not been
+    called" — not a crash (each tool's own try/except catches it), but a
+    silent functional failure: the tool always fails, with a confusing
+    error, no matter how correctly it was called.
+
+    Every place that spawns a worker thread to run a turn or a tool call
+    must wrap the thread's entry point in this — once, here, rather than
+    have every current and future COM-touching tool remember to do it
+    itself. No-ops if uiautomation isn't installed.
+    """
+    try:
+        import uiautomation as auto
+    except ImportError:
+        yield
+        return
+    initializer = auto.UIAutomationInitializerInThread()
+    try:
+        yield
+    finally:
+        initializer.Uninitialize()
 
 REGISTRY: dict[str, Any] = {}
 for _module in (system, desktop, filesystem):

@@ -144,7 +144,35 @@ class Brain:
         options = ClaudeAgentOptions(
             model=self.model,
             system_prompt=self.system_prompt(),
-            permission_mode="default",
+            # CRITICAL: with `tools` left unset, Claude gets the SDK's full
+            # built-in toolset — Bash, PowerShell, Write, Edit, Read, Agent,
+            # and more — in addition to (and entirely separate from) the
+            # jarvis MCP tools below. Confirmed live: with tools left at its
+            # default, a probe call could see and successfully invoke a raw
+            # Bash tool. Those built-in names aren't in safety.yaml, so
+            # they'd fall to unclassified — RED only while
+            # paranoid_first_week is on; plain AMBER (announce, then
+            # auto-proceed in 4s, no real confirmation) the moment it's
+            # turned off, which the handoff explicitly expects to happen
+            # "once you trust it." That's arbitrary shell execution behind
+            # a single generic-sounding confirmation, completely bypassing
+            # every tier boundary this project is built around. tools=[]
+            # disables the built-in set entirely — Claude can only call
+            # what's registered on the jarvis MCP server, nothing else.
+            tools=[],
+            # "default" prompts interactively for "dangerous" operations —
+            # there is no interactive terminal here to answer that prompt, so
+            # every non-trivial tool call just hung/denied forever. Confirmed
+            # live: with "default", every registered tool call failed with
+            # "permission wasn't granted," including plain GREEN-tier reads.
+            # bypassPermissions removes that separate, unanswerable gate.
+            # It does NOT touch PreToolUse hooks — confirmed straight from
+            # the SDK's own source (types.py's shadowing-warning helper):
+            # bypassPermissions shadows the (unused, here) can_use_tool
+            # callback specifically, and its own message says "To gate every
+            # tool call, use a PreToolUse hook instead" — which is exactly
+            # the mechanism below. The hook remains the sole, real gate.
+            permission_mode="bypassPermissions",
             max_turns=int(self.cfg.get_path("brain.max_turns_per_request", 12)),
             mcp_servers=self._mcp_servers(),
             hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self._make_hook()])]},
