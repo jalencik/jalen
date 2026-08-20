@@ -108,6 +108,16 @@ green:
     - read_document         # extracts text from a file; reads nothing it doesn't return
     - summarize_document    # ditto, just labelled for the brain to summarise
     - search_in_files       # read-only content search, bounded and never-touch aware
+    # Gmail / Calendar / personal Telegram reads. All strictly read-only, and
+    # every body they return is fenced as UNTRUSTED CONTENT and scanned by
+    # SafetyEngine.scan_for_injection() before the brain ever sees it.
+    - unread_email_summary  # "summarise my emails" — lists, changes nothing
+    - google_status         # which account is connected; no message access
+    - search_calendar
+    - calendar_status
+    - telegram_status       # which account is signed in
+    - list_telegram_chats   # chat names and unread counts, no message bodies
+    - search_telegram       # searches his OWN messages
 
 amber:
   # Deliberately tiny. Announcing an action and waiting 2 seconds is a real

@@ -15,7 +15,10 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
-from . import desktop, documents, filesystem, launcher, memory, sysinfo, system, web
+from . import (
+    desktop, documents, filesystem, gcalendar, gmail, launcher, memory,
+    messaging, sysinfo, system, web,
+)
 
 
 @contextlib.contextmanager
@@ -49,7 +52,10 @@ def com_initialized():
         initializer.Uninitialize()
 
 REGISTRY: dict[str, Any] = {}
-for _module in (system, desktop, filesystem, documents, memory, launcher, sysinfo, web):
+for _module in (
+    system, desktop, filesystem, documents, memory, launcher, sysinfo, web,
+    gmail, gcalendar, messaging,
+):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:
         raise RuntimeError(f"Tool name collision across modules: {_collisions}")

@@ -2,6 +2,8 @@
 *.session
 *.session-journal
 token.json
+google_token.json
+*_token.json
 client_secret*.json
 credentials.json
 data/

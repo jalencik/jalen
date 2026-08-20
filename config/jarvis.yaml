@@ -328,10 +328,23 @@ proactive:
 telegram:
   bot:
     enabled: true
-    allowed_user_ids: []           # <- YOUR numeric Telegram id. Empty = bot refuses everyone.
+    # [NOT READ] The live allow-list is TELEGRAM_ALLOWED_USER_IDS in .env —
+    # run.py passes secrets.telegram_allowed_user_ids to the bot and never
+    # looks at this key. It sat here reading "[]" while .env correctly held
+    # his id, which made the bot look locked out when it was not. Left in
+    # place, labelled, rather than deleted, because deleting it silently is
+    # how the same confusion comes back.
+    allowed_user_ids: []           # <- NOT USED. Set TELEGRAM_ALLOWED_USER_IDS in .env.
     full_desktop_control: true     # H62 - the bot can do anything the voice can
   personal:
-    enabled: false                 # turn on after you add api_id/api_hash. Read E35 warning in SETUP.md
+    # His OWN account, not the bot — a different identity with different
+    # credentials. api_id/api_hash in .env say "approved application"; they
+    # are NOT a login. Sign in once with:
+    #     .venv\Scripts\python.exe scripts\connect_telegram.py
+    # which stores a session file that IS a full password-less login, and is
+    # protected by .gitignore, by living under data/, and by safety.yaml's
+    # never_touch "*.session" pattern.
+    enabled: true                  # Read the E35 warning in SETUP.md
     summarise_unread: true
     monitor_channels: []
 
@@ -339,8 +352,14 @@ telegram:
 # INTEGRATIONS  (spec E33-E42)  — each one off until its credentials exist
 # ---------------------------------------------------------------------------
 integrations:
-  gmail:    { enabled: false, send_requires_confirmation: true }   # E33
-  calendar: { enabled: false, create_events: true }                # E37
+  # Gmail and Calendar share ONE Google login (jarvis/integrations/
+  # google_auth.py). Connect it once with:
+  #     .venv\Scripts\python.exe scripts\connect_google.py
+  # He approves in his own browser; Jarvis never sees the password.
+  # Scopes are deliberately narrow: read, draft, send, calendar events —
+  # NOT full account control, and never permanent deletion.
+  gmail:    { enabled: true, send_requires_confirmation: true }    # E33
+  calendar: { enabled: true, create_events: true }                 # E37
   drive:    { enabled: false }
   docs:     { enabled: false }
   sheets:   { enabled: false }
