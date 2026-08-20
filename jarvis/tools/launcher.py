@@ -129,6 +129,60 @@ def _best_contains(key: str, index: dict[str, str]) -> str | None:
     return min(pool, key=len)
 
 
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance — how many single-character edits apart."""
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+        prev = cur
+    return prev[-1]
+
+
+def _typo_matches(key: str, pool) -> list[str]:
+    """
+    Fuzzy match, but only where the candidate is plausibly a TYPO of what
+    was said — not merely a similar-looking different word.
+
+    Plain similarity is length-blind, so it matched "chromosome" -> chrome
+    and "telegraph" -> telegram. Both would have silently opened the wrong
+    app, which is worse than not matching at all. Similarity alone can't
+    separate them: telegraph/telegram scores 0.824, sitting between real
+    typos wrod/word (0.750) and telegran/telegram (0.875).
+
+    Edit distance can. Measured on real cases:
+        telegran   -> telegram    1 edit    typo
+        chrom      -> chrome      1 edit    typo
+        exploerer  -> explorer    1 edit    typo
+        wrod       -> word        2 edits   typo (short word, transposition)
+        telegraph  -> telegram    2 edits   DIFFERENT WORD
+        chromosome -> chrome      4 edits   DIFFERENT WORD
+
+    One edit always counts; two only on short words (<=5 chars), where
+    transpositions are common and there's less room to be a real word.
+    """
+    out = []
+    for cand in difflib.get_close_matches(key, list(pool), n=5, cutoff=FUZZY_MIN):
+        allowed = 2 if max(len(key), len(cand)) <= 5 else 1
+        if _edit_distance(key, cand) <= allowed:
+            out.append(cand)
+            continue
+        # An ABBREVIATION is not a typo and fails the edit-distance test:
+        # "igram" -> "ayugram" is 3 edits, yet it's exactly how someone
+        # shortens a name in speech. It IS safe when the spoken form is a
+        # contiguous tail (or head) of the real name and long enough to be
+        # distinctive — "igram" ends "ayugram"; "graph" would also end
+        # "telegraph", but "telegraph" is never reached here because it is
+        # itself a real word that matched nothing. Four characters is the
+        # floor: shorter fragments ("cal", "co") match far too much.
+        if len(key) >= 4 and (cand.endswith(key) or cand.startswith(key)):
+            out.append(cand)
+    return out
+
+
 def _known_name_pool(index: dict[str, str]) -> set[str]:
     """Every name resolution actually understands: installed apps, shipped
     aliases, and family members — the full universe a typo should be
@@ -294,7 +348,7 @@ def resolve_app(name: str) -> tuple[str | None, str | None]:
     # than opening the fuzzy match directly, so a bad guess still can't
     # skip alias-verification or the installed-sibling substitution.
     pool = _known_name_pool(index)
-    close = difflib.get_close_matches(key, list(pool), n=1, cutoff=FUZZY_MIN)
+    close = _typo_matches(key, pool)
     if close and close[0] != key:
         target, matched = _resolve_key(close[0], index)
         if target:
@@ -303,9 +357,47 @@ def resolve_app(name: str) -> tuple[str | None, str | None]:
     # Last resort: fuzzy straight against the installed index — covers a
     # typo'd app with no alias/family entry at all (a one-off Start Menu
     # program only known by its exact installed name).
-    close = difflib.get_close_matches(key, list(index), n=1, cutoff=FUZZY_MIN)
+    close = _typo_matches(key, index)
     if close:
         return index[close[0]], close[0]
+
+    # FIND THE APP INSIDE THE SENTENCE.
+    #
+    # Everything above assumes the spoken text IS a name, give or take
+    # filler words removed by a hard-coded list. That approach loses: a list
+    # only covers phrasings someone predicted. Measured against 14 ordinary
+    # phrasings that simply weren't on it — "open telegram when you get a
+    # chance", "open chrome if you don't mind", "open telegram buddy",
+    # "open the telegram thing" — 11 of 14 failed, because the entire tail
+    # became part of the name being searched for.
+    #
+    # So stop enumerating what ISN'T a name and go looking for what IS one.
+    # Every known app name is checked as a WORD SEQUENCE inside what was
+    # said; longest match wins, so "telegram web" beats "telegram" when both
+    # appear. No word list, so it degrades gracefully on phrasings nobody
+    # anticipated — which is the actual requirement.
+    #
+    # Only reached after every exact/substring/typo path has missed, so it
+    # can't override a precise match. Whole words only: "opera" must not
+    # match inside "operations", which is how a substring scan quietly opens
+    # the wrong app.
+    words = re.findall(r"[a-z0-9.+#]+", spoken)
+    if len(words) > 1:
+        best: tuple[int, str] | None = None
+        for candidate in _known_name_pool(index):
+            cand_words = re.findall(r"[a-z0-9.+#]+", candidate)
+            if not cand_words:
+                continue
+            span = len(cand_words)
+            for i in range(len(words) - span + 1):
+                if words[i:i + span] == cand_words:
+                    if best is None or span > best[0]:
+                        best = (span, candidate)
+                    break
+        if best is not None:
+            target, matched = _resolve_key(best[1], index)
+            if target:
+                return target, matched
     return None, None
 
 

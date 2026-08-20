@@ -552,3 +552,60 @@ def test_file_search_is_time_bounded():
     # Generous headroom over the budget for CI/disk variance, but far below
     # the 9s that made it feel broken.
     assert elapsed < SEARCH_TIME_BUDGET_S + 3.0, f"search took {elapsed:.1f}s"
+
+
+# --------------------------------- understanding messy real speech
+@pytest.mark.parametrize("phrase", [
+    "telegram when you get a chance",
+    "chrome if you don't mind",
+    "telegram buddy",
+    "chrome my friend",
+    "the telegram thing",
+    "that telegram app",
+    "telegram or whatever",
+    "telegram i guess",
+])
+def test_finds_the_app_inside_a_sentence(phrase):
+    """
+    The old approach deleted a hard-coded list of filler words, which only
+    covered phrasings someone predicted. Measured against 14 ordinary
+    phrasings that weren't on the list, 11 failed — the whole tail became
+    part of the name being searched for ("telegram for me" as an app name).
+    Now the app is found INSIDE whatever was said, so it degrades
+    gracefully on phrasings nobody anticipated.
+    """
+    from jarvis.tools.launcher import resolve_app
+
+    target, matched = resolve_app(phrase)
+    assert target, f"{phrase!r} resolved to nothing"
+
+
+@pytest.mark.parametrize("phrase", [
+    "chromosome", "telegraph", "wordpress", "codebase", "wordsmith",
+    "banana", "my operations report", "excellent work",
+])
+def test_similar_words_do_not_open_the_wrong_app(phrase):
+    """
+    The other half: being generous must not become reckless. Plain
+    similarity matched "chromosome"->chrome and "telegraph"->telegram, both
+    of which would silently open the WRONG app — worse than not matching.
+    Similarity alone can't separate them (telegraph/telegram scores 0.824,
+    between real typos wrod/word 0.750 and telegran/telegram 0.875), so
+    edit distance decides: a typo is 1 edit, or 2 on short words.
+    """
+    from jarvis.tools.launcher import resolve_app
+
+    target, matched = resolve_app(phrase)
+    assert target is None, f"{phrase!r} wrongly opened {matched}"
+
+
+@pytest.mark.parametrize("typo,expect_something", [
+    ("telegran", True), ("chrom", True), ("noteped", True),
+    ("igram", True),    # an abbreviation, not a typo: 3 edits from "ayugram"
+    ("capcut", True),
+])
+def test_real_typos_and_abbreviations_still_resolve(typo, expect_something):
+    from jarvis.tools.launcher import resolve_app
+
+    target, _matched = resolve_app(typo)
+    assert bool(target) == expect_something, f"{typo!r} -> {target}"
