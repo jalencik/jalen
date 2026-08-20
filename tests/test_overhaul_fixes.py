@@ -384,34 +384,126 @@ def test_a_thinking_pause_does_not_cut_the_command_in_half():
     Reported as "it is ignoring me". silence_ms was 700, so saying
     "open chrome ... and go to youtube" with a normal ~1.2s pause was
     captured as JUST "open chrome" — measured: cut at 1.34s, keeping 1.38s
-    of a 4.75s utterance, with the rest of the sentence discarded. The turn
-    then acted on half a command, which reads exactly like being ignored.
+    of a 4.75s utterance. The turn then acted on half a command, which
+    reads exactly like being ignored.
 
-    2000ms matches how people actually pause while thinking. Verified: a
-    1.9s pause keeps the whole sentence; a genuine 2.4s stop still ends
-    the turn, so it does not hang waiting forever either.
+    The guarantee now lives in a different place, so this tests a different
+    thing than it used to. Waiting 2000ms for EVERY turn fixed truncation
+    by making all 409 utterances in the log pay for the 1% that needed it.
+    Instead the utterance closes fast and the TRANSCRIPT decides: a
+    sentence ending on a connector is unfinished, so listening resumes on
+    the patient threshold.
+
+    (The previous version of this test drove the collector with
+    `np.full(512, 0.3)` — a DC constant, which Silero scores as silence,
+    not speech. `_started` was therefore never set and the collector could
+    not have closed for any reason, so the assertion held no matter what
+    the endpointing logic did. It is asserted on real behaviour here.)
+    """
+    from jarvis.app import looks_unfinished
+
+    # The exact phrase from the bug report, split where he paused.
+    assert looks_unfinished("open chrome and"), (
+        "a command ending on 'and' must keep listening — this is the "
+        "truncation that read as being ignored"
+    )
+    for unfinished in (
+        "open chrome and",
+        "send a message to",
+        "could you please open the",
+        "i want you to",
+        "go to youtube and search for",
+        "delete the",
+    ):
+        assert looks_unfinished(unfinished), f"{unfinished!r} should keep listening"
+
+    # ...and the 55% majority must NOT pay for it.
+    for finished in (
+        "open chrome",
+        "what time is it",
+        "close notepad",
+        "open telegram",
+        "what is eating my disk",
+        "mute",
+    ):
+        assert not looks_unfinished(finished), (
+            f"{finished!r} is a complete command and must dispatch immediately"
+        )
+
+
+def test_the_fast_endpoint_is_actually_faster_than_the_patient_one():
+    """The two thresholds must be ordered, or the optimisation is a no-op."""
+    from jarvis.audio.vad import VAD, UtteranceCollector
+
+    vad = VAD(CONFIG)
+    collector = UtteranceCollector(CONFIG, vad)
+    assert collector.fast_silence_ms < collector.patient_silence_ms, (
+        "fast endpoint is not faster than the patient one — every turn is "
+        "still paying the full silence tax"
+    )
+    assert collector.patient_silence_ms >= 1500, (
+        "the patient threshold is what protects a real thinking pause; "
+        "below ~1.5s it truncates again"
+    )
+    # A fresh utterance starts on the fast threshold.
+    assert collector._endpoint_ms == collector.fast_silence_ms
+    # resume() moves it to the patient one and keeps the audio already heard.
+    import numpy as np
+    heard = np.full(1600, 0.1, dtype=np.float32)
+    collector.resume(heard)
+    assert collector._endpoint_ms == collector.patient_silence_ms
+    assert collector.was_patient is True
+    assert sum(len(b) for b in collector._buf) == len(heard), (
+        "resume() dropped the audio already captured — the final transcript "
+        "would then see only the tail of the sentence"
+    )
+
+
+def test_a_noise_blip_cannot_hang_the_collector():
+    """
+    A single 32ms VAD blip (a keystroke, a door, Jarvis's own voice coming
+    back through the mic) used to hold the microphone for a full
+    max_utterance_s — 30 SECONDS of a live assistant appearing dead.
+
+    The old give-up condition was `not self._started`, but one blip sets
+    _started. The finish condition needs _speech_ms >= min_speech_ms, and
+    32ms never reaches 250ms. Neither could ever fire.
     """
     import numpy as np
     from jarvis.audio.vad import VAD, UtteranceCollector
 
-    vad = VAD(CONFIG)
-    assert vad.silence_ms >= 1500, (
-        f"silence_ms is {vad.silence_ms}ms — a normal thinking pause will "
-        "truncate the command and look like Jarvis ignoring you"
-    )
+    class _BlipVAD(VAD):
+        """Speech on frame 1 only, silence forever after."""
 
-    # Drive the collector directly: speech, a pause under the threshold,
-    # more speech. It must NOT have closed the utterance during the pause.
-    vad.load()
+        def __init__(self, cfg):
+            super().__init__(cfg)
+            self.calls = 0
+
+        def is_speech(self, frame):
+            self.calls += 1
+            return self.calls == 1
+
+        def reset(self):
+            pass
+
+    vad = _BlipVAD(CONFIG)
     collector = UtteranceCollector(CONFIG, vad)
-    speech = np.full(512, 0.3, dtype=np.float32)
-    silence = np.zeros(512, dtype=np.float32)
+    frame = np.zeros(512, dtype=np.float32)
 
-    for _ in range(20):
-        collector.feed(speech)
-    pause_frames = int((vad.silence_ms - 400) / collector.frame_ms)
-    closed_early = any(collector.feed(silence) is not None for _ in range(pause_frames))
-    assert not closed_early, "closed the utterance during a sub-threshold pause"
+    # Feed well past the give-up window but far short of max_utterance_s.
+    budget = int(collector.no_speech_timeout_ms / collector.frame_ms) + 4
+    closed_at = None
+    for i in range(budget):
+        if collector.feed(frame) is not None:
+            closed_at = (i + 1) * collector.frame_ms
+            break
+
+    assert closed_at is not None, (
+        "the collector never released the microphone — this is the 30-second "
+        "hang, and it is indistinguishable from Jarvis being crashed"
+    )
+    assert closed_at <= collector.no_speech_timeout_ms + 4 * collector.frame_ms
+    assert closed_at < collector.max_s * 1000, "still waiting out max_utterance_s"
 
 
 def test_common_replies_are_cached_not_re_synthesised():

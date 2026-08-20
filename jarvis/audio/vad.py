@@ -89,13 +89,56 @@ class VAD:
 
 
 class UtteranceCollector:
-    """Accumulates frames until you stop talking, then hands back the audio."""
+    """
+    Accumulates frames until you stop talking, then hands back the audio.
+
+    ENDPOINTING (why this is not just one silence threshold)
+    --------------------------------------------------------
+    The delay between "you stop talking" and "Jarvis starts working" is a
+    fixed tax on EVERY turn, and it used to be the single largest item in
+    the budget: 2000ms, more than the STT round-trip and the router put
+    together. It was 700ms once, and got raised because 700ms guillotined
+    people mid-thought -- "open chrome ... and go to youtube" with a normal
+    1.2s pause was captured as just "open chrome".
+
+    Both settings were right about their own failure and wrong about the
+    other one, because a silence threshold alone cannot tell "he's finished"
+    from "he's thinking". Nothing acoustic distinguishes them. Only the
+    WORDS do.
+
+    So there are two thresholds, and the transcript arbitrates:
+
+      fast_silence_ms (default 550)   -> close the utterance, transcribe.
+      silence_ms      (default 2000)  -> the patient limit, used only after
+                                         the transcript says he isn't done.
+
+    The orchestrator (app.py) transcribes at the fast endpoint and looks at
+    how the sentence ENDS. "open chrome" is a complete thought, so it goes
+    immediately. "open chrome and" ends on a conjunction -- nobody finishes
+    a sentence there -- so it calls resume() and keeps listening on the
+    patient threshold, then re-transcribes the whole thing.
+
+    Net effect: the common command pays 550ms instead of 2000ms, and the
+    trailing-thought case still gets its full 2s. The 1.45s saving is real
+    on every single turn, including ones the router answers without ever
+    reaching Claude.
+    """
 
     def __init__(self, cfg, vad: VAD) -> None:
         self.vad = vad
         self.sample_rate = int(cfg.get_path("audio.sample_rate", 16000))
         self.frame_ms = int(cfg.get_path("audio.frame_ms", 32))
         self.max_s = float(cfg.get_path("vad.max_utterance_s", 30))
+        self.min_speech_ms = int(cfg.get_path("vad.min_speech_ms", 250))
+        # The patient threshold. Read off the VAD so the existing
+        # vad.silence_ms key keeps meaning exactly what it always meant.
+        self.patient_silence_ms = int(vad.silence_ms)
+        self.fast_silence_ms = int(cfg.get_path("vad.fast_silence_ms", 550))
+        # Never let a misconfiguration make the fast path the slow one.
+        self.fast_silence_ms = min(self.fast_silence_ms, self.patient_silence_ms)
+        # How long a trigger that produced no real speech is allowed to hold
+        # the microphone before we give up on it.
+        self.no_speech_timeout_ms = int(cfg.get_path("vad.no_speech_timeout_ms", 2500))
         self._reset()
 
     def _reset(self) -> None:
@@ -103,11 +146,35 @@ class UtteranceCollector:
         self._silence_ms = 0
         self._speech_ms = 0
         self._started = False
+        self._endpoint_ms = self.fast_silence_ms
+        self.was_patient = False
+
+    def resume(self, audio: np.ndarray) -> None:
+        """
+        Put a closed utterance back into listening, on the patient threshold.
+
+        Called when the transcript of a fast endpoint turned out to be an
+        unfinished sentence. The audio already captured is restored so the
+        final transcription sees the WHOLE phrase, not just the tail -- one
+        Whisper pass over "open chrome and go to youtube" is both cheaper
+        and more accurate than stitching two partial transcripts together.
+        """
+        self._reset()
+        self._endpoint_ms = self.patient_silence_ms
+        self.was_patient = True
+        if audio is not None and len(audio):
+            self._buf.append(np.asarray(audio, dtype=np.float32))
+            # The restored audio is known speech. Say so, or min_speech_ms
+            # would have to be re-earned from scratch and a short trailing
+            # clause ("...and youtube") could never close the utterance.
+            self._speech_ms = max(self.min_speech_ms, self._speech_ms)
+            self._started = True
+        self.vad.reset()
 
     def feed(self, frame: np.ndarray) -> np.ndarray | None:
         """
         Returns None while you're still talking; returns the full utterance as a
-        float32 array the moment you've been quiet for `silence_ms`.
+        float32 array the moment you've been quiet for the active threshold.
         """
         speech = self.vad.is_speech(frame)
         self._buf.append(frame)
@@ -122,16 +189,37 @@ class UtteranceCollector:
         total_ms = len(self._buf) * self.frame_ms
         done_talking = (
             self._started
-            and self._silence_ms >= self.vad.silence_ms
-            and self._speech_ms >= self.vad.min_speech_ms
+            and self._silence_ms >= self._endpoint_ms
+            and self._speech_ms >= self.min_speech_ms
         )
         too_long = total_ms >= self.max_s * 1000
-        gave_up = not self._started and total_ms > 4000  # wake word but no speech
+
+        # A trigger that never became speech. Two shapes, and the second one
+        # used to be a 30-SECOND HANG rather than a give-up:
+        #
+        #   never started    -- VAD stayed below threshold the whole time.
+        #   started, but ... -- ONE 32ms blip (a keystroke, a door, the tail
+        #                       of Jarvis's own voice bleeding into the mic)
+        #                       set _started, leaving _speech_ms at 32ms.
+        #                       done_talking needs _speech_ms >= 250, which
+        #                       can never now happen, and the old gave_up
+        #                       tested `not self._started`, which is now
+        #                       False. Neither could fire, so the collector
+        #                       held the microphone until max_utterance_s.
+        #                       Thirty seconds of a live assistant appearing
+        #                       to be dead, from a single click of noise.
+        quiet_for = self._silence_ms if self._started else total_ms
+        gave_up = (
+            self._speech_ms < self.min_speech_ms
+            and quiet_for >= self.no_speech_timeout_ms
+        )
 
         if done_talking or too_long:
             audio = np.concatenate(self._buf) if self._buf else np.zeros(0, np.float32)
+            was_patient = self.was_patient
             self._reset()
             self.vad.reset()
+            self.was_patient = was_patient   # survives the reset; app.py reads it
             return audio
         if gave_up:
             self._reset()

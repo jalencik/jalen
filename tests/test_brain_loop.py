@@ -52,14 +52,19 @@ class _LoopBoundFakeBrain:
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
 
-    async def ask(self, text: str) -> str:
+    async def ask(self, text: str, on_text=None) -> str:
         if asyncio.get_running_loop() is not self._loop:
             raise RuntimeError(
                 "Brain used from a different event loop than it started on "
                 "— this is exactly the §3 bug."
             )
         self.turns += 1
-        return f"reply {self.turns}"
+        reply = f"reply {self.turns}"
+        # Mirror the real Brain: when a streaming callback is supplied, the
+        # text is delivered through it as well as returned.
+        if on_text is not None:
+            on_text(reply)
+        return reply
 
     async def stop(self) -> None:
         pass

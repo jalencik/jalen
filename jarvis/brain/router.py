@@ -541,18 +541,53 @@ class IntentRouter:
         # search then ran on the word "for". If what remains ends in
         # for/about/on/with/to/of, the "courtesy" was really that
         # preposition's object, so keep the original text.
+        #
+        # The word-boundary escape at the front of that pattern is
+        # load-bearing, and for a while it was not an escape at all: the
+        # file held a raw 0x08 control byte where the two characters
+        # backslash and b belonged. A raw string containing a real
+        # backspace matches nothing, so this guard silently never fired.
+        # "search reddit for jarvis" stripped to "search reddit for" and
+        # searched Reddit for the word "for" — precisely the failure the
+        # paragraph above says it prevents. It was the only control
+        # character in the codebase, which is why no one caught it by
+        # eye. tests/test_response_latency.py now fails if any control
+        # character reappears anywhere in this method.
         stripped = re.sub(
             r"(?:[,\s]+(?:boss|please|mate|man|jarvis|thanks|thank you|for me|"
             r"real quick|right now|now|asap|quickly|if you can|would you))+$",
             "", text,
         )
-        if not re.search(r"(?:for|about|on|with|to|of)$", stripped):
+        if not re.search(r"\b(?:for|about|on|with|to|of)$", stripped):
             text = stripped
-        # strip leading politeness ("can you open chrome" / "please open chrome")
-        text = re.sub(r"^(can|could|would) you (please )?|^please |^i want you to ", "", text)
-        # a filler word wedged between the politeness and the actual verb
-        # ("can you LIKE open chrome") — never part of any real command.
-        text = re.sub(r"^(?:like|just|kinda|sorta) ", "", text)
+        # Strip leading politeness ("can you open chrome" / "please open
+        # chrome"). Applied in a LOOP because real speech stacks these:
+        # "yes, could you please open telegram" is three layers deep, and a
+        # single pass leaves enough in front of the verb that no rule
+        # matches and the whole thing goes to Claude for a command the
+        # router already knows.
+        #
+        # Every alternative below is a phrase he actually said, taken from
+        # data/router_misses.log — the misses that reached the brain and
+        # cost seconds and tokens for "open telegram":
+        #   "be so kind as to open telegram"   (x3)
+        #   "you please open the telegram"
+        #   "yes, open telegram"
+        for _ in range(4):
+            before = text
+            text = re.sub(
+                r"^(?:yes|yeah|yep|sure|ok|okay|alright|right)[,\s]+"
+                r"|^(?:can|could|would|will) you (?:please )?"
+                r"|^(?:be so kind as to|do me a favou?r and|go ahead and)\s+"
+                r"|^(?:i'?d like you to|i would like you to|i want you to|"
+                r"i need you to|let'?s)\s+"
+                r"|^you (?:please|could|can)\s+"
+                r"|^please\s+",
+                "", text,
+            )
+            text = re.sub(r"^(?:like|just|kinda|sorta) ", "", text)
+            if text == before:
+                break
         return text.strip()
 
     def route(self, text: str) -> Intent | None:

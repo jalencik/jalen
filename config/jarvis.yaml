@@ -88,14 +88,44 @@ wake:
 
 vad:
   threshold: 0.5
-  # How long you must be SILENT before Jarvis decides you've finished.
-  # Was 700ms, which cut people off mid-thought: saying "open chrome ... and
-  # go to youtube" with a normal 1.2s pause was captured as JUST "open
-  # chrome" (measured: cut at 1.34s, 1.38s of 4.75s kept) and the rest of
-  # the sentence was thrown away. That is what "it is ignoring me" was.
-  # 2000ms matches how people actually pause while thinking.
+
+  # ---- ENDPOINTING: the largest fixed cost on every single turn ----
+  #
+  # There are TWO silence thresholds, because silence alone cannot tell
+  # "he's finished" from "he's thinking" — only the words can. Jarvis
+  # closes the utterance at the fast one, transcribes, and then looks at
+  # how the sentence ENDS: a complete thought goes straight through, one
+  # ending on "and"/"to"/"the" puts the audio back and keeps listening on
+  # the patient one. See jarvis/audio/vad.py and looks_unfinished() in
+  # jarvis/app.py.
+  #
+  # Measured over the 409 real utterances in data/audit.jsonl: 55% are six
+  # words or fewer, and only 1.0% end on a word implying more is coming.
+  # So the fast path is the common case by a wide margin.
+
+  # Fast endpoint. What almost every turn actually pays.
+  # Raise it if he gets cut off mid-sentence more than rarely; lower it
+  # (450 is about the floor before natural pauses start tripping it) if
+  # replies still feel like they lag behind him.
+  fast_silence_ms: 600
+
+  # Patient endpoint. Only used after the transcript says he isn't done.
+  # This was the value EVERY turn used to pay, and 700ms before that —
+  # 700 guillotined people mid-thought ("open chrome ... and go to
+  # youtube" was captured as just "open chrome": cut at 1.34s, 1.38s of
+  # 4.75s kept), which is what "it is ignoring me" was.
   silence_ms: 2000
+
   min_speech_ms: 250               # ignore blips shorter than this
+
+  # How long a trigger that never became real speech may hold the mic.
+  # Also the backstop for a bug that used to hang the collector for a full
+  # max_utterance_s: one 32ms noise blip set "speech started" but never
+  # reached min_speech_ms, so neither the finish condition nor the old
+  # give-up condition could ever fire. Thirty seconds of a live assistant
+  # looking dead, from a single click of noise.
+  no_speech_timeout_ms: 2500
+
   max_utterance_s: 30
 
 stt:
@@ -108,6 +138,11 @@ stt:
 conversation:
   follow_up: true                  # C19 keep listening after it answers
   follow_up_timeout_s: 12
+  # If a fast endpoint split one instruction in two, the second half opens
+  # on a connector ("and go to youtube") and means nothing alone. Within
+  # this many seconds it is re-attached to what it continues. Beyond it, a
+  # sentence starting with "and" is treated as a new thought.
+  stitch_window_s: 8
   end_phrases: ["that's all", "thats all", "that is all", "thank you jarvis", "we're done", "nothing else"]
   barge_in: true                   # C20 you can talk over it
   barge_in_threshold: 0.6          # how confident it must be that you're speaking, before it shuts up
@@ -144,6 +179,23 @@ brain:
   # [NOT IMPLEMENTED] never read; history is not trimmed. The Agent SDK
   # keeps its own conversation context, which is what actually applies.
   context_window_turns: 20         # how much conversation it keeps in working memory
+
+  # ---- LATENCY ----
+  # Reasoning effort. Both effort and extended thinking buy accuracy with
+  # time spent BEFORE the first token exists, and out loud that time is
+  # paid as dead air with a person waiting in it. The router already
+  # absorbs the turns simple enough to need no thought at all, so what
+  # reaches here is mostly mid-difficulty work where "low" is genuinely
+  # enough. Raise to medium/high if answers get careless.
+  effort: "low"
+  # Extended thinking, off. Same trade, more extreme: it can spend seconds
+  # before saying anything. Turn on only if you want Jarvis to deliberate.
+  thinking: false
+  # If a turn has produced no text after this long (because it is calling
+  # tools first), say one short pre-rendered line so the silence doesn't
+  # read as a crash. He described that silence as "you're taking too much
+  # time" and "why you're silent" in the log.
+  ack_after_ms: 1400
 
   # Free-tier offload: send cheap, tool-free questions to Gemini instead of
   # spending Claude allowance on them. Set to false to route everything to Claude.

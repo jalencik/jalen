@@ -15,7 +15,9 @@ Two edge-tts realities worth knowing:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures as _cf
 import io
+import queue
 import re
 import threading
 
@@ -161,6 +163,12 @@ class Speaker:
         "Skipped.", "Back one.", "Locked.", "Minimised.", "Maximised.",
         "Cancelled.", "Listening again.", "I didn't catch that.",
         "I'm still on the last one — give me a second.",
+        # Spoken by speak_brain_reply() when a turn is calling tools and has
+        # produced no text yet. It has to be instant to be worth saying at
+        # all — a filler that itself takes 1.5s of network to synthesise
+        # would just move the silence, so it is pre-rendered here.
+        "Give me a second.",
+        "That's the short version, the full text is on screen.",
     )
 
     def _cache_key(self, text: str) -> str:
@@ -296,6 +304,25 @@ class Speaker:
         except Exception:
             return None
 
+    def open_stream(self) -> "SpeechStream":
+        """
+        Start speaking text that does not fully exist yet.
+
+        say() needs the whole reply up front. That is fine for the router,
+        which answers in one canned line, but it is exactly wrong for the
+        brain: Brain.ask() used to wait for the SDK's ResultMessage before
+        returning a single character, so nothing was synthesised until
+        Claude had completely finished -- every token AND every tool call.
+        On a turn that reads the disk or searches the web that is five to
+        fifteen seconds of total silence, and only THEN a TTS round-trip.
+
+        A stream flips the order. Sentences are pushed in as the model emits
+        them and spoken immediately, so the clock that matters -- how long
+        until he hears something -- is set by the first sentence, not the
+        last one.
+        """
+        return SpeechStream(self)
+
     def summarise_if_long(self, text: str) -> tuple[str, str | None]:
         """
         Spec B15: long content is summarised aloud and shown in full on screen.
@@ -306,3 +333,143 @@ class Speaker:
         head = text[: self.max_spoken].rsplit(".", 1)[0]
         spoken = f"{head}. That's the short version — the full text is on screen."
         return spoken, text
+
+
+# Sentinel meaning "the queue is empty right now, but the producer hasn't
+# finished" -- distinct from None, which means "the producer IS finished".
+# Conflating the two is how a stream either ends early or hangs forever.
+_NOTHING_YET = object()
+
+
+class SpeechStream:
+    """
+    A speaking session fed incrementally. See Speaker.open_stream().
+
+    Holds the speaker's lock and its `speaking` flag for the WHOLE session,
+    not per sentence. That matters for more than tidiness: app.py's main
+    loop treats `speaker.speaking` as "this is Jarvis's own voice, ignore
+    it". Speaking sentence-by-sentence through say() would drop that flag
+    in every gap between sentences, and the microphone would hear the tail
+    of his own speech in those gaps and treat it as the user talking.
+    """
+
+    def __init__(self, speaker: "Speaker") -> None:
+        self._speaker = speaker
+        self._q: "queue.Queue[str | None]" = queue.Queue()
+        self._spoken: list[str] = []
+        self._pending_text = ""
+        self._first_audio = threading.Event()
+        self._done = threading.Event()
+        self.interrupted = False
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="jarvis-tts-stream"
+        )
+        self._thread.start()
+
+    # ------------------------------------------------------------- producing
+    def push(self, text: str) -> None:
+        """
+        Add model output. Safe to call with partial text — anything that is
+        not yet a complete sentence is held back until it is.
+
+        Half a sentence must never reach the synthesiser. edge-tts renders
+        "Your C drive is at ninety nine" with the falling intonation of a
+        finished statement, so a reply chopped at the buffer boundary sounds
+        like a series of confident non-sequiturs rather than one thought.
+        """
+        if not text:
+            return
+        self._pending_text += text
+        # Everything up to the last sentence terminator is safe to speak;
+        # the remainder stays buffered until more text arrives or close()
+        # flushes it.
+        cut = max(
+            self._pending_text.rfind("."),
+            self._pending_text.rfind("!"),
+            self._pending_text.rfind("?"),
+            self._pending_text.rfind(chr(10)),
+        )
+        if cut < 0:
+            return
+        ready, self._pending_text = self._pending_text[: cut + 1], self._pending_text[cut + 1 :]
+        self._enqueue(ready)
+
+    def _enqueue(self, text: str) -> None:
+        for sentence in split_sentences(clean_for_speech(text)):
+            self._q.put(sentence)
+
+    def close(self, timeout: float = 120.0) -> str:
+        """Flush the tail, wait for playback, return everything spoken."""
+        if self._pending_text.strip():
+            self._enqueue(self._pending_text)
+            self._pending_text = ""
+        self._q.put(None)
+        self._thread.join(timeout)
+        return " ".join(self._spoken).strip()
+
+    def abandon(self) -> None:
+        """Stop without waiting — used when a turn errors out mid-stream."""
+        self._pending_text = ""
+        self._q.put(None)
+
+    # ------------------------------------------------------------- consuming
+    @property
+    def has_spoken(self) -> bool:
+        """True once real audio has actually reached the speakers."""
+        return self._first_audio.is_set()
+
+    def _run(self) -> None:
+        sp = self._speaker
+        with sp._say_lock:
+            sp._interrupt.clear()
+            sp._speaking.set()
+            sp.on_state("speaking")
+            producer_finished = False
+            try:
+                with _cf.ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="tts-stream-synth"
+                ) as pool:
+                    ahead: tuple | None = None
+                    while not sp._interrupt.is_set():
+                        if ahead is not None:
+                            future, text = ahead
+                            ahead = None
+                        else:
+                            item = self._q.get()
+                            if item is None:
+                                break
+                            future, text = pool.submit(sp._render_cached, item), item
+
+                        # If the next sentence is ALREADY available, start
+                        # synthesising it before playing this one, so its
+                        # network round-trip hides behind audio that is
+                        # already playing. If it isn't available yet, don't
+                        # block waiting — the model is still writing it.
+                        try:
+                            nxt = self._q.get_nowait()
+                        except queue.Empty:
+                            nxt = _NOTHING_YET
+                        if nxt is None:
+                            producer_finished = True
+                        elif nxt is not _NOTHING_YET:
+                            ahead = (pool.submit(sp._render_cached, nxt), nxt)
+
+                        try:
+                            rendered = future.result()
+                        except Exception:
+                            rendered = None   # one bad sentence != a dead reply
+                        if rendered is not None:
+                            pcm, rate = rendered
+                            self._first_audio.set()
+                            if not sp._play(pcm, rate):
+                                self.interrupted = True
+                                break
+                        self._spoken.append(text)
+
+                        if producer_finished and ahead is None:
+                            break
+            finally:
+                sp._speaking.clear()
+                sp._interrupt.clear()
+                sp.on_state("idle")
+                self._done.set()

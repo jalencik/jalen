@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import queue
+import re
 import threading
 import time
 import uuid
@@ -41,6 +42,70 @@ from .ui.orb import Orb, TranscriptWindow
 # of the command and is dropped. Anything under it is the tail of the phrase
 # still being spoken and must be kept — see the wake handler in run().
 STALE_AUDIO_S = 1.5
+
+# --------------------------------------------------------------------------
+# Endpointing support: deciding, from the WORDS, whether he has finished.
+#
+# The microphone cannot tell "he's done" from "he's thinking" — both are
+# silence. That ambiguity is why vad.silence_ms had to be 2000ms, and that
+# 2000ms was the largest fixed cost on every single turn, paid even by the
+# commands the router answers without ever contacting Claude.
+#
+# The transcript resolves what the silence cannot. Measured over the 409
+# real user utterances in data/audit.jsonl: 55% are six words or fewer
+# (commands that should be instant) and only 1.0% end on a word implying
+# more is coming. The fast path is the overwhelmingly common case and the
+# patient path only has to cover a thin tail — which is exactly the shape
+# that makes "endpoint early, then check the words" beat one pessimistic
+# timeout applied to everybody.
+# --------------------------------------------------------------------------
+
+# Words nobody ends a sentence on. If the transcript at the fast endpoint
+# ends here, he paused mid-thought: keep listening on the patient window.
+_UNFINISHED_TAIL = re.compile(
+    r"(?:^|\s)(?:and|or|but|so|then|also|plus|because|if|when|while|"
+    r"which|to|for|with|from|into|onto|at|in|on|of|about|by|as|"
+    r"the|a|an|my|your|his|her|their|its|this|these|"
+    r"is|are|was|were|be|been|am|can|could|would|should|will|"
+    r"want|need|like|going|gonna|try|trying|"
+    r"um|uh|erm|hmm)$"
+)
+# Deliberately NOT on that list, though they look like they belong:
+#
+#   do / does / did   "what do you do", "what things can you do" — six of
+#                     them end a sentence in the log, all complete questions.
+#   that              "why is that", "what's that".
+#   those             "delete those".
+#   you / know / it   the three commonest final words he actually uses.
+#
+# The asymmetry is deliberate. A false "unfinished" only costs him the
+# extra 1.4s he used to pay anyway, and the turn still runs. A false
+# "finished" truncates the command, which is the failure that reads as
+# being ignored. So the list errs toward waiting — but not on words this
+# particular person demonstrably ends sentences with.
+
+# Openers meaning "this is the REST of what I just said", not a new command.
+# "open chrome" [pause] "and go to youtube" is one instruction with a gap in
+# it; treated as two, the second half arrives with no subject and means
+# nothing on its own.
+_CONTINUATION_OPENER = re.compile(
+    r"^(?:and then|after that|as well as|followed by|and|then|also|plus|or|next)\b"
+)
+
+
+def looks_unfinished(text: str) -> bool:
+    """True when the transcript reads like the middle of a sentence."""
+    cleaned = (text or "").strip().lower().rstrip(".,!?;:")
+    if not cleaned:
+        return False
+    return bool(_UNFINISHED_TAIL.search(cleaned))
+
+
+def is_continuation(text: str) -> bool:
+    """True when the transcript picks up where the previous one left off."""
+    return bool(_CONTINUATION_OPENER.match((text or "").strip().lower()))
+
+
 
 # How many turns may be working at once before new speech is deferred with a
 # spoken "still on the last one" instead of silently joining a backlog.
@@ -93,6 +158,10 @@ class Jarvis:
         self._answer_q: queue.Queue[Optional[bool]] = queue.Queue()
         self._awaiting_confirmation = False
         self._awaiting_stop = False
+        # Last thing he said, for re-attaching a continuation fragment —
+        # see the stitching block in process().
+        self._last_user_text = ""
+        self._last_user_at = 0.0
 
         self.end_phrases = [p.lower() for p in cfg.get_path("conversation.end_phrases", [])]
         self.kill_phrases = [p.lower() for p in cfg.get_path("safety.kill_phrases", [])]
@@ -397,19 +466,107 @@ class Jarvis:
             await brain.start()
             self.brain = brain
 
-    async def handle_with_brain(self, text: str) -> str:
+    async def handle_with_brain(self, text: str, on_text=None) -> str:
         if self.brain is None:
             await self._start_brain()
         try:
-            return await self.brain.ask(text)
+            return await self.brain.ask(text, on_text=on_text)
         except Exception as exc:
             self.audit.error("brain", exc)
             return f"My brain hit an error: {exc}"
+
+    def speak_brain_reply(self, user_text: str) -> None:
+        """
+        Run a brain turn and speak the answer WHILE it is being written.
+
+        The old shape was three serial waits — finish the reply, synthesise
+        it, play it — and he heard nothing through any of them. Measured on
+        a real session that silence ran to a median of 3.0s and a p90 of 23s.
+
+        Now the model's tokens flow straight into a SpeechStream, so the
+        wait he actually experiences ends at the FIRST sentence. The work
+        still takes as long as it takes; it just stops being
+        indistinguishable from a crash while it happens.
+        """
+        if self.muted:
+            # Nothing will be audible, so streaming buys nothing here and
+            # the plain path keeps the summarise/transcript logic simple.
+            self.say(self._run_coro(self.handle_with_brain(user_text)))
+            return
+
+        stream = self.speaker.open_stream()
+        max_spoken = self.speaker.max_spoken
+        state = {"chars": 0, "overflowed": False}
+
+        def on_text(chunk: str) -> None:
+            # Spec B15 still applies: long answers are summarised aloud and
+            # shown in full on screen. Streaming means enforcing that as the
+            # text arrives rather than measuring a finished string — once the
+            # reply runs long, stop feeding the speaker and let the
+            # transcript window carry the remainder.
+            if state["overflowed"]:
+                return
+            state["chars"] += len(chunk)
+            if state["chars"] > max_spoken:
+                state["overflowed"] = True
+                stream.push(" That's the short version, the full text is on screen.")
+                return
+            stream.push(chunk)
+
+        # A turn that calls tools first produces no text for seconds. Silence
+        # reads as "it's broken" — he said exactly that, more than once, in
+        # the log. One short line costs nothing (it is pre-rendered into the
+        # phrase cache at startup) and turns dead air into visible work.
+        ack_after = float(self.cfg.get_path("brain.ack_after_ms", 1400)) / 1000.0
+
+        def acknowledge() -> None:
+            if state["chars"] == 0:
+                stream.push("Give me a second.")
+
+        ack_timer = threading.Timer(ack_after, acknowledge)
+        ack_timer.daemon = True
+        ack_timer.start()
+
+        try:
+            reply = self._run_coro(self.handle_with_brain(user_text, on_text=on_text))
+        finally:
+            ack_timer.cancel()
+
+        if state["chars"] == 0:
+            # Nothing streamed: a tool-only turn, or an SDK build that did
+            # not emit deltas. Speak the finished string so a reply is never
+            # silently dropped.
+            stream.abandon()
+            self.say(reply)
+            return
+
+        if state["overflowed"]:
+            self.transcript.show("Full answer", reply)
+        stream.close()
+        self.audit.utterance(reply, who="jarvis")
 
     def process(self, text: str) -> None:
         text = (text or "").strip()
         if not text:
             return
+
+        # Stitching. The fast endpoint can close an utterance during a pause
+        # that turns out to be mid-sentence, so "open chrome and go to
+        # youtube" can arrive as two. The second half opens on a connector
+        # and is meaningless alone — "and go to youtube" has no subject — so
+        # re-attach it to what it continues instead of routing a fragment.
+        # Bounded by a short window: a sentence starting with "and" a minute
+        # later is a new thought, not the rest of an old one.
+        window = float(self.cfg.get_path("conversation.stitch_window_s", 8))
+        if (
+            is_continuation(text)
+            and self._last_user_text
+            and time.monotonic() - self._last_user_at <= window
+        ):
+            text = f"{self._last_user_text} {text}"
+        self._last_user_text = text
+        self._last_user_at = time.monotonic()
+
         self.audit.utterance(text, who="user")
 
         low = text.lower().rstrip(".!?")
@@ -446,8 +603,7 @@ class Jarvis:
                 return
 
         self.orb.set_state("thinking")
-        reply = self._run_coro(self.handle_with_brain(text))
-        self.say(reply)
+        self.speak_brain_reply(text)
 
     # -------------------------------------------------------------------- loop
     def run(self) -> None:
@@ -459,6 +615,11 @@ class Jarvis:
         self.vad.load()
 
         listening = False
+        # Did HE start this listening window by saying "hey jarvis", or did a
+        # noise trip it open? The answer decides whether a window that
+        # produces no speech is worth saying anything about — see the
+        # empty-utterance branch at the bottom of this loop.
+        wake_initiated = False
         follow_up_until = 0.0
         follow_up_s = float(self.cfg.get_path("conversation.follow_up_timeout_s", 12))
         barge_in = bool(self.cfg.get_path("conversation.barge_in", True))
@@ -514,6 +675,7 @@ class Jarvis:
                     if self.wake.feed(frame):
                         self.paused = False
                         listening = True
+                        wake_initiated = True
                         self.orb.set_state("listening")
                         self.collector._reset()
                     continue
@@ -530,6 +692,7 @@ class Jarvis:
                     if self.vad.probability(frame) >= barge_threshold:
                         self.speaker.stop()
                         listening = True
+                        wake_initiated = True    # he talked over it on purpose
                         self.orb.set_state("listening")
                         self.collector._reset()
                     continue
@@ -543,9 +706,11 @@ class Jarvis:
                     awaiting_reply = self._awaiting_confirmation or self._awaiting_stop
                     if (in_follow_up or awaiting_reply) and self.vad.probability(frame) >= self.vad.threshold:
                         listening = True
+                        wake_initiated = False   # a sound opened this, not him
                         self.orb.set_state("listening")
                     elif self.wake.feed(frame):
                         listening = True
+                        wake_initiated = True
                         follow_up_until = 0.0
                         self.orb.set_state("listening")
                         # Do NOT drain here. The frames still queued behind
@@ -574,12 +739,31 @@ class Jarvis:
 
                 listening = False
                 if len(utterance) == 0:
-                    # Wake fired but no speech followed. Say so: silently
-                    # returning to idle is indistinguishable from "heard you
-                    # and ignored you", which is how a dropped command felt
-                    # like the assistant simply not working.
+                    # A listening window that produced no speech. What to do
+                    # about it depends entirely on who opened it.
+                    #
+                    # He said "hey jarvis" and then nothing came through:
+                    # worth saying, because silently returning to idle is
+                    # indistinguishable from "heard you and ignored you".
+                    #
+                    # A NOISE opened it — a keystroke, a door, the tail of
+                    # Jarvis's own voice arriving back through the mic during
+                    # the follow-up window — and announcing that is pure
+                    # self-inflicted interruption. He never asked anything,
+                    # so there was nothing to catch. Worse, the announcement
+                    # is itself speech, which the mic hears, which can trip
+                    # the window open again.
+                    #
+                    # This was not a rare edge: "I didn't catch that" was
+                    # 30 of the 255 things Jarvis said in data/audit.jsonl,
+                    # 11.8% of its entire spoken output, and it fired in the
+                    # middle of a RED delete confirmation — talking over the
+                    # question it had just asked, then cancelling the action
+                    # for "no answer". Flash the orb instead: visible if he
+                    # is looking, silent if he is not.
                     self.orb.flash("blocked", 0.8)
-                    self.say("I didn't catch that.")
+                    if wake_initiated:
+                        self.say("I didn't catch that.")
                     self.orb.set_state("muted" if self.muted else "idle")
                     continue
 
@@ -594,6 +778,19 @@ class Jarvis:
 
                 if not text:
                     self.orb.set_state("idle")
+                    continue
+
+                # The utterance closed on the FAST threshold. If the words
+                # say he is mid-sentence ("...open chrome and"), put the
+                # audio back and keep listening on the patient one. The
+                # whole phrase is re-transcribed once at the end rather
+                # than stitched from two partial transcripts — one Whisper
+                # pass over the complete audio is both more accurate and
+                # cheaper than two over halves of it.
+                if not self.collector.was_patient and looks_unfinished(text):
+                    self.collector.resume(utterance)
+                    listening = True
+                    self.orb.set_state("listening")
                     continue
 
                 with self._turn_lock:

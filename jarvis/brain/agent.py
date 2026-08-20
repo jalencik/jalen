@@ -251,9 +251,41 @@ class Brain:
             max_turns=int(self.cfg.get_path("brain.max_turns_per_request", 12)),
             mcp_servers=self._mcp_servers(),
             hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self._make_hook()])]},
+            # Emit token deltas as they are produced instead of only whole
+            # messages. This is what lets ask() start SPEAKING sentence one
+            # while the model is still writing sentence three -- see the
+            # comment on ask() for why that is the single biggest latency
+            # win on this path.
+            include_partial_messages=True,
+            **self._speed_options(),
         )
         self._client = ClaudeSDKClient(options=options)
         await self._client.__aenter__()
+
+    def _speed_options(self) -> dict:
+        """
+        Latency dials that only make sense for a VOICE assistant.
+
+        `effort` and extended thinking both buy accuracy with time spent
+        before the first token exists. In a chat window that trade is
+        usually worth it; out loud it is not, because the cost is paid as
+        dead air with a person waiting in it. "Open Chrome" does not need
+        deliberation, and the router already absorbs the turns simple
+        enough to need none at all -- so what reaches the brain is mostly
+        mid-difficulty work where low effort is genuinely sufficient.
+
+        Both are config keys rather than constants: a turn that really does
+        need thinking (planning, debugging) is exactly the kind of thing
+        brain.escalate_on_keywords is for, and this is the dial that would
+        drive it.
+        """
+        opts: dict = {}
+        effort = self.cfg.get_path("brain.effort", "low")
+        if effort:
+            opts["effort"] = effort
+        if not bool(self.cfg.get_path("brain.thinking", False)):
+            opts["thinking"] = {"type": "disabled"}
+        return opts
 
     def _mcp_servers(self) -> dict:
         from claude_agent_sdk import create_sdk_mcp_server
@@ -273,8 +305,28 @@ class Brain:
                 self._client = None
 
     # -------------------------------------------------------------------- ask
-    async def ask(self, text: str) -> str:
-        """One conversational turn. Returns what Jarvis should say out loud."""
+    async def ask(self, text: str, on_text=None) -> str:
+        """
+        One conversational turn. Returns what Jarvis should say out loud.
+
+        `on_text` receives text as the model produces it. Pass it and the
+        reply is spoken while it is still being written; omit it and this
+        behaves exactly as before, returning the finished string.
+
+        Why it matters. This method used to consume the whole response
+        before returning anything, so the first word was not synthesised
+        until the model had finished everything -- including tool calls.
+        Measured against a real session (data/audit.jsonl): median turn
+        3.0s, p75 8.0s, p90 23.0s, and ALL of it was silence, because TTS
+        could not begin until this returned. The work itself was not the
+        problem; the ordering was. Now the clock a person actually feels --
+        how long until Jarvis says something -- is set by the first
+        sentence rather than the last.
+
+        Tool calls still take as long as they take. The difference is that
+        he hears "Give me a second, checking the disk" during them instead
+        of wondering whether the thing is broken.
+        """
         from claude_agent_sdk import AssistantMessage, ResultMessage
 
         async with self._lock:
@@ -282,17 +334,40 @@ class Brain:
                 await self.start()
 
             await self._client.query(text)
-            reply_parts: list[str] = []
+            streamed: list[str] = []
+            blocks: list[str] = []
             final = ""
 
             async for message in self._client.receive_response():
+                # Token deltas (include_partial_messages). Detected by shape
+                # rather than isinstance so an SDK that renames or reshapes
+                # its stream-event class degrades to the whole-message path
+                # below instead of crashing the turn.
+                event = getattr(message, "event", None)
+                if isinstance(event, dict):
+                    if event.get("type") == "content_block_delta":
+                        delta = event.get("delta") or {}
+                        if delta.get("type") == "text_delta":
+                            chunk = delta.get("text") or ""
+                            if chunk:
+                                streamed.append(chunk)
+                                if on_text is not None:
+                                    on_text(chunk)
+                    continue
+
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if getattr(block, "text", None):
-                            reply_parts.append(block.text)
+                            blocks.append(block.text)
                 elif isinstance(message, ResultMessage):
                     if getattr(message, "subtype", "") == "success":
                         final = getattr(message, "result", "") or ""
                     break
 
-            return (final or " ".join(reply_parts)).strip()
+            # Precedence matters. When deltas arrived, they are what was
+            # actually SPOKEN, so they must win: returning the SDK's `result`
+            # instead would hand app.py a string that differs from the audio
+            # already playing, and the tail would be spoken twice.
+            if streamed:
+                return "".join(streamed).strip()
+            return (final or " ".join(blocks)).strip()

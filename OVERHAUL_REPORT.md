@@ -361,3 +361,135 @@ thing to report.
 - **Code compiles clean**, no stray processes
 - **5 commits** on `main`, all work committed
 - No secrets in the code or its history; `.env` never committed
+
+---
+
+## 6e. Round five — response latency, measured from your own session log
+
+You said it was "taking a little too long to respond." I read
+`data/audit.jsonl` — 2,300 records, 419 real things you said — rather than
+guessing at what ought to be slow. Three of the four costs turned out not to
+be the work at all; they were ordering and two bugs.
+
+### What the log actually said
+
+| | |
+|---|---|
+| Median time from you finishing to Jarvis answering | **3.0 s** |
+| p75 | **8.0 s** |
+| p90 | **23.0 s** |
+| `"I didn't catch that"` | **30 of 255** things Jarvis ever said — **11.8%** |
+| Your commands that are 6 words or fewer | **55%** |
+| Your commands ending on a word implying more is coming | **1.0%** |
+
+### Fix 1 — the 2-second tax on every turn
+
+`vad.silence_ms: 2000` was how long you had to be **silent** before Jarvis
+would even begin. It was paid on every turn, including ones the router
+answers locally without contacting Claude at all. It had been 700 ms and was
+raised because 700 ms cut people off mid-sentence.
+
+Both settings were right about their own failure. A silence threshold cannot
+tell "he's finished" from "he's thinking" — nothing acoustic distinguishes
+them. **Only the words do.**
+
+So there are now two thresholds and the transcript decides between them.
+Jarvis closes the utterance at **600 ms**, transcribes, and looks at how the
+sentence *ends*. "Open Chrome" is complete — it goes immediately. "Open
+Chrome and" ends on a conjunction, so the audio goes back and it keeps
+listening on the patient 2000 ms, then re-transcribes the whole phrase at
+once.
+
+A third layer catches the rest: if a fast endpoint ever does split one
+instruction in two, the second half opens on a connector ("and go to
+YouTube") and gets re-attached to what it continues.
+
+**Measured across your 419 real utterances: 2000 ms → 619 ms average.
+1,381 ms saved on every single turn.** Only 1.0% still take the patient path.
+
+### Fix 2 — Jarvis was silent until the entire answer was finished
+
+`Brain.ask()` waited for the SDK's `ResultMessage` before returning a single
+character. Nothing was synthesised until Claude had completely finished —
+every token *and* every tool call — and only then did a text-to-speech
+round-trip start. That is what the 3.0 s median and 23 s p90 were: not work,
+just ordering.
+
+Tokens now flow straight into a `SpeechStream` as the model writes them, so
+the clock you actually feel ends at the **first sentence** instead of the
+last. Extended thinking is off and effort is set to `low` (both are config
+keys) — out loud, deliberation time is paid as dead air with a person
+waiting in it, and the router already absorbs the turns simple enough to
+need none.
+
+If a turn calls tools first and has produced no text after 1.4 s, it says one
+short pre-rendered line so silence never reads as a crash. You wrote "why
+you're silent" and "you're taking too much time to respond to me" in the log.
+
+### Fix 3 — one click of noise could freeze it for 30 seconds
+
+The give-up condition was `not self._started`, but a single 32 ms blip — a
+keystroke, a door, the tail of Jarvis's own voice returning through the
+mic — *sets* `_started`, leaving 32 ms of speech against a 250 ms floor. The
+finish condition could never fire and neither could the give-up. The
+collector held the microphone until `max_utterance_s`.
+
+**30,000 ms → 2,560 ms** on every false trigger.
+
+### Fix 4 — Jarvis interrupting itself, 11.8% of the time
+
+"I didn't catch that" fires when a listening window produces no speech. In
+the follow-up window after it answers, that window is usually opened by a
+*noise*, not by you — you never asked anything, so there was nothing to
+catch. Worse, the announcement is itself speech, which the microphone hears,
+which can trip the window open again.
+
+In your log it fired **in the middle of a RED delete confirmation**, talking
+over the question it had just asked, and the delete was then cancelled for
+"no answer". That is the whole `19:37:29 → 19:37:56` sequence.
+
+It now only speaks when *you* opened the window by saying "Hey Jarvis". A
+noise-opened window flashes the orb and stays quiet.
+
+### Fix 5 — a guard that had never once run
+
+`router.py` carried a full paragraph explaining why "search reddit **for
+jarvis**" must not have "jarvis" stripped as a trailing address. The regex
+implementing it contained a **literal backspace byte (0x08)** where the two
+characters `\b` belonged. A raw string holding a real backspace matches
+nothing, so the guard silently never fired: the phrase stripped to "search
+reddit for" and searched Reddit for the word **"for"**.
+
+It was the only control character in the codebase, which is why nobody
+caught it by eye. A test now fails if any control character reappears there.
+
+### Fix 6 — commands that reached Claude for no reason
+
+Politeness stripping ran once; real speech stacks it. "Be so kind as to open
+telegram" (said three times), "you please open the telegram", "yes, open
+telegram" all went to Claude for a command the router already knew. Stripping
+now loops. **27 of the 317 recorded misses are handled locally.**
+
+### Numbers
+
+Run `.venv\Scripts\python.exe tests\benchmark_latency.py` to reproduce all of
+these against your own log.
+
+| | Before | After |
+|---|---|---|
+| Endpointing, every turn | 2000 ms | **619 ms** |
+| Noise-blip hang | 30,000 ms | **2,560 ms** |
+| Time to first spoken word (brain turn) | after the *whole* reply | after the **first sentence** |
+| `"I didn't catch that"` | 11.8% of all speech | only when you woke it |
+| Tests | 627 | **682** |
+
+### Honest limit
+
+**Not every task can finish in under two seconds, and no amount of tuning
+changes that.** Opening Chrome is fast because it is one local action.
+Searching the web, reading your inbox or scanning the disk means waiting on
+someone else's server, and that wait is real work, not overhead.
+
+What *is* now under two seconds, always, is the time until Jarvis **starts
+responding** — which is the part that actually feels like speed. The rest is
+honest work happening out loud instead of behind silence.
