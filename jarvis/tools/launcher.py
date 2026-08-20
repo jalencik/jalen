@@ -44,9 +44,15 @@ from .system import IS_WINDOWS, _APP_ALIASES, _title_pattern
 ALIASES_PATH = ROOT / "data" / "aliases.json"
 
 # difflib ratio below which a fuzzy app match is treated as "not confident".
-# 0.6 accepts "igram"->"ayugram" and "vs code"->"Visual Studio Code" while
-# still rejecting unrelated words.
-FUZZY_MIN = 0.6
+# Used for every fuzzy pass below: against the known-name pool (aliases +
+# family members + index) and, last resort, against the installed index
+# alone. That pool holds short, generic tokens ("code", "cmd", "vlc") that
+# a looser cutoff matches by accident — verified live at 0.6: "claude" ->
+# "code", "discord" -> "vscode", "opera" -> "Computer", "zoom" -> "Zotero",
+# each scored 0.60-0.62 and would have confidently opened the WRONG app.
+# 0.75 still passes every real typo tested ("wrod"->"word" is the tightest,
+# at exactly 0.75) while rejecting all five of those.
+FUZZY_MIN = 0.75
 
 # Apps that are the same THING to a user but share no useful spelling.
 # "Open Telegram" on this machine must open AyuGram — a Telegram client —
@@ -71,6 +77,90 @@ def _family_candidates(key: str) -> list[str]:
         if key in family:
             return [member for member in family if member != key]
     return []
+
+
+# Bare words that must always mean the user's own folder, never an app —
+# checked in open_target before any app resolution runs at all. Windows
+# ships real apps whose names contain these words ("Remote Desktop
+# Connection"), so leaving them to fuzzy/substring matching is a live
+# collision, not a hypothetical one.
+_SPECIAL_FOLDERS: dict[str, str] = {
+    "desktop": "Desktop",
+    "documents": "Documents",
+    "downloads": "Downloads",
+    "pictures": "Pictures",
+    "videos": "Videos",
+    "music": "Music",
+}
+
+# Gaps in the shipped _APP_ALIASES table: apps with no Start Menu .lnk on
+# this machine at all (the modern Calculator ships no shortcut, so no
+# amount of fuzzy/substring matching against the index can ever find it),
+# checked exactly like _APP_ALIASES. Kept local rather than added to
+# system.py's table since that file belongs to a different area.
+_LOCAL_ALIASES: dict[str, str] = {
+    "calc": "calc.exe",
+}
+
+
+def _word_boundary_match(needle: str, haystack: str) -> bool:
+    """
+    True when `needle` appears in `haystack` as a separate word, not glued
+    inside a longer one. "word" matches "word 2016" (space-separated) but
+    not "wordpad" (glued straight to "pad") — the difference between
+    opening Microsoft Word and opening WordPad for "open word", which a
+    plain substring check can't tell apart.
+    """
+    return re.search(r"(?:^|[\s\-_(])" + re.escape(needle) + r"(?:$|[\s\-_)])", haystack) is not None
+
+
+def _best_contains(key: str, index: dict[str, str]) -> str | None:
+    """
+    Best of the index entries where `key` is a substring (or vice versa).
+    Word-boundary matches win over ones where the key is merely embedded
+    ("word" in "word 2016" beats "word" in "wordpad"); ties, and the
+    boundary-less fallback, go to the shortest name — least extra junk.
+    """
+    contains = [n for n in index if key in n or n in key]
+    if not contains:
+        return None
+    boundary = [n for n in contains if _word_boundary_match(key, n) or _word_boundary_match(n, key)]
+    pool = boundary or contains
+    return min(pool, key=len)
+
+
+def _known_name_pool(index: dict[str, str]) -> set[str]:
+    """Every name resolution actually understands: installed apps, shipped
+    aliases, and family members — the full universe a typo should be
+    corrected against, not just whatever happens to be in the Start Menu."""
+    names = set(index) | set(_APP_ALIASES) | set(_LOCAL_ALIASES)
+    for family in _APP_FAMILIES:
+        names |= family
+    return names
+
+
+def _resolve_key(key: str, index: dict[str, str]) -> tuple[str | None, str | None]:
+    """Exact alias, exact index, family sibling, then boundary-aware
+    substring — the deterministic part of resolution, no fuzziness."""
+    builtin = _APP_ALIASES.get(key) or _LOCAL_ALIASES.get(key)
+    if builtin:
+        if builtin.startswith(("ms-settings:", "http")) or shutil.which(builtin) or Path(builtin).exists():
+            return builtin, key
+
+    if key in index:
+        return index[key], key
+
+    for sibling in _family_candidates(key):
+        if sibling in index:
+            return index[sibling], sibling
+        sibling_builtin = _APP_ALIASES.get(sibling) or _LOCAL_ALIASES.get(sibling)
+        if sibling_builtin and (shutil.which(sibling_builtin) or Path(sibling_builtin).exists()):
+            return sibling_builtin, sibling
+
+    best = _best_contains(key, index)
+    if best:
+        return index[best], best
+    return None, None
 
 
 _app_index_cache: dict[str, str] | None = None
@@ -182,33 +272,46 @@ def resolve_app(name: str) -> tuple[str | None, str | None]:
     # AyuGram instead — so the alias resolved to something nonexistent and
     # "open Telegram" failed while the real client sat one fuzzy match away.
     # Verify first; fall through to what's installed when it doesn't hold.
-    builtin = _APP_ALIASES.get(key)
-    if builtin:
-        if builtin.startswith(("ms-settings:", "http")) or shutil.which(builtin) or Path(builtin).exists():
-            return builtin, key
-
-    if key in index:
-        return index[key], key
-
-    # A same-thing-different-name sibling that IS installed (telegram -> ayugram).
-    for sibling in _family_candidates(key):
-        if sibling in index:
-            return index[sibling], sibling
-        sibling_builtin = _APP_ALIASES.get(sibling)
-        if sibling_builtin and (shutil.which(sibling_builtin) or Path(sibling_builtin).exists()):
-            return sibling_builtin, sibling
-
     # Substring both ways: "igram" is inside "ayugram"; "visual studio code"
     # contains the spoken "vs code" only after fuzzy, but "code" is inside it.
-    contains = [n for n in index if key in n or n in key]
-    if contains:
-        best = min(contains, key=len)  # shortest = least extra junk
-        return index[best], best
+    target, matched = _resolve_key(key, index)
+    if target:
+        return target, matched
 
+    # Nothing exact/substring matched — the spoken name itself might be
+    # misspelled ("telegran" for "telegram", "exploerer" for "explorer").
+    # Correct it against every name resolution actually understands (Start
+    # Menu entries, shipped aliases, family members) rather than only the
+    # installed index, so a typo'd ALIAS or FAMILY name gets fixed too —
+    # then resolve the CORRECTED name through the real rules above rather
+    # than opening the fuzzy match directly, so a bad guess still can't
+    # skip alias-verification or the installed-sibling substitution.
+    pool = _known_name_pool(index)
+    close = difflib.get_close_matches(key, list(pool), n=1, cutoff=FUZZY_MIN)
+    if close and close[0] != key:
+        target, matched = _resolve_key(close[0], index)
+        if target:
+            return target, matched
+
+    # Last resort: fuzzy straight against the installed index — covers a
+    # typo'd app with no alias/family entry at all (a one-off Start Menu
+    # program only known by its exact installed name).
     close = difflib.get_close_matches(key, list(index), n=1, cutoff=FUZZY_MIN)
     if close:
         return index[close[0]], close[0]
     return None, None
+
+
+def _canonical_choice_name(path: str) -> str:
+    """
+    Collapse Windows' own auto-generated copy naming ("X - Shortcut",
+    "X - Shortcut (2)") to the same choice, so two shortcuts to the same
+    thing don't manufacture a fake ambiguity between identical launchers.
+    """
+    stem = Path(path).stem.lower()
+    stem = re.sub(r"\s*\(\d+\)$", "", stem)
+    stem = re.sub(r"\s*-\s*shortcut$", "", stem)
+    return stem
 
 
 # ------------------------------------------------------------------- open
@@ -241,6 +344,24 @@ def open_target(name: str) -> str:
         except Exception as exc:
             return f"Couldn't open {expanded.name}: {exc}"
 
+    # A bare special-folder name always means the folder, checked BEFORE app
+    # resolution. The router's own dedicated rule already handles the common
+    # phrasings ("open my desktop"), but anything that reaches open_target
+    # by a phrasing that rule doesn't cover ("pull up my desktop") used to
+    # fall into resolve_app's fuzzy matching and confidently open "Remote
+    # Desktop Connection" instead — verified live. "desktop"/"documents" are
+    # real words that collide with real installed app names; they must
+    # never be left to fuzzy matching.
+    folder_key = re.sub(r"^(my|the|a|an)\s+|\s+folder$", "", raw.strip().lower()).strip()
+    special_folder = _SPECIAL_FOLDERS.get(folder_key)
+    if special_folder:
+        target_dir = Path.home() / special_folder
+        try:
+            _startfile(str(target_dir))
+            return f"Opened {special_folder}."
+        except Exception as exc:
+            return f"Couldn't open {special_folder}: {exc}"
+
     target, matched = resolve_app(raw)
     if target:
         try:
@@ -259,16 +380,42 @@ def open_target(name: str) -> str:
             return f"Opening {raw}."
         return f"I started {matched or raw} but nothing came up."
 
-    hits = find_files(raw)
+    # An explicit "folder"/"directory" narrows the search to directories, so
+    # "open the SAT TOP folder" isn't buried under unrelated PDFs and specs
+    # that happen to contain the same two words.
+    wants_dir = re.search(r"\bfolder\b|\bdirectory\b", raw, re.I) is not None
+    hits = find_files(raw, dirs_only=wants_dir)
+    if wants_dir and not hits:
+        hits = find_files(raw)  # nothing matched as a folder — don't over-restrict
     if not hits:
         return f"I couldn't find an app, file or folder called {raw}."
+
+    # A real Desktop shortcut named exactly what was asked for outranks any
+    # number of unrelated files that merely happen to contain the same
+    # word(s) — verified live: "open claude" matched two "Claude - Shortcut"
+    # copies AND several unrelated project folders named "claude-api"; the
+    # shortcut is unambiguously what "open" means here, so it wins outright
+    # instead of joining a "which one?" list with things that were never
+    # really candidates.
+    query_terms = " ".join(
+        t for t in raw.lower().replace("_", " ").replace("-", " ").split()
+        if t not in {"my", "the", "a", "an", "file", "folder", "please", "open"}
+    )
+    shortcut_hits = [h for h in hits if h.lower().endswith(".lnk") and _canonical_choice_name(h) == query_terms]
+    if shortcut_hits:
+        hits = shortcut_hits
 
     # Only ask when the choice is genuinely ambiguous. Asking "which one?"
     # about two files that share a NAME (the same document in Desktop and
     # Downloads) is noise — either satisfies the request. Likewise, naming a
     # file outright ("changes.pdf") is already unambiguous. Ask only when the
     # candidates are actually different things.
-    distinct = {Path(h).name.lower() for h in hits}
+    #
+    # "different things" also excludes Windows' own shortcut-copy naming:
+    # "Slack - Shortcut.lnk" and a second copy both mean the same app, so
+    # they collapse to one canonical choice rather than manufacturing a
+    # fake "which one?" between two names for the identical launcher.
+    distinct = {_canonical_choice_name(h) for h in hits}
     asked_for = Path(raw).name.lower()
     exact = [h for h in hits if Path(h).name.lower() == asked_for]
 
@@ -276,7 +423,14 @@ def open_target(name: str) -> str:
     if exact:
         chosen = exact[0]
     elif len(distinct) == 1:
-        chosen = hits[0]
+        # Among duplicate names for the same thing, a real .lnk shortcut is
+        # what "open" should launch — not an install package or archive
+        # that happens to share the name (verified live: "slack" matched
+        # both "Slack - Shortcut.lnk" and a downloaded "Slack.msix"; the
+        # shorter filename won the old length-only sort and opened the
+        # installer package instead of the app).
+        lnk_hits = [h for h in hits if h.lower().endswith(".lnk")]
+        chosen = lnk_hits[0] if lnk_hits else hits[0]
 
     if chosen:
         try:
@@ -328,8 +482,15 @@ def _search_roots() -> list[Path]:
     return [r for r in roots if r.is_dir()]
 
 
-def find_files(query: str, limit: int = 12) -> list[str]:
-    """Filename search over the usual places, best matches first."""
+def find_files(query: str, limit: int = 12, dirs_only: bool = False) -> list[str]:
+    """
+    Filename search over the usual places, best matches first.
+
+    `dirs_only` narrows results to directories — open_target sets it when the
+    request explicitly said "folder"/"directory", so "open the SAT TOP
+    folder" isn't drowned out by unrelated PDFs that happen to share the
+    same words.
+    """
     query = (query or "").strip().lower()
     if not query:
         return []
@@ -341,23 +502,30 @@ def find_files(query: str, limit: int = 12) -> list[str]:
         terms = [query]
 
     exclude = {d.lower() for d in (CONFIG.get_path("index.exclude_dirs", []) or [])}
-    scored: list[tuple[int, str]] = []
+    # (depth, name length, path): depth FIRST. A project like "Claude
+    # skills" clones the same short folder name ("claude-api") once per
+    # language subfolder — under pure length-sorting those buried
+    # duplicates crowded out the actual Desktop shortcut the user meant.
+    # Ranking shallower (closer-to-root) hits first fixes that without
+    # loosening what counts as a match at all.
+    scored: list[tuple[int, int, str]] = []
     scanned = 0
     for root in _search_roots():
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d.lower() not in exclude and not d.startswith(".")]
-            for entry in filenames + dirnames:
+            depth = len(Path(dirpath).relative_to(root).parts)
+            names = dirnames if dirs_only else filenames + dirnames
+            for entry in names:
                 scanned += 1
                 if scanned > 60_000:
                     break
                 low = entry.lower()
                 if all(t in low for t in terms):
-                    # Prefer shorter names: "CV.pdf" over "CV_old_draft_v3.pdf".
-                    scored.append((len(entry), str(Path(dirpath) / entry)))
+                    scored.append((depth, len(entry), str(Path(dirpath) / entry)))
             if scanned > 60_000:
                 break
     scored.sort()
-    return [path for _, path in scored[:limit]]
+    return [path for _, _, path in scored[:limit]]
 
 
 def search_files(query: str, root: str | None = None) -> str:

@@ -22,6 +22,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from jarvis.config import CONFIG  # noqa: E402
 from jarvis.safety import SafetyEngine, Tier  # noqa: E402
 
+# Reflects the policy after real use: only DESTROYS-or-SENDS gates. Announcing
+# an action and waiting 2s is a cost paid on every single use, and it was being
+# paid to scroll and paste — which made the assistant unusable for the very
+# things it is asked to do most. AMBER is now overwrite-in-place only.
 EXPECTED_TIERS = {
     # filesystem.py
     "read_file": Tier.GREEN,
@@ -29,17 +33,17 @@ EXPECTED_TIERS = {
     "search_files": Tier.GREEN,
     "create_file": Tier.GREEN,   # makes something NEW; nothing existing is lost
     "edit_file": Tier.AMBER,
-    "move_file": Tier.AMBER,
-    "rename_file": Tier.AMBER,
-    "copy_file": Tier.AMBER,
+    "move_file": Tier.GREEN,
+    "rename_file": Tier.GREEN,
+    "copy_file": Tier.GREEN,
     "create_folder": Tier.GREEN,  # ditto
     "delete_file": Tier.RED,
     # desktop.py
     "get_window_list": Tier.GREEN,
     "read_screen": Tier.GREEN,
-    "click_element": Tier.AMBER,
-    "type_text": Tier.AMBER,
-    "keyboard_shortcut": Tier.AMBER,
+    "click_element": Tier.GREEN,
+    "type_text": Tier.GREEN,
+    "keyboard_shortcut": Tier.GREEN,
 }
 
 

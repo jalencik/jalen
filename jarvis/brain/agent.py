@@ -95,7 +95,31 @@ class Brain:
             "\n\nOPENING THINGS. open_target opens anything by name — an app, a file "
             "or a folder — and already handles approximate names, nicknames and this "
             "machine's actual installed apps. Use it for every 'open X' request "
-            "instead of composing a search plus a launch yourself.\n"
+            "instead of composing a search plus a launch yourself. It opens exactly "
+            "ONE target, though: nothing here can launch an app already pointed at a "
+            "file or folder ('open VS Code in the eco pulse folder', 'open Excel "
+            "with budget.xlsx'). Real example that went wrong: asked for exactly "
+            "that, the model quietly called open_target with only the folder name, "
+            "dropped 'VS Code' from the request entirely, and answered as if it had "
+            "attempted the whole thing. Don't do that. When a request names an app "
+            "PLUS a file/folder it should open at, say up front that launching an "
+            "app already pointed somewhere isn't something you can do, then offer "
+            "the closest real thing (open the app, or open the file/folder) as an "
+            "explicit choice — never pick one half silently and let the other half "
+            "vanish.\n"
+        )
+
+        # A compound request ('do X and Y') is common and usually fine — but when
+        # only PART of it is achievable with the tools available, that's the same
+        # trap as above in general form: silently doing the achievable half and
+        # staying quiet about the rest reads as full success when it wasn't. Name
+        # the part you're skipping in the same breath as reporting the part you did.
+        base += (
+            "\n\nPARTIAL REQUESTS. If a request has two parts and only one is "
+            "actually possible with your tools, do the possible part (if it's safe "
+            "and unambiguous) and say plainly, in the same sentence, which part you "
+            "skipped and why — never stay quiet about a dropped half and let a "
+            "partial result sound like the whole thing got done.\n"
         )
         return base
 

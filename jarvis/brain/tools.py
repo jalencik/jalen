@@ -134,10 +134,20 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     }),
     # ---- launcher.py --------------------------------------------------------
     "open_target": (
-        "Open anything by name: an application, a file, or a folder. Handles "
-        "approximate names, nicknames and misspellings, and resolves the app "
-        "actually installed on this machine (e.g. 'Telegram' opens AyuGram "
-        "here). Prefer this over open_app/open_folder for any 'open X' request.",
+        "Open exactly ONE thing by name: an application, a file, or a "
+        "folder. Handles approximate names, nicknames and misspellings, and "
+        "resolves the app actually installed on this machine (e.g. "
+        "'Telegram' opens AyuGram here). Prefer this over open_app/"
+        "open_folder for any 'open X' request. IMPORTANT: it takes a single "
+        "target and cannot launch an app already pointed at a file or "
+        "folder — there is no tool anywhere in this set that opens an app "
+        "with a startup argument or working directory (e.g. 'open VS Code "
+        "in the eco pulse folder', 'open Photoshop with image.png'). For "
+        "that phrasing, say plainly that you can't launch the app already "
+        "pointed at that location, then offer the closest real options "
+        "(open the app, or open the file/folder, as two separate actions) "
+        "— never silently call this with only the folder/file name and "
+        "drop the app half of the request as if the whole thing was done.",
         {"name": ("string", "what to open: app name, file name, or full path", True)},
     ),
     "remember_alias": (
@@ -179,17 +189,21 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     # ---- documents.py -----------------------------------------------------
     "read_document": (
         "Extract readable text from a document: plain text, markdown, csv, "
-        "json, code/config files, and .docx/.pptx/.xlsx (read directly as "
-        "the zip-of-XML they are, no extra library needed). PDF and old "
-        "binary Office formats (.doc/.xls/.ppt) aren't supported in this "
-        "environment — no PDF library is installed — and it says so rather "
-        "than returning nothing.",
+        "json, code/config files, .docx/.pptx/.xlsx (read directly as the "
+        "zip-of-XML they are), and .pdf (real text extraction, page by "
+        "page). Call this directly for a PDF — do not assume PDFs are "
+        "unsupported and skip the call. The two things it genuinely can't "
+        "read: old binary Office formats (.doc/.xls/.ppt — pre-2007, not "
+        "the same as .docx/.xlsx/.pptx), and a scanned/image-only PDF with "
+        "no text layer (would need OCR, which isn't installed). Both cases "
+        "return a clear message rather than empty text, so trust what it "
+        "reports back instead of pre-deciding a file won't work.",
         {"path": ("string", "file path", True)},
     ),
     "summarize_document": (
         "Extract a document's text, clearly labelled with its name/path/type, "
-        "so it can be summarised. Same format support as read_document; does "
-        "not attempt to summarise anything itself.",
+        "so it can be summarised. Same format support as read_document — "
+        "including .pdf — does not attempt to summarise anything itself.",
         {"path": ("string", "file path", True)},
     ),
     "search_in_files": (

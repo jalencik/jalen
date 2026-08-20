@@ -244,10 +244,78 @@ def test_bare_search_for_still_means_local_file_search(router):
     assert intent.args["query"] == "resume"  # existing rule strips the leading "my"
 
 
+# --------------------------------------------------------- site navigation
+# "open youtube" / "go to chess.com" must open the SITE, in one router hit,
+# never touching Claude or open_target. This is the exact bug the task
+# called out: no app/file named "youtube" exists on the machine, so before
+# this table existed the phrase fell through to open_target and failed.
+SITE_PHRASES = [
+    ("open youtube", "https://youtube.com"),
+    ("go to youtube", "https://youtube.com"),
+    ("launch youtube", "https://youtube.com"),
+    ("open youtube.com", "https://youtube.com"),
+    ("open chess", "https://chess.com"),
+    ("go to chess.com", "https://chess.com"),
+    ("open instagram", "https://instagram.com"),
+    ("go to instagram", "https://instagram.com"),
+    ("open gmail", "https://mail.google.com"),
+    ("open github", "https://github.com"),
+    ("open claude", "https://claude.ai"),
+    ("open chatgpt", "https://chatgpt.com"),
+    ("open telegram web", "https://web.telegram.org"),
+    ("open whatsapp web", "https://web.whatsapp.com"),
+    ("open linkedin", "https://linkedin.com"),
+    ("open twitter", "https://x.com"),
+    ("open x", "https://x.com"),
+    ("go to reddit", "https://reddit.com"),
+]
+
+
+@pytest.mark.parametrize("phrase,expected_url", SITE_PHRASES)
+def test_known_site_phrasing_routes_to_open_url(router, phrase, expected_url):
+    intent = route(router, phrase)
+    assert intent is not None, f"{phrase!r} missed the router entirely"
+    assert intent.tool == "open_url"
+    assert intent.args["url"] == expected_url
+
+
+def test_open_youtube_does_not_fall_through_to_open_target(router):
+    """Regression test for the exact ordering trap the task described: a
+    known site name must never reach open_target, which would search for an
+    app/file literally named "youtube", find nothing, and report failure."""
+    intent = route(router, "open youtube")
+    assert intent.tool != "open_target"
+
+
+def test_unlisted_domain_still_opens_directly(router):
+    """A domain not in the table is still unambiguous -- open it, don't send
+    it to app/file search."""
+    intent = route(router, "go to some-startup.io")
+    assert intent.tool == "open_url"
+    assert intent.args["url"] == "some-startup.io"
+
+
+def test_open_app_by_name_is_unaffected_by_the_site_table(router):
+    """An ordinary app name (not in the site table, not domain-shaped) must
+    still resolve through open_target exactly as before."""
+    intent = route(router, "open notepad")
+    assert intent.tool == "open_target"
+    assert intent.args["name"] == "notepad"
+
+
+def test_go_to_sleep_is_not_swallowed_by_site_navigation(router):
+    """"sleep" isn't a known site, so the existing Jarvis-sleep rule (which
+    sits earlier) must still win."""
+    assert route_tool(router, "go to sleep") == "jarvis_sleep"
+
+
 # --------------------------------------------------------- every rule points
 # --------------------------------------------------------- at a real tool
 NEW_TOOLS_AND_EXPECTED_TIERS = {
-    "open_url": Tier.AMBER,
+    # open_url was rebalanced to GREEN: "opening a page changes nothing"
+    # (config/safety.yaml). Keep this in lockstep with that file rather
+    # than pinning the pre-rebalance tier.
+    "open_url": Tier.GREEN,
     "empty_recycle_bin": Tier.RED,
     "sign_out": Tier.RED,
 }
@@ -326,6 +394,9 @@ def test_new_fast_paths_do_not_widen_what_asks(router):
                        if engine.classify(t, {}).tier.value != "red"}
     assert not not_confirming, f"these must confirm first: {not_confirming}"
 
-    # keyboard_shortcut carries every clipboard/window/browser rule above —
-    # confirm it's still AMBER (announce + short stop-window), not GREEN.
-    assert engine.classify("keyboard_shortcut", {}).tier is Tier.AMBER
+    # keyboard_shortcut carries every clipboard/window/browser rule above, so
+    # it is the tool most affected by the announce cost: it fires on "scroll
+    # down", "copy that", "paste". As AMBER, each of those first said "keyboard
+    # shortcut, say stop if you don't want that" and waited 2 seconds — which is
+    # what made the assistant unusable. It destroys nothing, so it is GREEN.
+    assert engine.classify("keyboard_shortcut", {}).tier is Tier.GREEN

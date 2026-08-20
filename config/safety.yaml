@@ -22,6 +22,25 @@ green:
     - search_files
     - list_directory
     - list_aliases         # read-only: what nicknames are known
+    # Jarvis's own controls. These never touch the machine — they change
+    # Jarvis's own state — and gating them is absurd: "quit" would announce
+    # "jarvis quit, say stop if you don't want that" and wait 2s before
+    # quitting. They were unclassified, so they inherited AMBER by accident.
+    - jarvis_quit
+    - jarvis_pause
+    - jarvis_resume
+    - jarvis_restart
+    - jarvis_mute
+    - jarvis_unmute
+    - jarvis_sleep
+    - private_mode
+    - set_posture
+    - reload_config
+    - audit_digest
+    - morning_brief
+    - greet
+    - cancel
+    - acknowledge
     - refresh_system_scan  # re-measures disk usage; reads only, deletes nothing
     - screenshot
     - read_screen          # UI accessibility tree
@@ -54,6 +73,23 @@ green:
     - open_target          # opens an app/file/folder. Destroys nothing; closing the
                            # window undoes it. Asking here is pure friction.
     - remember_alias       # stores a name->path note; nothing is executed
+    - type_text            # typing is not destructive
+    - click_element        # clicking a button is what a person does constantly
+    - keyboard_shortcut    # scroll/copy/paste/undo/save/new-tab. Announcing each of
+                           # these and waiting 2s made the assistant unusable: saying
+                           # "scroll down" first said "keyboard shortcut, say stop if
+                           # you don't want that". None of them destroy anything.
+    - open_url             # opening a page changes nothing
+    - close_app            # window closes; the app's own save prompt still protects work
+    - move_file            # the file still exists, at a new path, and it's in the audit log
+    - rename_file          # same
+    - copy_file            # strictly additive
+    - draft_email          # a DRAFT is not a send. send_email stays RED.
+    - draft_message        # same
+    - label_email
+    - archive_email        # archive is not delete; it's recoverable
+    - set_reminder
+    - create_calendar_event
     - create_file          # makes something NEW; nothing existing is lost.
                            # Overwriting is edit_file, which stays gated.
     - create_folder        # ditto
@@ -71,29 +107,17 @@ green:
     - search_in_files       # read-only content search, bounded and never-touch aware
 
 amber:
-  reason: "Changes something, but you can undo it."
+  # Deliberately tiny. Announcing an action and waiting 2 seconds is a real
+  # cost paid on EVERY use, and it was being paid for scrolling and pasting.
+  # The rule that survived contact with real use: only things that destroy
+  # content or reach other people are worth interrupting for. AMBER is now
+  # just overwrite-in-place — everything else is GREEN (runs) or RED (asks).
+  reason: "Overwrites existing content, but the file survives."
   announce_template: "{summary}. Say stop if you don't want that."
   tools:
     - edit_file
-    - move_file
-    - rename_file
-    - copy_file
-    - close_app            # closing can lose unsaved work (a save prompt can appear and
-                           # just sit there), so it announces first. Was unclassified,
-                           # which happened to land on the same tier by accident — an
-                           # accident is not a decision, and the default could change.
-    - type_text            # typing into an app
-    - click_element
-    - keyboard_shortcut
-    - open_url
-    - create_calendar_event
-    - draft_email          # drafting is amber, sending is red
-    - draft_message
-    - label_email
-    - archive_email
     - create_github_issue
     - write_notion_page
-    - set_reminder
 
 red:
   reason: "Irreversible, public, spends money, or speaks as you. (spec F46)"

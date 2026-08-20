@@ -340,3 +340,39 @@ def test_black_tier_is_still_absolute():
     engine = SafetyEngine(CONFIG)
     for tool in ("transfer_funds", "execute_payment", "enter_password", "vps_access"):
         assert engine.classify(tool, {}).blocked is True, tool
+
+
+# --------------------------------------- Jarvis's own controls never gate
+def test_jarvis_self_controls_are_never_gated():
+    """
+    "quit" used to classify as unclassified-AMBER, so it announced
+    "jarvis quit, say stop if you don't want that" and waited 2 seconds
+    before quitting. These change Jarvis's own state, not the machine —
+    gating them is absurd, and the AMBER was inherited by accident rather
+    than decided.
+    """
+    from jarvis.safety import SafetyEngine
+
+    engine = SafetyEngine(CONFIG)
+    controls = ["jarvis_quit", "jarvis_pause", "jarvis_resume", "jarvis_restart",
+                "jarvis_mute", "jarvis_unmute", "jarvis_sleep", "private_mode",
+                "set_posture", "reload_config", "audit_digest", "morning_brief"]
+    gated = {}
+    for tool in controls:
+        verdict = engine.classify(tool, {})
+        if verdict.tier.value != "green" or verdict.detail.get("unclassified"):
+            gated[tool] = verdict.tier.value
+    assert not gated, f"Jarvis's own controls must run instantly: {gated}"
+
+
+@pytest.mark.parametrize("phrase,tool", [
+    ("what can I delete", "cleanup_suggestions"),
+    ("what should I delete", "cleanup_suggestions"),
+    ("clean up my disk", "cleanup_suggestions"),
+    ("what is taking up my space", "disk_report"),
+    ("what's eating my space", "disk_report"),
+])
+def test_disk_cleanup_phrasings_route_locally(router, phrase, tool):
+    """Asked the way a person asks it. These fell through to Claude (3-18s)
+    for a question a local tool answers instantly."""
+    assert route_tool(router, phrase) == tool
