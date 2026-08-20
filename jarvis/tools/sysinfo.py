@@ -116,10 +116,58 @@ def _cached(key: str, compute) -> str:
             return value + _age_note(age)
         return value + _age_note(age) + " I'm re-checking now — ask again in a moment for current figures."
 
-    value = compute()
+    # Nothing cached yet. These scans take 13s (disk) and 41-92s (cleanup)
+    # depending on how cold the filesystem cache is — far too long to make
+    # someone wait mid-conversation. Answer immediately with what we can say
+    # for certain, and compute in the background so the next ask is instant.
+    # prewarm_system_scan() means this branch is normally never hit at all;
+    # it only fires if the question arrives during the first seconds of a
+    # session, before warmup finished.
     with _cache_lock:
-        _cache[key] = (time.monotonic(), value)
-    return value
+        already = key in _refreshing
+        if not already:
+            _refreshing.add(key)
+    if not already:
+        def compute_now() -> None:
+            try:
+                fresh = compute()
+                with _cache_lock:
+                    _cache[key] = (time.monotonic(), fresh)
+            except Exception:
+                pass
+            finally:
+                with _cache_lock:
+                    _refreshing.discard(key)
+
+        threading.Thread(target=compute_now, name=f"sysinfo-first-{key}", daemon=True).start()
+
+    quick = _instant_summary(key)
+    tail = " I'm still measuring the details — ask again in a few seconds for the full picture."
+    if key == "cleanup":
+        # The "nothing gets deleted" reassurance belongs on EVERY cleanup
+        # answer, including this partial one — that promise is the whole
+        # reason this tool is safe to run without asking, and dropping it
+        # from one code path would be exactly the kind of quiet
+        # inconsistency that erodes trust in it.
+        tail += " I'm only reporting sizes; nothing gets deleted unless you tell me to."
+    return quick + tail
+
+
+def _instant_summary(key: str) -> str:
+    """Something true and useful RIGHT NOW, while the real scan runs."""
+    try:
+        drives = _drive_usage()
+    except Exception:
+        return "Give me a moment to check."
+    if not drives:
+        return "Give me a moment to check."
+    parts = []
+    for d in drives[:2]:
+        parts.append(
+            f"your {d['label']} has {_size_str(d['free'])} free out of "
+            f"{_size_str(d['total'])}, {d['percent']:.0f} percent full"
+        )
+    return ("Right now " + "; ".join(parts) + ".")
 
 
 def refresh_system_scan() -> str:
