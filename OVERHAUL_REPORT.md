@@ -5,7 +5,7 @@ terms. Every number here was measured on the real machine, not estimated.
 
 **Verdict: MACHINE-VERIFIED — REQUIRES USER ACCEPTANCE TEST**
 
-Everything I can test by machine passes (172 automated tests). The one thing
+Everything I can test by machine passes (323 automated tests). The one thing
 left is you speaking into the microphone, which I cannot do for you.
 
 ---
@@ -221,6 +221,43 @@ only its own 37 tools. Verified.
 **Also fixed:** "brief me" used to produce total silence; it now reports date,
 time and battery and says plainly that email/calendar need Google connected.
 
+## 6c. Round three — capability build
+
+**Your C: drive is 99% full — 1.5 GB free.** That degrades Windows system-wide
+and is worth fixing today. Jarvis found ~4.4 GB safely reclaimable: npm cache
+2.1 GB, Downloads older than 30 days 1.6 GB, pip cache 445 MB, temp files
+216 MB, recycle bin 76 MB. Ask it *"what can I delete"* for the current list.
+It only ever measures and reports — deleting still needs your spoken yes.
+
+**Reading documents now works, including PDFs.** This needed a new dependency
+(`pypdf` — pure Python, 380 KB, no compiler, safe on your RAM budget). Verified
+on a real 20,000-character PDF in 1.4 s. Two details that mattered: PDFs
+extracted with every word on its own line, which would have tripled the cost of
+handing a document to the AI and sounded like dictation when spoken — that is
+now rejoined into proper prose. And image-only/scanned PDFs are reported as
+needing OCR rather than returned as silently empty.
+
+Also new: real search *inside* file contents (not just filenames), and
+`.docx`/`.pptx`/`.xlsx` reading with no extra dependencies.
+
+**The slow tools are now instant.** Disk and cleanup scans genuinely take 13 s
+and 41 s — unusable for voice. Those numbers barely change minute to minute, so
+results are cached for 10 minutes, refreshed in the background, and pre-warmed
+at startup. Measured: **41 s → 0.00 ms.** If a figure is more than ~90 seconds
+old, Jarvis says so out loud rather than passing it off as current.
+
+**Far more commands run locally.** All of these now resolve in under a
+millisecond instead of a multi-second AI round trip: "scroll down", "copy that",
+"paste", "select all", "undo", "save it", "new tab", "close tab", "go back",
+"refresh the page", "close this window", "make it louder", "lock it",
+"search the web for X", "what's eating my memory", "how much space do I have".
+Every rule was checked to point at a genuinely implemented tool — an earlier bug
+had rules pointing at nothing, which produced silence.
+
+**The orb matches what you asked for:** dark when idle, **blue** when listening,
+**yellow** when executing. It also now shows the last thing it *heard*, so you
+can tell a misheard command from a broken one without opening a terminal.
+
 ## 7. What I could NOT complete
 
 Honest list — these are genuinely blocked or not built.
@@ -275,7 +312,7 @@ thing to report.
 
 ## 9. Current state
 
-- **179 automated tests passing** (134 before this work + 45 new)
+- **323 automated tests passing** (134 before this work)
 - **Health check:** all green, no warnings
 - **Code compiles clean**, no stray processes
 - **5 commits** on `main`, all work committed
