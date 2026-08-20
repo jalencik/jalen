@@ -1,7 +1,7 @@
 """
 Diagnostics. Run this whenever something doesn't work:
 
-    python run.py --check
+    .\jarvis.ps1 check
 
 Tells you exactly which piece is missing, in plain language.
 """
@@ -156,7 +156,11 @@ def main() -> int:
         print(f"{BAD}Config problem: {exc}")
         problems += 1
 
-    print("\n" + ("All good — run: python run.py" if problems == 0
+    # NOT "python run.py": that advice fails twice over on Windows.
+    # PowerShell refuses to run a script from the current folder without a
+    # ".\" prefix, and bare "python" is a different install with none of
+    # this project's packages. The launcher handles both.
+    print("\n" + ("All good — start it with:  .\\jarvis.ps1" if problems == 0
                   else f"{problems} blocking problem(s) above."))
     return 1 if problems else 0
 
