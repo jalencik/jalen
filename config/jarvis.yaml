@@ -215,12 +215,18 @@ ui:
   orb_position: "bottom-right"     # bottom-right | bottom-left | top-right | top-left | remember
   orb_margin: 28
   always_on_top: true
-  click_through_when_idle: true    # so it never blocks a button underneath
+  # Implemented via ctypes (WS_EX_LAYERED | WS_EX_TRANSPARENT on the orb's
+  # own window) so it never blocks a click meant for whatever's underneath.
+  # The style is removed again the instant the orb isn't idle, so it stays
+  # draggable the rest of the time. Windows only; a no-op elsewhere.
+  click_through_when_idle: true
   transcript_window: true          # C15 long content appears here instead of being read out
+  show_transcript: true            # small caption under the orb showing the last thing
+                                    # Jarvis heard (the STT transcript); auto-hides after ~8s
   theme:
-    idle:      "#2b3a4a"
-    listening: "#00d4ff"
-    thinking:  "#f5a623"
+    idle:      "#161c24"           # deliberately dark/near-off — "silent when idle"
+    listening: "#2f8fff"           # BLUE — listening
+    thinking:  "#ffd60a"           # YELLOW — thinking / executing
     speaking:  "#3ddc84"
     blocked:   "#ff4d4f"
 

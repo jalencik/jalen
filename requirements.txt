@@ -47,6 +47,12 @@ PyGithub>=2.9.1
 notion-client>=3.1.0
 httpx>=0.27.0
 
+# --- documents ---
+pypdf>=6.0.0                 # PDF text. Pure Python, ~380KB, no compiler and no
+                             # native dep - which is why it fits the RAM budget.
+                             # Reading PDFs is a stated requirement; without this
+                             # the tool could only apologise.
+
 # --- memory ---
 fastembed>=0.8.0             # local embeddings, 384-dim, no API key, no quota
 sqlite-vec==0.1.9            # pre-v1: pinned on purpose

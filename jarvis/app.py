@@ -166,6 +166,12 @@ class Jarvis:
         def warm_all() -> None:
             warm("stt", lambda: self.stt.warmup())
             warm("tts", lambda: self.speaker.warmup())
+            # Disk/cleanup scans take 13s and 41s cold. Doing them here means
+            # "what's eating my disk" answers instantly the first time it's
+            # asked, instead of after a 41-second silence.
+            warm("sysinfo", lambda: __import__(
+                "jarvis.tools.sysinfo", fromlist=["prewarm_system_scan"]
+            ).prewarm_system_scan())
             if bool(self.cfg.get_path("brain.prewarm", True)):
                 warm("brain", lambda: self._run_coro(self._start_brain()))
 

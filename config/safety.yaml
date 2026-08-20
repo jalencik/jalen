@@ -22,6 +22,7 @@ green:
     - search_files
     - list_directory
     - list_aliases         # read-only: what nicknames are known
+    - refresh_system_scan  # re-measures disk usage; reads only, deletes nothing
     - screenshot
     - read_screen          # UI accessibility tree
     - get_window_list
@@ -44,6 +45,11 @@ green:
     - window_state         # minimise/maximise: same reversibility class as volume_step.
                            # Was unclassified, so it defaulted to AMBER and paid a
                            # mandatory 4s announce-and-wait to minimise a window.
+    - lock_workstation     # your own screen lock, undone with your own password;
+                           # same reversibility class as window_state. Was unclassified
+                           # (silently AMBER, RED under paranoid_first_week) even though
+                           # an existing router rule ("lock the screen") already pointed
+                           # here — found while adding "lock it" as a second phrasing.
     - open_folder          # opens Explorer at a path; reads nothing, changes nothing
     - open_target          # opens an app/file/folder. Destroys nothing; closing the
                            # window undoes it. Asking here is pure friction.
@@ -57,6 +63,12 @@ green:
     - get_system_status
     - recall_memory
     - remember
+    - disk_report           # read-only report of drive/folder sizes
+    - cleanup_suggestions   # read-only report; never deletes anything itself
+    - memory_report         # read-only report of RAM usage
+    - read_document         # extracts text from a file; reads nothing it doesn't return
+    - summarize_document    # ditto, just labelled for the brain to summarise
+    - search_in_files       # read-only content search, bounded and never-touch aware
 
 amber:
   reason: "Changes something, but you can undo it."
@@ -66,6 +78,10 @@ amber:
     - move_file
     - rename_file
     - copy_file
+    - close_app            # closing can lose unsaved work (a save prompt can appear and
+                           # just sit there), so it announces first. Was unclassified,
+                           # which happened to land on the same tier by accident — an
+                           # accident is not a decision, and the default could change.
     - type_text            # typing into an app
     - click_element
     - keyboard_shortcut
@@ -91,6 +107,7 @@ red:
     - delete_email
     - delete_message
     - empty_recycle_bin
+    - sign_out                  # closes every running app; router-coverage addition
     - install_software          # F46
     - uninstall_software
     - run_powershell            # E27 "yes, but ask me first"

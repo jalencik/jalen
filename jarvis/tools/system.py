@@ -286,9 +286,75 @@ def open_folder(path: str) -> str:
         return f"Couldn't open that folder: {exc}"
 
 
+def open_url(url: str) -> str:
+    """
+    Open a URL in the default browser — AMBER (already tiered in
+    config/safety.yaml). The router referenced this tool name for "search
+    the web for X" / "google X" with no implementation behind it at all —
+    this is that missing half, not a new capability being invented.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return "Open what URL?"
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", raw):
+        raw = "https://" + raw
+    try:
+        os.startfile(raw)  # noqa: S606
+        return f"Opening {raw}."
+    except Exception as exc:
+        return f"Couldn't open that URL: {exc}"
+
+
 def lock_workstation() -> str:
     ctypes.windll.user32.LockWorkStation()
     return "Locked."
+
+
+def sign_out() -> str:
+    """
+    Log the current Windows user out — RED. This closes every running app;
+    Windows still prompts individual apps that have unsaved changes before
+    the session actually ends, but that prompt is easy to miss, which is
+    exactly why this tier stops and asks first rather than skipping straight
+    to execution just because the router matched the phrase quickly.
+    """
+    if not IS_WINDOWS:
+        return "Signing out is Windows-only."
+    EWX_LOGOFF = 0x00000000
+    try:
+        ok = ctypes.windll.user32.ExitWindowsEx(EWX_LOGOFF, 0)
+    except Exception as exc:
+        return f"Couldn't sign out: {exc}"
+    if not ok:
+        return f"Couldn't sign out (error {ctypes.GetLastError()})."
+    return "Signing out."
+
+
+def empty_recycle_bin() -> str:
+    """
+    Permanently empty the Recycle Bin — RED (already tiered in
+    config/safety.yaml). Unlike delete_file, there's no second undo after
+    this — it's the step that makes a deleted file actually gone.
+    SHEmptyRecycleBinW is the documented Windows shell API for it, called
+    directly via ctypes; no extra dependency needed.
+    """
+    if not IS_WINDOWS:
+        return "Emptying the Recycle Bin is Windows-only."
+    SHERB_NOCONFIRMATION = 0x00000001
+    SHERB_NOPROGRESSUI = 0x00000002
+    SHERB_NOSOUND = 0x00000004
+    flags = SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND
+    try:
+        result = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, flags)
+    except Exception as exc:
+        return f"Couldn't empty the Recycle Bin: {exc}"
+    # S_OK (0) on success. The documented quirk: a Recycle Bin that's
+    # already empty returns a non-zero HRESULT (E_UNEXPECTED, 0x8000FFFF —
+    # -2147418113 as the signed value ctypes hands back) instead of S_OK.
+    # That's not a real failure, so it's reported as success too.
+    if result in (0, -2147418113):
+        return "Recycle Bin emptied."
+    return f"Couldn't empty the Recycle Bin (error {result})."
 
 
 def focus_window(name: str) -> str:
@@ -384,9 +450,12 @@ REGISTRY = {
     "open_app": open_app,
     "close_app": close_app,
     "open_folder": open_folder,
+    "open_url": open_url,
     "focus_window": focus_window,
     "window_state": window_state,
     "lock_workstation": lock_workstation,
+    "sign_out": sign_out,
+    "empty_recycle_bin": empty_recycle_bin,
     "get_time": get_time,
     "get_date": get_date,
     "get_battery": get_battery,

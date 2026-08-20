@@ -53,6 +53,9 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "open_folder": ("Open a folder in File Explorer.", {
         "path": ("string", "folder path", True),
     }),
+    "open_url": ("Open a URL in the default browser.", {
+        "url": ("string", "the URL to open (a bare domain gets https:// prepended)", True),
+    }),
     "focus_window": ("Bring a window to the foreground by (partial) title.", {
         "name": ("string", "substring of the window title", True),
     }),
@@ -60,6 +63,8 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "state": ("string", "'minimize' or 'maximize'", True),
     }),
     "lock_workstation": ("Lock the screen.", {}),
+    "sign_out": ("Log the current Windows user out. Closes every running app.", {}),
+    "empty_recycle_bin": ("Permanently empty the Recycle Bin. Irreversible.", {}),
     "get_time": ("Current time.", {}),
     "get_date": ("Current date.", {}),
     "get_battery": ("Battery level, if this machine has one.", {}),
@@ -142,6 +147,11 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
          "target": ("string", "full path, or the app name it should mean", True)},
     ),
     "list_aliases": ("List every nickname taught so far.", {}),
+    "refresh_system_scan": (
+        "Force a fresh disk/cleanup scan in the background. Use only when the user says the "
+        "figures look out of date; normal reports already answer from a recent scan.",
+        {},
+    ),
     # ---- memory.py ----------------------------------------------------------
     "remember": ("Store a fact or preference for later recall. Refuses anything that looks like a credential.", {
         "text": ("string", "what to remember", True),
@@ -149,6 +159,46 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "recall_memory": ("Search remembered facts and preferences by meaning, not exact wording.", {
         "query": ("string", "what to recall", True),
     }),
+    # ---- sysinfo.py -----------------------------------------------------------
+    "disk_report": (
+        "Report free space per drive, plus the biggest folders and files in the "
+        "user's Desktop, Documents, Downloads and Temp folders. Read-only.",
+        {},
+    ),
+    "cleanup_suggestions": (
+        "Report specifically safe-to-delete things with real measured sizes: Temp "
+        "files, old Downloads, recycle bin, browser/pip/npm caches. Only suggests "
+        "— never deletes anything; use delete_file for that after confirming.",
+        {"downloads_older_than_days": (
+            "integer", "how old a Downloads file must be to count as stale; defaults to 30", False,
+        )},
+    ),
+    "memory_report": ("Report overall RAM usage and the top processes by memory use.", {
+        "top_n": ("integer", "how many top processes to list; defaults to 5", False),
+    }),
+    # ---- documents.py -----------------------------------------------------
+    "read_document": (
+        "Extract readable text from a document: plain text, markdown, csv, "
+        "json, code/config files, and .docx/.pptx/.xlsx (read directly as "
+        "the zip-of-XML they are, no extra library needed). PDF and old "
+        "binary Office formats (.doc/.xls/.ppt) aren't supported in this "
+        "environment — no PDF library is installed — and it says so rather "
+        "than returning nothing.",
+        {"path": ("string", "file path", True)},
+    ),
+    "summarize_document": (
+        "Extract a document's text, clearly labelled with its name/path/type, "
+        "so it can be summarised. Same format support as read_document; does "
+        "not attempt to summarise anything itself.",
+        {"path": ("string", "file path", True)},
+    ),
+    "search_in_files": (
+        "Find files whose CONTENTS contain a phrase, not just the filename. "
+        "Only reads formats read_document supports, bounded on time/file-count/"
+        "match-count so it can't hang on a large folder.",
+        {"query": ("string", "text to search for inside file contents", True),
+         "folder": ("string", "optional folder to search under; defaults to the configured index paths", False)},
+    ),
 }
 
 
