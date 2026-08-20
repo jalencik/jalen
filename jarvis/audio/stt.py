@@ -39,6 +39,9 @@ class Transcriber:
         self._groq = None
         self._moonshine = None
         self.last_engine = ""
+        # Why the primary was skipped, when it was. Empty on a clean
+        # Groq run. See the note in transcribe().
+        self.last_fallback_reason = ""
 
     # ------------------------------------------------------------------ groq
     def _groq_client(self):
@@ -123,11 +126,30 @@ class Transcriber:
 
         order = [self.primary] + ([self.fallback] if self.fallback != self.primary else [])
         errors: list[str] = []
+        self.last_fallback_reason = ""
         for engine in order:
             try:
                 text = self._via_groq(audio) if engine == "groq" else self._via_moonshine(audio)
                 if text:
                     self.last_engine = engine
+                    # A fallback that WORKS is the dangerous kind of
+                    # failure: the transcript is fine, so nothing looks
+                    # wrong, and the fact that the primary is down never
+                    # reaches anyone. Groq was observed returning
+                    # intermittent 403s ("Access denied. Please check your
+                    # network settings") on roughly two calls in five,
+                    # silently demoting every one of those turns to the
+                    # local tiny model — lower accuracy on real speech, and
+                    # RAM on a machine that has none spare. It had been
+                    # happening invisibly, and the audit log this project
+                    # is diagnosed from had no record of it.
+                    #
+                    # Recording the reason does not fix the network. It
+                    # makes the problem countable, which is the difference
+                    # between "STT feels worse lately" and a line in the
+                    # log saying how often and why.
+                    if engine != self.primary and errors:
+                        self.last_fallback_reason = errors[0]
                     return text
             except Exception as exc:  # network down, quota, model missing
                 errors.append(f"{engine}: {type(exc).__name__}: {exc}")

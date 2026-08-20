@@ -112,6 +112,7 @@ green:
     # every body they return is fenced as UNTRUSTED CONTENT and scanned by
     # SafetyEngine.scan_for_injection() before the brain ever sees it.
     - unread_email_summary  # "summarise my emails" — lists, changes nothing
+    - unread_email_headline # the same count as one spoken sentence
     - google_status         # which account is connected; no message access
     - search_calendar
     - calendar_status

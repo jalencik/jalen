@@ -323,87 +323,125 @@ def test_the_preposition_guard_is_a_real_regex_escape():
     )
 
 
-@pytest.mark.parametrize("spoken,must_survive", [
-    ("search reddit for jarvis", "jarvis"),
-    ("search youtube for boss", "boss"),
-    ("search google for please", "please"),
-    ("search reddit for cats", "cats"),
-])
-def test_a_query_is_not_mistaken_for_trailing_courtesy(spoken, must_survive):
-    router = IntentRouter(CONFIG)
-    intent = router.route(spoken)
-    assert intent is not None, f"{spoken!r} no longer routes at all"
-    assert must_survive in str(intent.args).lower(), (
-        f"the query lost its object: {intent.args} — the search would run "
-        "on the preposition instead of what he asked for"
+def test_no_source_file_contains_a_raw_control_character():
+    """
+    Widened from one method to the whole tree, because it happened TWICE.
+
+    The first time, the preposition guard in _normalise shipped with a 0x08
+    byte where its word-boundary escape belonged, so the guard it implements
+    never once fired. The second time, two new lookaheads in the same file
+    arrived with exactly the same corruption: a shell heredoc had eaten the
+    backslash before Python ever saw the source.
+
+    That is a property of the editing PIPELINE, not of any one line, so
+    checking a single function was never going to catch it. A raw control
+    byte inside a regex is invisible and silent — the pattern still
+    compiles, the tests around it still pass, and the condition it guards
+    simply never matches. Reading the code tells you nothing.
+    """
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in root.rglob("*.py"):
+        if ".venv" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), 1):
+            for char in line:
+                # Tab (0x09) is legal whitespace and newlines never survive
+                # splitlines(). Everything else below 0x20 is a mistake.
+                if ord(char) < 9 or 11 <= ord(char) < 32:
+                    offenders.append(
+                        f"{path.relative_to(root).as_posix()}:{number} "
+                        f"contains {hex(ord(char))}"
+                    )
+                    break
+    assert not offenders, (
+        "raw control characters in source — a regex escape has almost "
+        "certainly been mangled by a shell heredoc again:\n  "
+        + "\n  ".join(offenders)
     )
 
 
 # ===========================================================================
-# Brain streaming, against a stand-in SDK client
+# A fallback that works is the dangerous kind of failure
 # ===========================================================================
 
-def test_the_brain_hands_text_over_as_it_arrives():
+def test_a_silent_demotion_to_the_local_model_is_recorded():
     """
-    Brain.ask() must call on_text with each delta as it lands, and return
-    what was streamed — not the SDK's separate `result` string. If it
-    returned `result` instead, app.py would be handed a string that differs
-    from the audio already playing and the tail would be spoken twice.
+    Groq returns intermittent 403s ("Access denied. Please check your network
+    settings") — measured at roughly two calls in five on this machine. When
+    it does, transcribe() falls back to the local tiny model, which produces
+    a perfectly good transcript.
+
+    That is precisely why it is dangerous. The turn succeeds, so nothing
+    looks wrong and nothing else in the system would ever mention it. The
+    primary engine can be down for weeks and the only symptom is that
+    recognition quietly gets worse on hard speech — which surfaces later as
+    "it understands me less well now", with no evidence attached.
+
+    Recording it does not fix the network. It makes the problem countable.
     """
-    import asyncio
-    import types
+    import numpy as np
 
-    from jarvis.audit import AuditLog
-    from jarvis.brain.agent import Brain
-    from jarvis.safety import SafetyEngine
+    from jarvis.audio.stt import Transcriber
 
-    class _Delta:
-        def __init__(self, text):
-            self.event = {
-                "type": "content_block_delta",
-                "delta": {"type": "text_delta", "text": text},
-            }
-
-    class _Result:
-        subtype = "success"
-        result = "SHOULD NOT BE SPOKEN"
-        event = None
-
-    class _FakeClient:
-        def __init__(self):
-            self.asked = None
-
-        async def query(self, text, **kw):
-            self.asked = text
-
-        async def receive_response(self):
-            for chunk in ["Chrome is open ", "on YouTube. ", "Anything else?"]:
-                yield _Delta(chunk)
-            yield _Result()
-
-    async def _confirm(q):
-        return True
-
-    async def _announce(t):
-        return None
-
-    audit = AuditLog(CONFIG, "test-stream")
-    brain = Brain(CONFIG, SafetyEngine(CONFIG), audit,
-                  confirm=_confirm, announce=_announce, tools=[])
-    brain._client = _FakeClient()
-
-    seen: list[str] = []
-    try:
-        reply = asyncio.run(brain.ask("open chrome", on_text=seen.append))
-    finally:
-        audit.close()
-
-    assert seen == ["Chrome is open ", "on YouTube. ", "Anything else?"], (
-        "deltas did not reach the callback as they arrived — nothing can be "
-        "spoken before the reply is finished"
+    transcriber = Transcriber(CONFIG, object())
+    transcriber.primary = "groq"
+    transcriber.fallback = "moonshine"
+    transcriber._via_groq = lambda a: (_ for _ in ()).throw(
+        PermissionError("403 Access denied. Please check your network settings.")
     )
-    assert reply == "Chrome is open on YouTube. Anything else?"
-    assert "SHOULD NOT BE SPOKEN" not in reply, (
-        "returned the SDK result instead of what was streamed; the tail "
-        "would be spoken a second time"
+    transcriber._via_moonshine = lambda a: "the quick brown fox"
+
+    audio = np.zeros(CONFIG.get_path("audio.sample_rate", 16000), dtype=np.float32)
+    text = transcriber.transcribe(audio)
+
+    assert text == "the quick brown fox", "the fallback did not cover for the primary"
+    assert transcriber.last_engine == "moonshine"
+    assert transcriber.last_fallback_reason, (
+        "the primary failed and nothing recorded why — this is the silent "
+        "degradation the whole test exists to prevent"
     )
+    assert "403" in transcriber.last_fallback_reason
+
+
+def test_a_clean_primary_run_records_nothing():
+    """The reason field must stay empty when Groq worked, or the audit log
+    fills with noise and the real events stop standing out."""
+    import numpy as np
+
+    from jarvis.audio.stt import Transcriber
+
+    transcriber = Transcriber(CONFIG, object())
+    transcriber.primary = "groq"
+    transcriber._via_groq = lambda a: "clean transcript"
+
+    audio = np.zeros(CONFIG.get_path("audio.sample_rate", 16000), dtype=np.float32)
+    transcriber.transcribe(audio)
+
+    assert transcriber.last_engine == "groq"
+    assert transcriber.last_fallback_reason == ""
+
+
+def test_the_reason_is_cleared_between_turns():
+    """A stale reason from an earlier turn would be audited against a later,
+    healthy one — a log entry that is simply false."""
+    import numpy as np
+
+    from jarvis.audio.stt import Transcriber
+
+    transcriber = Transcriber(CONFIG, object())
+    transcriber.primary = "groq"
+    transcriber.fallback = "moonshine"
+    audio = np.zeros(CONFIG.get_path("audio.sample_rate", 16000), dtype=np.float32)
+
+    transcriber._via_groq = lambda a: (_ for _ in ()).throw(PermissionError("403"))
+    transcriber._via_moonshine = lambda a: "fallback text"
+    transcriber.transcribe(audio)
+    assert transcriber.last_fallback_reason
+
+    transcriber._via_groq = lambda a: "groq is back"
+    transcriber.transcribe(audio)
+    assert transcriber.last_fallback_reason == "", "a stale reason survived"

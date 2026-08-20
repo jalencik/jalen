@@ -294,6 +294,13 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "what comes back. Read-only.",
         {"max_results": ("integer", "how many to list; defaults to 10, max 25", False)},
     ),
+    "unread_email_headline": (
+        "Unread mail as ONE short spoken sentence — a count and the first "
+        "few senders, no subjects and no message ids. Use this when he just "
+        "wants to know whether anything came in. Use unread_email_summary "
+        "instead when you need to pick a message out to read.",
+        {"max_results": ("integer", "how many to count; defaults to 5", False)},
+    ),
     "read_email": (
         "Read ONE message in full. Accepts a Gmail message id, or a search "
         "like 'from:rodion' — spoken requests name a person, not an id, so "

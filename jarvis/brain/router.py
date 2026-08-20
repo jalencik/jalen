@@ -414,6 +414,79 @@ def _rules() -> list[Rule]:
         (R(r"^(?:search the web for|search google for|google) (.+)$", re.I),
          "open_url", lambda m: {"url": _web_search_url(m.group(1).strip())}, None),
 
+        # ---- Gmail / Calendar / Telegram: answers, not summaries ------------
+        # The router's contract is turns that need NO model at all, so the
+        # test for belonging here is simple: is the tool's own output already
+        # the spoken answer?
+        #
+        # These pass. read_calendar returns "2 event(s) on Friday 21 August:
+        # - 14:00 Dentist", which is what you would say out loud anyway.
+        #
+        # RESEARCH DELIBERATELY DOES NOT. web_search returns fenced results
+        # with URLs; routing "research X" here would have Jarvis read a list
+        # of links aloud instead of answering the question. Synthesising
+        # across sources is exactly what the brain is for, so research stays
+        # on the brain path on purpose — faster there would mean worse.
+        (R(r"^(?:what(?:'s|s| is| have i got)?)\s*(?:on |in )?(?:my )?"
+           r"calendar(?: for)?(?: today)?$", re.I),
+         "read_calendar", lambda m: {"days_ahead": 0}, None),
+        (R(r"^(?:what(?:'s|s| is| have i got)?)\s*(?:on |in )?(?:my )?"
+           r"calendar(?: for)? tomorrow$", re.I),
+         "read_calendar", lambda m: {"days_ahead": 1}, None),
+        (R(r"^what(?:'s| is| do i have) on (?:today|for today)$", re.I),
+         "read_calendar", lambda m: {"days_ahead": 0}, None),
+        (R(r"^what(?:'s| is| do i have) on tomorrow$", re.I),
+         "read_calendar", lambda m: {"days_ahead": 1}, None),
+
+        (R(r"^(?:any |do i have any |check (?:my )?)?"
+           r"(?:new |unread )?(?:e-?mails?|mail)(?: yet| today)?\??$", re.I),
+         "unread_email_headline", lambda m: {"max_results": 5}, None),
+        (R(r"^how many (?:unread )?(?:e-?mails?|mail)(?: do i have)?\??$", re.I),
+         "unread_email_headline", lambda m: {"max_results": 5}, None),
+
+        (R(r"^(?:my )?(?:recent )?telegram chats?$", re.I),
+         "list_telegram_chats", lambda m: {"limit": 15}, None),
+        (R(r"^(?:read|show|check) (?:my )?telegram (?:from |with )(.+)$", re.I),
+         "read_telegram", lambda m: {"chat": m.group(1).strip()}, None),
+
+        # ---- connection status: plainly a fact, no thinking required --------
+        (R(r"^(?:is (?:my )?)?(?:google|gmail|e-?mail) (?:connected|status|working)\??$", re.I),
+         "google_status", lambda m: {}, None),
+        (R(r"^(?:is (?:my )?)?telegram (?:connected|status|signed in|working)\??$", re.I),
+         "telegram_status", lambda m: {}, None),
+        (R(r"^(?:is )?claude code (?:installed|status|there|available)\??$", re.I),
+         "claude_code_status", lambda m: {}, None),
+
+        # ---- handing a job to Claude Code -----------------------------------
+        # Passed through verbatim, which is the one place raw dictation is
+        # genuinely fine: Claude Code interprets the request itself, so
+        # sending it through the brain first to be tidied would add a
+        # round-trip to reword a sentence its recipient was going to
+        # interpret anyway. A request naming a FOLDER as well is not matched
+        # here on purpose -- resolving "the eco pulse folder" out of a spoken
+        # sentence is the brain's job, and picking the wrong repository for
+        # an autonomous agent is expensive.
+        # Order matters: the "use cowork" form must be tried BEFORE the
+        # generic one, or the generic `to (.+)` swallows the whole phrase
+        # and "use cowork on the eco pulse folder" becomes the prompt
+        # instead of selecting the agent. Rules are matched top-down and
+        # first match wins.
+        # Both forms refuse the sentence when it mentions a folder, a repo or
+        # a directory. Without that guard, "use cowork on the eco pulse
+        # folder" routes here with prompt="the eco pulse folder" -- handing
+        # an autonomous agent a LOCATION as its task, in whatever directory
+        # Jarvis happened to be started from. Those sentences go to the
+        # brain, which resolves the folder properly and can ask which one it
+        # meant. Starting a coding agent in the wrong repository is the one
+        # mistake here worth a round-trip to avoid.
+        (R(r"^(?:ask|tell) claude(?: code)? to use (cowork|code) (?:on |for |to )?"
+           r"(?!.*\b(?:folder|directory|repo|repository|project)\b)(.+)$", re.I),
+         "ask_claude_code",
+         lambda m: {"agent": m.group(1).strip(), "prompt": m.group(2).strip()}, None),
+        (R(r"^(?:ask|tell) claude(?: code)? to "
+           r"(?!.*\b(?:folder|directory|repo|repository|project)\b)(.+)$", re.I),
+         "ask_claude_code", lambda m: {"prompt": m.group(1).strip()}, None),
+
         # ---- files: create / rename / copy ----------------------------------
         # "make me a new folder called Projects" / "create a file called
         # notes.txt" — a bare name with no path is what people actually say,
@@ -482,7 +555,15 @@ def _rules() -> list[Rule]:
          "cleanup_suggestions", n, None),
 
         # ---- files: cheap paths --------------------------------------------
-        (R(r"^(find|search for|where is|locate) (?:my |the )?(?:file |document |folder |project )?(.+?)(?: (?:file|folder|project))?$", re.I),
+        # "find out about X" is never a file search — it means "go and
+        # learn something", which is the brain's job now that web_search
+        # actually reads pages. Without this exclusion, "find out about the
+        # Horizon deadline" searched his DISK for a file called "out about
+        # the horizon deadline" and reported nothing, which reads as Jarvis
+        # being useless at the exact moment he asked it to research
+        # something. Pre-existing; only visible once research existed as a
+        # real alternative.
+        (R(r"^(find(?! out\b)|search for|where is|locate) (?:my |the )?(?:file |document |folder |project )?(.+?)(?: (?:file|folder|project))?$", re.I),
          "search_files", lambda m: {"query": m.group(2).strip()}, None),
 
 

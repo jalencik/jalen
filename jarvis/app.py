@@ -629,25 +629,16 @@ class Jarvis:
     # taking the whole brief down with it.
 
     def _brief_email(self) -> str:
+        # Same sentence the "any new emails?" router turn speaks — see
+        # gmail.unread_email_headline. Deliberately one implementation: two
+        # near-identical summarisers drift, and the one nobody is looking at
+        # is the one that ends up wrong.
         try:
             from .tools import gmail
 
-            summary = gmail.unread_email_summary(max_results=5)
+            return gmail.unread_email_headline(max_results=5)
         except Exception as exc:
             return f"I couldn't reach your email ({type(exc).__name__})."
-        if summary.startswith("No unread"):
-            return "No unread mail."
-        senders = [
-            line.split("<")[0].strip(" -")
-            for line in summary.splitlines()
-            if line.startswith("- ")
-        ]
-        count = len(senders)
-        if not count:
-            return "No unread mail."
-        who = ", ".join(senders[:3])
-        more = f" and {count - 3} more" if count > 3 else ""
-        return f"{count} unread email{'s' if count != 1 else ''}, from {who}{more}."
 
     def _brief_calendar(self) -> str:
         try:
@@ -839,6 +830,20 @@ class Jarvis:
                 if not text:
                     self.orb.set_state("idle")
                     continue
+
+                # The primary engine failed and the fallback covered for it.
+                # Worth one audit line: the turn succeeded, so nothing else
+                # would ever mention it, and a silent demotion to the local
+                # model is exactly the kind of quiet degradation that gets
+                # reported months later as "it understands me less well now".
+                if self.stt.last_fallback_reason:
+                    self.audit.write(
+                        "system",
+                        summary=(
+                            f"stt fell back to {self.stt.last_engine} — "
+                            f"{self.stt.last_fallback_reason[:160]}"
+                        ),
+                    )
 
                 # The utterance closed on the FAST threshold. If the words
                 # say he is mid-sentence ("...open chrome and"), put the

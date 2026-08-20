@@ -415,11 +415,8 @@ def test_a_connected_brief_actually_contains_the_email(monkeypatch):
     from jarvis.app import Jarvis
     from jarvis.tools import gcalendar, gmail
 
-    monkeypatch.setattr(gmail, "unread_email_summary", lambda max_results=5: (
-        "3 unread message(s):\n"
-        "- Kevin Zhu <kevin@x.org> — Lecture Sunday\n  snippet\n  [id: 1]\n"
-        "- Roni Rosenfeld <roni@cmu.edu> — Re: forecasting\n  snippet\n  [id: 2]\n"
-        "- LinkedIn <no@reply> — Add a badge\n  snippet\n  [id: 3]"
+    monkeypatch.setattr(gmail, "unread_email_headline", lambda max_results=5: (
+        "3 unread emails, from Kevin Zhu, Roni Rosenfeld, LinkedIn."
     ))
     monkeypatch.setattr(gcalendar, "read_calendar", lambda days_ahead=0: (
         "1 event(s) on Friday 21 August:\n- 14:00  Dentist"
@@ -431,7 +428,7 @@ def test_a_connected_brief_actually_contains_the_email(monkeypatch):
     finally:
         jarvis.shutdown()
 
-    assert "3 unread" in spoken, f"the brief dropped email silently: {spoken!r}"
+    assert "3 unread emails" in spoken, f"the brief dropped email silently: {spoken!r}"
     assert "Kevin Zhu" in spoken
     assert "Dentist" in spoken, f"the brief dropped the calendar silently: {spoken!r}"
     assert "can't include" not in spoken
@@ -449,7 +446,7 @@ def test_an_unreachable_google_degrades_to_one_clause(monkeypatch):
     def _boom(*a, **k):
         raise ConnectionError("network down")
 
-    monkeypatch.setattr(gmail, "unread_email_summary", _boom)
+    monkeypatch.setattr(gmail, "unread_email_headline", _boom)
     monkeypatch.setattr(gcalendar, "read_calendar", _boom)
 
     jarvis = Jarvis()
@@ -467,8 +464,8 @@ def test_an_empty_inbox_says_so_rather_than_staying_quiet(monkeypatch):
     from jarvis.app import Jarvis
     from jarvis.tools import gcalendar, gmail
 
-    monkeypatch.setattr(gmail, "unread_email_summary",
-                        lambda max_results=5: "No unread mail in the inbox.")
+    monkeypatch.setattr(gmail, "unread_email_headline",
+                        lambda max_results=5: "No unread mail.")
     monkeypatch.setattr(gcalendar, "read_calendar",
                         lambda days_ahead=0: "Nothing on the calendar for Friday 21 August.")
 
@@ -480,3 +477,48 @@ def test_an_empty_inbox_says_so_rather_than_staying_quiet(monkeypatch):
 
     assert "No unread mail" in spoken
     assert "Nothing on your calendar today" in spoken
+
+
+def test_the_brief_and_the_router_speak_the_same_sentence(monkeypatch):
+    """
+    "any new emails?" is a router turn and the morning brief is a local
+    handler, and both need the identical spoken summary. They were two
+    near-identical implementations for about an hour, which is exactly how
+    the one nobody is looking at ends up wrong. One function, two callers.
+
+    Note the double patch. jarvis.tools.REGISTRY captures the function
+    OBJECT at import time, so patching gmail.unread_email_headline moves
+    only the callers that look the attribute up at call time (the brief
+    does). Tool dispatch goes through the registry and would still have hit
+    the live account — which is exactly what happened when this test was
+    first written, and it is worth knowing before writing any other test
+    that thinks it has stubbed a tool out.
+    """
+    from jarvis import tools as jarvis_tools
+    from jarvis.app import Jarvis
+    from jarvis.brain.router import IntentRouter
+    from jarvis.tools import gcalendar, gmail
+
+    def _fake(max_results=5):
+        return "2 unread emails, from A, B."
+
+    monkeypatch.setattr(gmail, "unread_email_headline", _fake)
+    monkeypatch.setitem(jarvis_tools.REGISTRY, "unread_email_headline", _fake)
+    monkeypatch.setattr(gcalendar, "read_calendar",
+                        lambda days_ahead=0: "Nothing on the calendar for Friday.")
+
+    router = IntentRouter(CONFIG)
+    intent = router.route("any new emails")
+    assert intent.tool == "unread_email_headline"
+
+    jarvis = Jarvis()
+    try:
+        from_router = jarvis.handle_local(intent)
+        from_brief = _brief(jarvis)
+    finally:
+        jarvis.shutdown()
+
+    assert from_router == "2 unread emails, from A, B."
+    assert from_router in from_brief, (
+        "the brief and the router turn produced different sentences"
+    )

@@ -209,6 +209,54 @@ def unread_email_summary(max_results: int = 10) -> str:
     return f"{len(lines)} unread message(s):\n" + "\n".join(lines)
 
 
+def unread_email_headline(max_results: int = 5) -> str:
+    """
+    Unread mail as ONE spoken sentence, not a list.
+
+    unread_email_summary is the right shape for the brain — sender, subject,
+    snippet and a message id per row, so it can pick one to read. It is the
+    wrong shape for a voice answer: read aloud, "[id: 1a0212da312c7ebe]"
+    becomes sixteen spoken hex characters, three times over.
+
+    This exists because "any new emails?" is a router turn — it reaches no
+    model at all, so whatever comes back IS what gets spoken. A router rule
+    is only justified when the tool's own output is already the answer, and
+    for the list form it plainly wasn't.
+
+    Shared with app.py's morning brief, which needs exactly the same
+    sentence. One implementation, two callers.
+    """
+    _enabled()
+    service = gmail_service()
+    ids = _messages(service, "is:unread in:inbox", max_results)
+    if not ids:
+        return "No unread mail."
+
+    senders = []
+    for item in ids:
+        msg = (
+            service.users()
+            .messages()
+            .get(userId="me", id=item["id"], format="metadata",
+                 metadataHeaders=["From"])
+            .execute()
+        )
+        raw = _readable(_header(msg.get("payload") or {}, "From"))
+        # "Kevin Zhu <kevin@algoverse.org>" -> "Kevin Zhu". A spoken address
+        # is unbearable; the display name is what he'd recognise anyway.
+        name = raw.split("<")[0].strip().strip('"') or raw
+        if name:
+            senders.append(name)
+
+    count = len(ids)
+    plural = "s" if count != 1 else ""
+    if not senders:
+        return f"{count} unread email{plural}."
+    who = ", ".join(senders[:3])
+    more = f" and {count - 3} more" if count > 3 else ""
+    return f"{count} unread email{plural}, from {who}{more}."
+
+
 def read_email(query: str) -> str:
     """
     Read one message in full. `query` may be a Gmail message id, or a search
@@ -307,6 +355,7 @@ def google_status() -> str:
 REGISTRY: dict[str, Any] = {
     "search_email": search_email,
     "unread_email_summary": unread_email_summary,
+    "unread_email_headline": unread_email_headline,
     "read_email": read_email,
     "draft_email": draft_email,
     "send_email": send_email,
