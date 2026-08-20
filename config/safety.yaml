@@ -72,6 +72,7 @@ green:
     - open_folder          # opens Explorer at a path; reads nothing, changes nothing
     - open_target          # opens an app/file/folder. Destroys nothing; closing the
                            # window undoes it. Asking here is pure friction.
+    - open_in              # same, with the app pointed at a file/folder
     - remember_alias       # stores a name->path note; nothing is executed
     - type_text            # typing is not destructive
     - click_element        # clicking a button is what a person does constantly

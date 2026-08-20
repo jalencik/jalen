@@ -222,6 +222,21 @@ def _rules() -> list[Rule]:
         (R(r"^turn (?:the )?volume (up|down)(?: a (?:bit|little))?$", re.I),
          "volume_step", lambda m: {"direction": m.group(1).lower()}, None),
 
+        # "open chrome and go to youtube" — a COMPOUND command. The open_app
+        # catch-all below is greedy, so it swallowed the whole phrase and
+        # tried to launch an app literally named "chrome and go to youtube",
+        # which of course does not exist. Browser + site is the common shape
+        # and resolves to one action: open the site (the browser opens with
+        # it). Anything else compound goes to the brain, which can sequence.
+        (R(r"^(?:open|launch|start)\s+(?:chrome|browser|google chrome|edge|firefox)\s*(?:,)?\s*(?:and\s+)?(?:go\s+to|open|visit|navigate\s+to)\s+(.+)$", re.I),
+         "open_url", lambda m: {"url": m.group(1).strip()}, None),
+
+        # "open vs code in the eco pulse folder" / "open excel with budget.xlsx".
+        # Must sit ABOVE the greedy open catch-all, which otherwise tries to
+        # launch an app literally named "vs code in the eco pulse folder".
+        (R(r"^(?:open|launch|start|run)\s+(.+?)\s+(?:in|with|on|at)\s+(?:the\s+)?(.+?)(?:\s+(?:folder|directory|project))?$", re.I),
+         "open_in", lambda m: {"app": m.group(1).strip(), "target": m.group(2).strip()}, None),
+
         # ---- windows and apps ----------------------------------------------
         # NOTE: the folder rules must come BEFORE the open_app catch-all below.
         # "^open (?:up )?(.+)$" matches literally any "open X", so when it sat

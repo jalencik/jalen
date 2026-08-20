@@ -323,6 +323,74 @@ def _startfile(target: str) -> None:
         subprocess.Popen(["xdg-open", target])
 
 
+def open_in(app: str, target: str) -> str:
+    """
+    Launch an app already pointed at a file or folder — GREEN.
+
+    "open VS Code in the eco pulse folder", "open Excel with budget.xlsx".
+    Before this existed the request had nowhere to go: the greedy open rule
+    swallowed the whole phrase and tried to launch an app literally named
+    "vs code in the eco pulse folder", and the brain's own fallback was to
+    silently drop half the request and answer as if it had done all of it.
+
+    Windows launches an app with a document by passing the path as the first
+    argument — the same thing "Open with" does.
+    """
+    app_target, matched = resolve_app(app)
+    if app_target is None:
+        return f"I couldn't find an app called {app} on this machine."
+
+    where = Path(os.path.expandvars(os.path.expanduser((target or "").strip().strip('"'))))
+    if not where.exists():
+        hits = find_files(target)
+        if not hits:
+            return f"I couldn't find {target}."
+        # Prefer a folder when the phrasing said "folder", else the best hit.
+        folders = [h for h in hits if Path(h).is_dir()]
+        chosen = folders[0] if ("folder" in (target or "").lower() and folders) else hits[0]
+        where = Path(chosen)
+
+    launcher_path = app_target
+    if launcher_path.endswith(".lnk"):
+        # A .lnk can't take arguments directly; resolve it to the real exe.
+        resolved = _resolve_lnk_target(launcher_path)
+        if resolved:
+            launcher_path = resolved
+
+    # A bare name like "code" is a shell wrapper (code.cmd), not an
+    # executable Popen can launch directly — it fails with WinError 2.
+    # shutil.which resolves it to the real file, extension included.
+    if not Path(launcher_path).exists():
+        which = shutil.which(launcher_path)
+        if which:
+            launcher_path = which
+
+    try:
+        # .cmd/.bat wrappers (VS Code ships code.cmd) need a shell to run.
+        if launcher_path.lower().endswith((".cmd", ".bat")):
+            subprocess.Popen(f'"{launcher_path}" "{where}"', shell=True, close_fds=True)
+        else:
+            subprocess.Popen([launcher_path, str(where)], shell=False, close_fds=True)
+    except Exception as exc:
+        return f"Couldn't open {matched or app} at {where.name}: {exc}"
+
+    if _appeared(app, matched, launcher_path):
+        return f"Opening {matched or app} at {where.name}."
+    return f"I started {matched or app} but nothing came up."
+
+
+def _resolve_lnk_target(lnk_path: str) -> str | None:
+    """The .exe a Start Menu shortcut points at, so it can take arguments."""
+    try:
+        import win32com.client
+
+        shell = win32com.client.Dispatch("WScript.Shell")
+        target = shell.CreateShortcut(lnk_path).TargetPath
+        return target if target and Path(target).exists() else None
+    except Exception:
+        return None
+
+
 def open_target(name: str) -> str:
     """
     Open whatever the user meant: an app, a file, or a folder — AMBER.
@@ -538,6 +606,7 @@ def search_files(query: str, root: str | None = None) -> str:
 
 REGISTRY: dict[str, Any] = {
     "open_target": open_target,
+    "open_in": open_in,
     "remember_alias": remember_alias,
     "list_aliases": list_aliases,
 }

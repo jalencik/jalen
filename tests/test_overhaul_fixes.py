@@ -460,3 +460,46 @@ def test_long_replies_are_not_cached():
     speaker._render = lambda s: (np.zeros(10, dtype=np.float32), 24000)
     speaker._render_cached("x" * (speaker.CACHEABLE_MAX_CHARS + 50))
     assert len(speaker._audio_cache) == 0
+
+
+# ------------------------------------------- compound / app-at-location
+@pytest.mark.parametrize("phrase", [
+    "open chrome and go to youtube",
+    "open chrome and go to chess",
+    "launch chrome and open instagram",
+])
+def test_browser_plus_site_opens_the_site(router, phrase):
+    """The greedy open catch-all swallowed the whole phrase and tried to
+    launch an app literally named "chrome and go to youtube"."""
+    intent = router.route(phrase)
+    assert intent.tool == "open_url"
+
+
+@pytest.mark.parametrize("phrase,app,target", [
+    ("open vs code in the eco pulse folder", "vs code", "eco pulse"),
+    ("open excel with budget.xlsx", "excel", "budget.xlsx"),
+])
+def test_app_at_a_location_parses_both_halves(router, phrase, app, target):
+    """
+    "open VS Code in the eco pulse folder" had nowhere to go: the greedy
+    rule tried to launch an app by that entire name, and the brain's
+    fallback was to silently drop half the request and answer as though it
+    had done all of it.
+    """
+    intent = router.route(phrase)
+    assert intent.tool == "open_in"
+    assert intent.args["app"] == app
+    assert intent.args["target"] == target
+
+
+def test_plain_open_still_goes_to_open_target(router):
+    """The new rules must not steal simple opens."""
+    assert route_tool(router, "open chrome") == "open_target"
+    assert route_tool(router, "open my cv") == "open_target"
+
+
+def test_open_in_reports_missing_app_and_target_honestly():
+    from jarvis.tools.launcher import open_in
+
+    assert "couldn't find" in open_in("zzz_no_app_9x7", "eco pulse").lower()
+    assert "couldn't find" in open_in("notepad", "zzz_no_file_9x7").lower()

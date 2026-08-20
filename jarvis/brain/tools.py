@@ -150,6 +150,13 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "drop the app half of the request as if the whole thing was done.",
         {"name": ("string", "what to open: app name, file name, or full path", True)},
     ),
+    "open_in": (
+        "Launch an application already pointed at a file or folder, e.g. VS Code opened "
+        "on a project folder, or Excel opened with a spreadsheet. Use this whenever a "
+        "request names BOTH an app and a place - never call open_target with just one half.",
+        {"app": ("string", "the application name", True),
+         "target": ("string", "the file or folder to open it at", True)},
+    ),
     "remember_alias": (
         "Teach a nickname for an app, file or folder so it can be opened by "
         "that name later. Persists across restarts.",
