@@ -5,7 +5,7 @@ terms. Every number here was measured on the real machine, not estimated.
 
 **Verdict: MACHINE-VERIFIED — REQUIRES USER ACCEPTANCE TEST**
 
-Everything I can test by machine passes (323 automated tests). The one thing
+Everything I can test by machine passes (570 automated tests). The one thing
 left is you speaking into the microphone, which I cannot do for you.
 
 ---
@@ -258,6 +258,50 @@ had rules pointing at nothing, which produced silence.
 **yellow** when executing. It also now shows the last thing it *heard*, so you
 can tell a misheard command from a broken one without opening a terminal.
 
+## 6d. Round four — "execute without questioning"
+
+**The confirmations are gone.** Every UI action was announcing itself and
+waiting 2 seconds first. Saying *"scroll down"* produced *"keyboard shortcut,
+say stop if you don't want that"* — pause — then scrolled. Same for copy,
+paste, undo, save, new tab, go back, typing, clicking, opening a web page.
+Worse, **"quit" did it too**: it announced *"jarvis quit, say stop if you don't
+want that"* and waited before quitting, because Jarvis's own controls had never
+been categorised and inherited the cautious default by accident.
+
+Now only **destroying or sending** ever asks. Verified in both directions:
+17/17 destructive tools still stop and ask, 11/11 refused tools still refuse,
+protected folders still blocked, zero uncategorised tools.
+
+**Misspellings work.** The matcher was too loose in a dangerous way — it
+silently opened the *wrong* app rather than failing: "claude" opened VS Code,
+"zoom" opened Zotero, "word" opened WordPad instead of Word. Tightened and
+stress-tested against 34 nonsense words with zero false matches. Measured now:
+
+| You say | It opens |
+|---|---|
+| "telegran", "igram", "my telegram" | **AyuGram** |
+| "chrom" | Chrome |
+| "cap cut" | CapCut |
+| "word" | Word 2016 (not WordPad) |
+| "banana", "zzznope", uninstalled apps | nothing — says so honestly |
+
+**Command coverage went 70% → 100%** on a 90-phrase benchmark of real
+phrasing. Web navigation is local now too: "open youtube", "go to chess",
+"open instagram" resolve in ~0.1 ms instead of a multi-second AI round trip.
+
+**Measured end-to-end through the real app**, no confirmations, nothing mocked:
+
+| Command | Time | Result |
+|---|---|---|
+| "what time is it" | 0.02 s | "It's 7:06 AM." |
+| "open notepad" | 0.10 s | "Opening notepad." |
+| "what's my battery" | 0.02 s | "Battery is at 75 percent." |
+| "scroll down" | 1.16 s | scrolled |
+| **"open telegran"** *(misspelled)* | **0.73 s** | **"Opening ayugram."** |
+| "minimize this window" | 0.81 s | minimised |
+
+**570 automated tests** (was 134 at the start of this work).
+
 ## 7. What I could NOT complete
 
 Honest list — these are genuinely blocked or not built.
@@ -312,7 +356,7 @@ thing to report.
 
 ## 9. Current state
 
-- **323 automated tests passing** (134 before this work)
+- **570 automated tests passing** (134 before this work)
 - **Health check:** all green, no warnings
 - **Code compiles clean**, no stray processes
 - **5 commits** on `main`, all work committed
