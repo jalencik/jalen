@@ -118,6 +118,8 @@ green:
     - telegram_status       # which account is signed in
     - list_telegram_chats   # chat names and unread counts, no message bodies
     - search_telegram       # searches his OWN messages
+    - voice_guide           # reads his own skill file off local disk
+    - claude_code_status    # reports whether a CLI is installed; runs nothing
 
 amber:
   # Deliberately tiny. Announcing an action and waiting 2 seconds is a real
@@ -131,6 +133,14 @@ amber:
     - edit_file
     - create_github_issue
     - write_notion_page
+    # Starts an autonomous coding agent, with its own tool access, on his
+    # machine. GREEN would be too casual for that. But RED — a spoken
+    # "confirm?" every time he asks Claude to look at something — is exactly
+    # the friction that made the earlier build unusable, and Claude Code
+    # runs its OWN permission prompts for anything destructive. AMBER is the
+    # honest middle: he hears which folder and which prompt, and has two
+    # seconds to say stop.
+    - ask_claude_code
 
 red:
   reason: "Irreversible, public, spends money, or speaks as you. (spec F46)"

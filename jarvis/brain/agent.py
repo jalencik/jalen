@@ -109,6 +109,29 @@ class Brain:
             "vanish.\n"
         )
 
+        # Two capabilities the model will not use correctly unless told
+        # when to reach for them, because in both cases a WORSE tool looks
+        # superficially applicable and was, until now, the only one there.
+        base += (
+            "\n\nRESEARCH. web_search and web_read actually fetch and read "
+            "pages; search_site only opens a browser tab, which shows him "
+            "something but tells YOU nothing. For any question about current "
+            "facts, search first, read the two or three best results, and "
+            "answer from what they say — naming what you couldn't confirm. "
+            "Never answer a research question from memory alone and never "
+            "call search_site and then describe what is 'probably' on the "
+            "page.\n"
+        )
+        base += (
+            "\n\nWRITING AS HIM. Anything that goes out under his name — an "
+            "email draft, a Telegram message, an essay — must sound like "
+            "him, not like you. Call voice_guide FIRST and follow it. It is "
+            "a large document, so call it only when you are genuinely "
+            "writing something as him, never for ordinary conversation. If "
+            "it reports the skill is missing, say so before drafting rather "
+            "than quietly writing in your own register.\n"
+        )
+
         # A compound request ('do X and Y') is common and usually fine — but when
         # only PART of it is achievable with the tools available, that's the same
         # trap as above in general form: silently doing the achievable half and
