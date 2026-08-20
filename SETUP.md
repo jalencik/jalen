@@ -242,6 +242,32 @@ Starts muted, as you asked. Say "unmute" or press the tray icon to wake it.
 
 ## Starting and stopping
 
+The simplest way — a launcher that can't be typed wrong:
+
+```powershell
+cd C:\Users\user\Desktop\Jarvis-setup\jarvis
+
+.\jarvis.ps1              # start listening
+.\jarvis.ps1 stop         # stop it
+.\jarvis.ps1 restart      # stop, then start fresh
+.\jarvis.ps1 status       # is it running?
+.\jarvis.ps1 text         # type instead of talk
+.\jarvis.ps1 telegram     # control from your phone
+.\jarvis.ps1 check        # diagnostics
+```
+
+**Why not just `run.py --unmuted`?** That fails twice over on Windows:
+
+- PowerShell will not run a script from the current folder without the `.\`
+  prefix — you get *"The term 'run.py' is not recognized"*.
+- Bare `python` is a **different** Python install without this project's
+  packages, so it dies with *"No module named 'numpy'"*.
+
+`.\jarvis.ps1` handles both, from any folder.
+
+### The longer way
+
+
 Always use the project's `.venv` (see the troubleshooting table below if you
 get a `ModuleNotFoundError`):
 
