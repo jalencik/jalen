@@ -447,6 +447,17 @@ def _rules() -> list[Rule]:
         (R(r"^what(?:'s| is) (taking|eating|using) (up )?(my )?(space|disk|storage)\??$", re.I),
          "disk_report", n, None),
 
+        # Heard live and all missed, costing a 3-7s Claude round trip for a
+        # question a local tool answers: "could you please tell me what to
+        # delete in my desktop", "what should I delete from my desktop".
+        (R(r"^(?:tell me |show me )?what (?:should|can|could) (?:i|we) "
+           r"(?:delete|remove|clean|clear|free)(?: up)?(?: from| in| on)?(?: my)?.*$", re.I),
+         "cleanup_suggestions", n, None),
+        (R(r"^(?:tell me |show me )?what to (?:delete|remove|clean|clear)(?: up)?(?: from| in| on)?(?: my)?.*$", re.I),
+         "cleanup_suggestions", n, None),
+        (R(r"^(?:how do i |help me )?(?:free|clear|clean)(?: up)? (?:some )?(?:space|disk|storage|room).*$", re.I),
+         "cleanup_suggestions", n, None),
+
         # ---- files: cheap paths --------------------------------------------
         (R(r"^(find|search for|where is|locate) (?:my |the )?(?:file |document |folder |project )?(.+?)(?: (?:file|folder|project))?$", re.I),
          "search_files", lambda m: {"query": m.group(2).strip()}, None),
@@ -493,7 +504,19 @@ class IntentRouter:
         # "jarvis" matters: only the LEADING wake word was stripped above, so
         # "open chrome, Jarvis" reached open_app as name="chrome, jarvis" and
         # tried to launch an app by that name.
-        text = re.sub(r"[,\s]+(boss|please|mate|man|jarvis|thanks|thank you)$", "", text)
+        # Trailing courtesy and urgency. This mattered more than it looks:
+        # heard live, "could you please open Telegram FOR ME" reached
+        # open_target as name="telegram for me", which searched the whole
+        # machine for an app by that literal name, failed after 8 seconds,
+        # and answered "I couldn't find an app called telegram for me".
+        # Same shape for "open chrome now", "open notepad real quick".
+        # Repeated (`(?:...)+$`) because people stack them: "..., for me,
+        # please", "... right now thanks".
+        text = re.sub(
+            r"(?:[,\s]+(?:boss|please|mate|man|jarvis|thanks|thank you|for me|"
+            r"real quick|right now|now|asap|quickly|if you can|would you))+$",
+            "", text,
+        )
         # strip leading politeness ("can you open chrome" / "please open chrome")
         text = re.sub(r"^(can|could|would) you (please )?|^please |^i want you to ", "", text)
         # a filler word wedged between the politeness and the actual verb

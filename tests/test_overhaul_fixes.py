@@ -503,3 +503,52 @@ def test_open_in_reports_missing_app_and_target_honestly():
 
     assert "couldn't find" in open_in("zzz_no_app_9x7", "eco pulse").lower()
     assert "couldn't find" in open_in("notepad", "zzz_no_file_9x7").lower()
+
+
+# ---------------------------------------- real spoken phrasing, measured
+@pytest.mark.parametrize("phrase,expected_name", [
+    ("Could you please open Telegram for me?", "telegram"),
+    ("can you open chrome for me", "chrome"),
+    ("could you open notepad real quick", "notepad"),
+    ("jarvis open chrome now", "chrome"),
+    ("open my cv for me please", "my cv"),
+])
+def test_trailing_courtesy_is_not_part_of_the_name(router, phrase, expected_name):
+    """
+    Heard live: "could you please open Telegram FOR ME" reached open_target
+    as name="telegram for me", searched the whole machine for an app by that
+    literal name, failed after 8 seconds, and answered "I couldn't find an
+    app called telegram for me".
+    """
+    intent = router.route(phrase)
+    assert intent is not None, f"{phrase!r} fell through to Claude (3-7s)"
+    assert intent.args["name"] == expected_name
+
+
+@pytest.mark.parametrize("phrase", [
+    "could you please tell me what to delete in my desktop",
+    "what should I delete from my desktop",
+    "tell me what to delete",
+    "free up some space",
+])
+def test_cleanup_asked_naturally_stays_local(router, phrase):
+    """Each of these cost a 3-7s Claude round trip for a question a local
+    tool answers instantly."""
+    assert route_tool(router, phrase) == "cleanup_suggestions"
+
+
+def test_file_search_is_time_bounded():
+    """
+    Measured at 8.96s on this machine ("open my cv") — the entry cap alone
+    bounds nothing when the disk is slow (this one is 99% full), and 9
+    seconds of silence is exactly what "it's not responding" feels like.
+    """
+    import time
+    from jarvis.tools.launcher import find_files, SEARCH_TIME_BUDGET_S
+
+    start = time.perf_counter()
+    find_files("my cv")
+    elapsed = time.perf_counter() - start
+    # Generous headroom over the budget for CI/disk variance, but far below
+    # the 9s that made it feel broken.
+    assert elapsed < SEARCH_TIME_BUDGET_S + 3.0, f"search took {elapsed:.1f}s"

@@ -167,6 +167,13 @@ _app_index_cache: dict[str, str] | None = None
 _app_index_built_at = 0.0
 APP_INDEX_TTL_S = 300.0
 
+# Bounds for the filename search. A voice assistant that goes quiet for 9
+# seconds reads as broken, so the budget is what actually matters here —
+# better a fast good-enough answer than a slow exhaustive one.
+SEARCH_TIME_BUDGET_S = 2.0
+SEARCH_MAX_ENTRIES = 60_000
+SEARCH_MAX_DEPTH = 6
+
 
 # ------------------------------------------------------------------ aliases
 def _load_aliases() -> dict[str, str]:
@@ -578,20 +585,36 @@ def find_files(query: str, limit: int = 12, dirs_only: bool = False) -> list[str
     # loosening what counts as a match at all.
     scored: list[tuple[int, int, str]] = []
     scanned = 0
+    deadline = time.monotonic() + SEARCH_TIME_BUDGET_S
+    out_of_time = False
     for root in _search_roots():
+        if out_of_time:
+            break
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d.lower() not in exclude and not d.startswith(".")]
             depth = len(Path(dirpath).relative_to(root).parts)
+            # Don't descend forever. Nothing a person asks for by name lives
+            # 6 levels inside Desktop; deep trees here are dependency folders
+            # (node_modules, .venv, site-packages) that only add scan time.
+            if depth >= SEARCH_MAX_DEPTH:
+                dirnames[:] = []
             names = dirnames if dirs_only else filenames + dirnames
             for entry in names:
                 scanned += 1
-                if scanned > 60_000:
-                    break
                 low = entry.lower()
                 if all(t in low for t in terms):
                     scored.append((depth, len(entry), str(Path(dirpath) / entry)))
-            if scanned > 60_000:
+            # A WALL-CLOCK budget, not just an entry cap. Measured on this
+            # machine: "open my cv" took 8.96s — the entry cap alone doesn't
+            # bound anything when the disk is slow (this one is 99% full),
+            # and 9 seconds of silence is exactly what "it's not responding"
+            # feels like. Checked per directory, not per file, so the check
+            # itself costs nothing.
+            if scanned > SEARCH_MAX_ENTRIES or time.monotonic() > deadline:
+                out_of_time = True
                 break
+        if out_of_time:
+            break
     scored.sort()
     return [path for _, _, path in scored[:limit]]
 
