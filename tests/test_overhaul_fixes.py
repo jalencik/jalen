@@ -376,3 +376,87 @@ def test_disk_cleanup_phrasings_route_locally(router, phrase, tool):
     """Asked the way a person asks it. These fell through to Claude (3-18s)
     for a question a local tool answers instantly."""
     assert route_tool(router, phrase) == tool
+
+
+# ------------------------------------------------- mid-sentence pause
+def test_a_thinking_pause_does_not_cut_the_command_in_half():
+    """
+    Reported as "it is ignoring me". silence_ms was 700, so saying
+    "open chrome ... and go to youtube" with a normal ~1.2s pause was
+    captured as JUST "open chrome" — measured: cut at 1.34s, keeping 1.38s
+    of a 4.75s utterance, with the rest of the sentence discarded. The turn
+    then acted on half a command, which reads exactly like being ignored.
+
+    2000ms matches how people actually pause while thinking. Verified: a
+    1.9s pause keeps the whole sentence; a genuine 2.4s stop still ends
+    the turn, so it does not hang waiting forever either.
+    """
+    import numpy as np
+    from jarvis.audio.vad import VAD, UtteranceCollector
+
+    vad = VAD(CONFIG)
+    assert vad.silence_ms >= 1500, (
+        f"silence_ms is {vad.silence_ms}ms — a normal thinking pause will "
+        "truncate the command and look like Jarvis ignoring you"
+    )
+
+    # Drive the collector directly: speech, a pause under the threshold,
+    # more speech. It must NOT have closed the utterance during the pause.
+    vad.load()
+    collector = UtteranceCollector(CONFIG, vad)
+    speech = np.full(512, 0.3, dtype=np.float32)
+    silence = np.zeros(512, dtype=np.float32)
+
+    for _ in range(20):
+        collector.feed(speech)
+    pause_frames = int((vad.silence_ms - 400) / collector.frame_ms)
+    closed_early = any(collector.feed(silence) is not None for _ in range(pause_frames))
+    assert not closed_early, "closed the utterance during a sub-threshold pause"
+
+
+def test_common_replies_are_cached_not_re_synthesised():
+    """
+    "Opening chrome." cost ~1.46s of network round-trip EVERY time — the
+    largest remaining delay on a command whose actual work finishes in
+    ~0.5s. The words never change, so they are rendered once and replayed.
+    Measured after: 1460ms -> 0.02ms.
+    """
+    from jarvis.audio.tts import Speaker
+
+    speaker = Speaker(CONFIG)
+    calls = []
+
+    def fake_render(sentence):
+        calls.append(sentence)
+        import numpy as np
+        return (np.zeros(10, dtype=np.float32), 24000)
+
+    speaker._render = fake_render
+    for _ in range(5):
+        speaker._render_cached("Done.")
+    assert len(calls) == 1, f"re-synthesised a cached phrase {len(calls)} times"
+
+
+def test_audio_cache_is_bounded():
+    """This runs on a machine with ~1GB free — an unbounded audio cache
+    would be a slow memory leak."""
+    from jarvis.audio.tts import Speaker
+    import numpy as np
+
+    speaker = Speaker(CONFIG)
+    speaker._render = lambda s: (np.zeros(10, dtype=np.float32), 24000)
+    for i in range(speaker.CACHE_MAX_ENTRIES + 15):
+        speaker._render_cached(f"phrase number {i}.")
+    assert len(speaker._audio_cache) <= speaker.CACHE_MAX_ENTRIES
+
+
+def test_long_replies_are_not_cached():
+    """Only short confirmations repeat; caching paragraphs would waste the
+    bound on things said once."""
+    from jarvis.audio.tts import Speaker
+    import numpy as np
+
+    speaker = Speaker(CONFIG)
+    speaker._render = lambda s: (np.zeros(10, dtype=np.float32), 24000)
+    speaker._render_cached("x" * (speaker.CACHEABLE_MAX_CHARS + 50))
+    assert len(speaker._audio_cache) == 0

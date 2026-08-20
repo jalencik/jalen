@@ -81,7 +81,13 @@ wake:
 
 vad:
   threshold: 0.5
-  silence_ms: 700                  # how long you stop talking before it decides you're done
+  # How long you must be SILENT before Jarvis decides you've finished.
+  # Was 700ms, which cut people off mid-thought: saying "open chrome ... and
+  # go to youtube" with a normal 1.2s pause was captured as JUST "open
+  # chrome" (measured: cut at 1.34s, 1.38s of 4.75s kept) and the rest of
+  # the sentence was thrown away. That is what "it is ignoring me" was.
+  # 2000ms matches how people actually pause while thinking.
+  silence_ms: 2000
   min_speech_ms: 250               # ignore blips shorter than this
   max_utterance_s: 30
 

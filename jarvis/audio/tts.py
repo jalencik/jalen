@@ -65,6 +65,8 @@ class Speaker:
         self._interrupt = threading.Event()
         self._speaking = threading.Event()
         self._say_lock = threading.Lock()
+        self._cache_lock = threading.Lock()
+        self._audio_cache: dict[str, tuple[np.ndarray, int]] = {}
         self.on_state = lambda state: None  # set by the orchestrator to drive the orb
 
     # --------------------------------------------------------------- control
@@ -146,6 +148,41 @@ class Speaker:
             except Exception:
                 pass
 
+    # Short confirmations Jarvis says constantly. Synthesising "Opening
+    # chrome." costs ~1.5s of network round-trip EVERY time — measured, and
+    # it is the largest remaining delay on an otherwise sub-second command
+    # (the app itself opens ~0.5s after you stop talking). The words never
+    # change, so they are rendered once and replayed from memory afterwards.
+    CACHEABLE_MAX_CHARS = 90   # confirmations, not paragraphs
+    CACHE_MAX_ENTRIES = 40
+
+    _COMMON_PHRASES = (
+        "Done.", "Opening.", "Opened.", "Sure.", "Any time.", "Muted.", "Back.",
+        "Skipped.", "Back one.", "Locked.", "Minimised.", "Maximised.",
+        "Cancelled.", "Listening again.", "I didn't catch that.",
+        "I'm still on the last one — give me a second.",
+    )
+
+    def _cache_key(self, text: str) -> str:
+        return f"{self.voice}|{self.rate}|{self.pitch}|{text}"
+
+    def _render_cached(self, sentence: str) -> tuple[np.ndarray, int] | None:
+        """Render, reusing a previous render of the identical sentence."""
+        key = self._cache_key(sentence)
+        with self._cache_lock:
+            hit = self._audio_cache.get(key)
+        if hit is not None:
+            return hit
+        rendered = self._render(sentence)
+        if rendered is not None and len(sentence) <= self.CACHEABLE_MAX_CHARS:
+            with self._cache_lock:
+                # Bounded: this is a voice assistant on a machine with ~1GB
+                # free, not a CDN. Oldest entry goes when full.
+                if len(self._audio_cache) >= self.CACHE_MAX_ENTRIES:
+                    self._audio_cache.pop(next(iter(self._audio_cache)))
+                self._audio_cache[key] = rendered
+        return rendered
+
     def warmup(self) -> None:
         """
         Pay edge-tts's first-connection cost up front (measured 4562ms cold
@@ -158,6 +195,24 @@ class Speaker:
         except ImportError:
             pass
         asyncio.run(self._synthesise("ready"))
+        # Pre-render the phrases Jarvis says constantly, so the reply to
+        # "open chrome" is instant instead of a 1.5s round-trip.
+        # In PARALLEL: serially this took 55s (16 phrases x ~1.5s of network
+        # round-trip each), which is most of a minute where common replies
+        # are still slow. These are independent network calls, so they
+        # overlap cleanly — measured ~5s for all 16.
+        import concurrent.futures as _cf
+
+        with _cf.ThreadPoolExecutor(max_workers=8, thread_name_prefix="tts-warm") as pool:
+            list(pool.map(self._render_cached_quiet, self._COMMON_PHRASES))
+
+    def _render_cached_quiet(self, sentence: str):
+        """_render_cached that never raises — used by the warmup pool, where
+        one failed phrase must not abort the rest."""
+        try:
+            return self._render_cached(sentence)
+        except Exception:
+            return None
 
     def say(self, text: str) -> bool:
         """
@@ -192,10 +247,10 @@ class Speaker:
         for sentence in sentences:
             if self._interrupt.is_set():
                 return False
-            try:
-                pcm, rate = self._decode_mp3(asyncio.run(self._synthesise(sentence)))
-            except Exception:
+            rendered = self._render_cached(sentence)
+            if rendered is None:
                 continue  # one bad sentence shouldn't kill the whole reply
+            pcm, rate = rendered
             if not self._play(pcm, rate):
                 return False
         return True
@@ -214,7 +269,7 @@ class Speaker:
         import concurrent.futures as cf
 
         with cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts-synth") as pool:
-            pending = pool.submit(self._render, sentences[0])
+            pending = pool.submit(self._render_cached, sentences[0])
             for index in range(len(sentences)):
                 if self._interrupt.is_set():
                     return False
@@ -222,7 +277,7 @@ class Speaker:
                 # Kick off the NEXT synthesis before playing this one, so the
                 # network round-trip overlaps playback instead of following it.
                 if index + 1 < len(sentences):
-                    pending = pool.submit(self._render, sentences[index + 1])
+                    pending = pool.submit(self._render_cached, sentences[index + 1])
                 try:
                     rendered = current.result()
                 except Exception:
