@@ -386,14 +386,30 @@ class Jarvis:
             # "brief me" produced total silence — indistinguishable from
             # Jarvis being broken. Report what's actually wired, and say
             # plainly what isn't, rather than pretending or staying quiet.
+            #
+            # It then had a subtler version of the same fault. The original
+            # only CHECKED integrations.gmail.enabled and appended "I can't
+            # include email yet" when it was off — so the moment Google was
+            # actually connected and the flag flipped to true, the warning
+            # correctly disappeared and nothing replaced it. A brief that
+            # silently drops email reads as "no mail today", which is a
+            # worse lie than admitting it isn't wired. Fetch it for real.
             from .tools import system as _sys
 
             parts = [_sys.get_date(), _sys.get_time(), _sys.get_battery()]
-            missing = []
-            if not self.cfg.get_path("integrations.gmail.enabled", False):
-                missing.append("email")
-            if not self.cfg.get_path("integrations.calendar.enabled", False):
-                missing.append("calendar")
+            missing: list[str] = []
+
+            for label, enabled_key, fetch in (
+                ("email", "integrations.gmail.enabled", self._brief_email),
+                ("calendar", "integrations.calendar.enabled", self._brief_calendar),
+            ):
+                if not self.cfg.get_path(enabled_key, False):
+                    missing.append(label)
+                    continue
+                line = fetch()
+                if line:
+                    parts.append(line)
+
             if missing:
                 parts.append(
                     f"I can't include {' or '.join(missing)} yet — "
@@ -604,6 +620,50 @@ class Jarvis:
 
         self.orb.set_state("thinking")
         self.speak_brain_reply(text)
+
+    # ------------------------------------------------------------ brief parts
+    # Both of these are deliberately failure-tolerant and deliberately SHORT.
+    # A morning brief is spoken out loud in one breath, so it wants a count
+    # and the two or three things that matter, not an inbox dump — and if
+    # Google is unreachable it must degrade to one honest clause rather than
+    # taking the whole brief down with it.
+
+    def _brief_email(self) -> str:
+        try:
+            from .tools import gmail
+
+            summary = gmail.unread_email_summary(max_results=5)
+        except Exception as exc:
+            return f"I couldn't reach your email ({type(exc).__name__})."
+        if summary.startswith("No unread"):
+            return "No unread mail."
+        senders = [
+            line.split("<")[0].strip(" -")
+            for line in summary.splitlines()
+            if line.startswith("- ")
+        ]
+        count = len(senders)
+        if not count:
+            return "No unread mail."
+        who = ", ".join(senders[:3])
+        more = f" and {count - 3} more" if count > 3 else ""
+        return f"{count} unread email{'s' if count != 1 else ''}, from {who}{more}."
+
+    def _brief_calendar(self) -> str:
+        try:
+            from .tools import gcalendar
+
+            today = gcalendar.read_calendar(0)
+        except Exception as exc:
+            return f"I couldn't reach your calendar ({type(exc).__name__})."
+        if today.startswith("Nothing on the calendar"):
+            return "Nothing on your calendar today."
+        events = [line.strip("- ") for line in today.splitlines() if line.startswith("- ")]
+        if not events:
+            return "Nothing on your calendar today."
+        head = "; ".join(events[:3])
+        more = f", and {len(events) - 3} more" if len(events) > 3 else ""
+        return f"{len(events)} thing{'s' if len(events) != 1 else ''} on today: {head}{more}."
 
     # -------------------------------------------------------------------- loop
     def run(self) -> None:

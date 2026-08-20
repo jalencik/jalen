@@ -63,6 +63,19 @@ def _serve(args) -> int:
         jarvis.muted = False
 
     if args.text:
+        # Text mode prints whatever Jarvis would have said, and that now
+        # includes email and Telegram bodies written by other people. A
+        # Windows console defaults to a legacy code page (cp1251 on this
+        # machine), and print() RAISES on a character it cannot encode
+        # rather than degrading — so one narrow no-break space in a Google
+        # email, a character you cannot even see, took the whole session
+        # down. Reconfigure stdout to UTF-8 and replace anything still
+        # unencodable instead of dying.
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError):
+                pass  # not a real console (piped, redirected); nothing to fix
         print("Jarvis — text mode. Ctrl+C to quit.\n")
         jarvis.muted = True
         jarvis.orb.start()

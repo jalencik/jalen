@@ -385,3 +385,98 @@ def test_credentials_and_tokens_are_git_ignored():
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+# ===========================================================================
+# "Brief me" — the regression that flipping a config flag created
+# ===========================================================================
+
+class _Intent:
+    tool = "morning_brief"
+    args: dict = {}
+    reply = None
+
+
+def _brief(jarvis) -> str:
+    return jarvis.handle_local(_Intent())
+
+
+def test_a_connected_brief_actually_contains_the_email(monkeypatch):
+    """
+    The original morning_brief only CHECKED integrations.gmail.enabled and
+    appended "I can't include email yet" when it was off. So the moment
+    Google was really connected and the flag went true, the warning
+    correctly vanished — and nothing replaced it. The brief silently
+    dropped email entirely, which a listener hears as "no mail today".
+
+    That is a worse failure than admitting it isn't wired, because it is
+    indistinguishable from a true answer.
+    """
+    from jarvis.app import Jarvis
+    from jarvis.tools import gcalendar, gmail
+
+    monkeypatch.setattr(gmail, "unread_email_summary", lambda max_results=5: (
+        "3 unread message(s):\n"
+        "- Kevin Zhu <kevin@x.org> — Lecture Sunday\n  snippet\n  [id: 1]\n"
+        "- Roni Rosenfeld <roni@cmu.edu> — Re: forecasting\n  snippet\n  [id: 2]\n"
+        "- LinkedIn <no@reply> — Add a badge\n  snippet\n  [id: 3]"
+    ))
+    monkeypatch.setattr(gcalendar, "read_calendar", lambda days_ahead=0: (
+        "1 event(s) on Friday 21 August:\n- 14:00  Dentist"
+    ))
+
+    jarvis = Jarvis()
+    try:
+        spoken = _brief(jarvis)
+    finally:
+        jarvis.shutdown()
+
+    assert "3 unread" in spoken, f"the brief dropped email silently: {spoken!r}"
+    assert "Kevin Zhu" in spoken
+    assert "Dentist" in spoken, f"the brief dropped the calendar silently: {spoken!r}"
+    assert "can't include" not in spoken
+
+
+def test_an_unreachable_google_degrades_to_one_clause(monkeypatch):
+    """
+    No network, expired token, Google having a bad day — the brief must
+    still deliver the date, time and battery. Losing the whole brief
+    because the inbox was unreachable would be the tail wagging the dog.
+    """
+    from jarvis.app import Jarvis
+    from jarvis.tools import gcalendar, gmail
+
+    def _boom(*a, **k):
+        raise ConnectionError("network down")
+
+    monkeypatch.setattr(gmail, "unread_email_summary", _boom)
+    monkeypatch.setattr(gcalendar, "read_calendar", _boom)
+
+    jarvis = Jarvis()
+    try:
+        spoken = _brief(jarvis)
+    finally:
+        jarvis.shutdown()
+
+    assert "Battery" in spoken, "the whole brief died because email was down"
+    assert "couldn't reach your email" in spoken
+    assert "couldn't reach your calendar" in spoken
+
+
+def test_an_empty_inbox_says_so_rather_than_staying_quiet(monkeypatch):
+    from jarvis.app import Jarvis
+    from jarvis.tools import gcalendar, gmail
+
+    monkeypatch.setattr(gmail, "unread_email_summary",
+                        lambda max_results=5: "No unread mail in the inbox.")
+    monkeypatch.setattr(gcalendar, "read_calendar",
+                        lambda days_ahead=0: "Nothing on the calendar for Friday 21 August.")
+
+    jarvis = Jarvis()
+    try:
+        spoken = _brief(jarvis)
+    finally:
+        jarvis.shutdown()
+
+    assert "No unread mail" in spoken
+    assert "Nothing on your calendar today" in spoken
