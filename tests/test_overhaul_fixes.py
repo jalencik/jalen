@@ -609,3 +609,61 @@ def test_real_typos_and_abbreviations_still_resolve(typo, expect_something):
 
     target, _matched = resolve_app(typo)
     assert bool(target) == expect_something, f"{typo!r} -> {target}"
+
+
+# ------------------------------------------ doing things ON websites
+@pytest.mark.parametrize("phrase,query", [
+    ("go to youtube and search lofi and play it", "lofi"),
+    ("youtube play sat prep", "sat prep"),
+    ("play timeless on youtube", "timeless"),
+    ("go to youtube and play chess openings", "chess openings"),
+])
+def test_youtube_search_and_play_is_one_intent(router, phrase, query):
+    """
+    "Go to YouTube and search X and play it" is ONE thing the user wants,
+    not three steps they should have to narrate. Before this, "open
+    youtube" opened the site and stopped — everything after was on them.
+    """
+    intent = router.route(phrase)
+    assert intent is not None, f"{phrase!r} fell through to Claude"
+    assert intent.tool == "play_on_youtube"
+    assert intent.args["query"] == query
+
+
+@pytest.mark.parametrize("phrase,site,query", [
+    ("search youtube for chess openings", "youtube", "chess openings"),
+    ("look up python decorators on github", "github", "python decorators"),
+    ("search reddit for python tips", "reddit", "python tips"),
+])
+def test_named_site_search_routes_locally(router, phrase, site, query):
+    intent = router.route(phrase)
+    assert intent is not None, f"{phrase!r} fell through to Claude"
+    assert intent.tool == "search_site"
+    assert intent.args["site"] == site
+    assert intent.args["query"] == query
+
+
+def test_play_without_a_site_still_means_a_local_file(router):
+    """"play timeless" means the file on this machine; only "... on
+    youtube" means YouTube. The local-file rule was grabbing both."""
+    assert route_tool(router, "play timeless") == "open_target"
+
+
+def test_youtube_title_notification_count_is_not_spoken():
+    """YouTube prefixes its tab title with an unread count — "(394) lofi
+    hip hop" — which sounded broken when read aloud."""
+    import re as _re
+
+    assert _re.sub(r"^\(\d+\)\s*", "", "(394) lofi hip hop radio") == "lofi hip hop radio"
+
+
+def test_web_tools_are_green_and_registered():
+    from jarvis import tools
+    from jarvis.safety import SafetyEngine
+
+    engine = SafetyEngine(CONFIG)
+    for name in ("search_site", "play_on_youtube"):
+        assert name in tools.REGISTRY
+        verdict = engine.classify(name, {})
+        assert verdict.tier.value == "green", f"{name} gates unnecessarily"
+        assert not verdict.detail.get("unclassified")

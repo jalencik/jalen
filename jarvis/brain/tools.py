@@ -157,6 +157,18 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"app": ("string", "the application name", True),
          "target": ("string", "the file or folder to open it at", True)},
     ),
+    "search_site": (
+        "Search a specific website and show the results: YouTube, Google, GitHub, Reddit, "
+        "Amazon, Wikipedia, Spotify, Maps and others. Use for any 'search X for Y' or "
+        "'look up Y on X' request.",
+        {"site": ("string", "the website, e.g. youtube", True),
+         "query": ("string", "what to search for", True)},
+    ),
+    "play_on_youtube": (
+        "Search YouTube and start the first result playing. Use for 'play X', "
+        "'go to youtube and play X', or any request to hear/watch something on YouTube.",
+        {"query": ("string", "song, video or channel to play", True)},
+    ),
     "remember_alias": (
         "Teach a nickname for an app, file or folder so it can be opened by "
         "that name later. Persists across restarts.",

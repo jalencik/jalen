@@ -201,7 +201,9 @@ def _rules() -> list[Rule]:
         # after the generic "play the music" rule above so that still toggles
         # playback, and resolves through open_target's file search so a rough
         # name finds the actual track.
-        (R(r"^(?:play|put on) (.+)$", re.I),
+        # Not "... on youtube" — that is a YouTube request, handled below,
+        # and this local-file rule was grabbing it first.
+        (R(r"^(?:play|put on) (?!.* on youtube$)(.+)$", re.I),
          "open_target", lambda m: {"name": m.group(1).strip()}, None),
         (R(r"^(next|skip)( song| track| this)?$", re.I), "media_next", n, None),
         (R(r"^(previous|back|last) (song|track)$", re.I), "media_previous", n, None),
@@ -236,6 +238,27 @@ def _rules() -> list[Rule]:
         # launch an app literally named "vs code in the eco pulse folder".
         (R(r"^(?:open|launch|start|run)\s+(.+?)\s+(?:in|with|on|at)\s+(?:the\s+)?(.+?)(?:\s+(?:folder|directory|project))?$", re.I),
          "open_in", lambda m: {"app": m.group(1).strip(), "target": m.group(2).strip()}, None),
+
+        # "go to youtube and search X and play it" is ONE intent, not three
+        # steps the user should have to narrate. These must sit above the
+        # browser/open catch-alls below, which would otherwise swallow the
+        # whole phrase and try to focus a window named after the sentence.
+        (R(r"^(?:go to |open |on )?youtube(?:\.com)?[, ]*(?:and )?"
+           r"(?:search(?: for)?|find|look up|play) (.+?)"
+           r"(?:[, ]*(?:and )?(?:play|start|watch)(?: it| that| them)?)?$", re.I),
+         "play_on_youtube", lambda m: {"query": m.group(1).strip()}, None),
+        (R(r"^play (.+?) on youtube$", re.I),
+         "play_on_youtube", lambda m: {"query": m.group(1).strip()}, None),
+        # "search youtube for X" / "look X up on github"
+        (R(r"^(?:search|look up|find) (?:on )?(youtube|google|github|reddit|amazon|"
+           r"wikipedia|linkedin|twitter|spotify|maps|chess) (?:for )?(.+)$", re.I),
+         "search_site", lambda m: {"site": m.group(1), "query": m.group(2).strip()}, None),
+        # (?!for$) — "search reddit for jarvis" was matching this
+        # "<query> on <site>" shape with query="for", because "reddit for
+        # jarvis" happens to end in a site name when read backwards.
+        (R(r"^(?:search|look up|find) (?:for )?(?!for$)(.+?) on (youtube|google|github|reddit|"
+           r"amazon|wikipedia|linkedin|twitter|spotify|maps|chess)$", re.I),
+         "search_site", lambda m: {"site": m.group(2), "query": m.group(1).strip()}, None),
 
         # ---- windows and apps ----------------------------------------------
         # NOTE: the folder rules must come BEFORE the open_app catch-all below.
@@ -512,11 +535,19 @@ class IntentRouter:
         # Same shape for "open chrome now", "open notepad real quick".
         # Repeated (`(?:...)+$`) because people stack them: "..., for me,
         # please", "... right now thanks".
-        text = re.sub(
+        # But never when stripping leaves a dangling preposition. "search
+        # reddit FOR JARVIS" ends in a word on this list, yet there it is the
+        # QUERY, not an address: stripping it left "search reddit for" and the
+        # search then ran on the word "for". If what remains ends in
+        # for/about/on/with/to/of, the "courtesy" was really that
+        # preposition's object, so keep the original text.
+        stripped = re.sub(
             r"(?:[,\s]+(?:boss|please|mate|man|jarvis|thanks|thank you|for me|"
             r"real quick|right now|now|asap|quickly|if you can|would you))+$",
             "", text,
         )
+        if not re.search(r"(?:for|about|on|with|to|of)$", stripped):
+            text = stripped
         # strip leading politeness ("can you open chrome" / "please open chrome")
         text = re.sub(r"^(can|could|would) you (please )?|^please |^i want you to ", "", text)
         # a filler word wedged between the politeness and the actual verb

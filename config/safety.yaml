@@ -70,6 +70,8 @@ green:
                            # an existing router rule ("lock the screen") already pointed
                            # here — found while adding "lock it" as a second phrasing.
     - open_folder          # opens Explorer at a path; reads nothing, changes nothing
+    - search_site          # opens a search results page; changes nothing
+    - play_on_youtube      # opens a video and presses play; changes nothing
     - open_target          # opens an app/file/folder. Destroys nothing; closing the
                            # window undoes it. Asking here is pure friction.
     - open_in              # same, with the app pointed at a file/folder

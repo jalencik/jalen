@@ -220,8 +220,10 @@ def test_delete_a_named_file_is_not_rerouted_by_the_new_rules(router):
 
 
 # --------------------------------------------------------- web search
-@pytest.mark.parametrize("phrase", ["search the web for python tutorials", "google python tutorials",
-                                     "search google for python tutorials"])
+# "search google for X" now routes to search_site instead — a strictly
+# better destination once the site is named explicitly (it knows each
+# site's real search grammar). Both still land on a Google results page.
+@pytest.mark.parametrize("phrase", ["search the web for python tutorials", "google python tutorials"])
 def test_web_search_routes_to_open_url(router, phrase):
     intent = route(router, phrase)
     assert intent.tool == "open_url"
