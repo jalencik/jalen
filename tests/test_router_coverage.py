@@ -13,7 +13,7 @@ Two things this file is careful to prove alongside the new hits:
   1. No new rule shadows an EXISTING rule. "search for X" must still mean
      local file search; "close notepad" must still mean close_app, not the
      new "close window" shortcut; bare "close"/"back" must still mean
-     jarvis_quit/media_previous.
+     jalen_quit/media_previous.
   2. Every tool a new rule points at is real: present in jarvis.tools.
      REGISTRY, present in brain/tools.py's TOOL_SPECS (so build_sdk_tools()
      doesn't blow up at startup), and given an EXPLICIT tier in
@@ -308,7 +308,7 @@ def test_open_app_by_name_is_unaffected_by_the_site_table(router):
 def test_go_to_sleep_is_not_swallowed_by_site_navigation(router):
     """"sleep" isn't a known site, so the existing Jarvis-sleep rule (which
     sits earlier) must still win."""
-    assert route_tool(router, "go to sleep") == "jarvis_sleep"
+    assert route_tool(router, "go to sleep") == "jalen_sleep"
 
 
 # --------------------------------------------------------- every rule points
@@ -356,8 +356,8 @@ def test_every_new_rule_targets_a_real_registered_tool(router):
     from jarvis import tools
 
     app_level_intents = {
-        "jarvis_mute", "jarvis_unmute", "jarvis_sleep", "jarvis_quit", "jarvis_pause",
-        "jarvis_resume", "jarvis_restart", "private_mode", "set_posture", "morning_brief",
+        "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_quit", "jalen_pause", "jalen_ack",
+        "jalen_resume", "jalen_restart", "private_mode", "set_posture", "morning_brief",
         "audit_digest", "cancel", "acknowledge", "greet", "reload_config",
     }
     missing = set()

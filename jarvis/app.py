@@ -335,15 +335,15 @@ class Jarvis:
         """Router hit — execute without ever touching an LLM."""
         tool = intent.tool
 
-        if tool == "jarvis_mute":
+        if tool == "jalen_mute":
             self.muted = True
             self.orb.set_state("muted")
             return None
-        if tool == "jarvis_unmute":
+        if tool == "jalen_unmute":
             self.muted = False
             self.orb.set_state("idle")
             return intent.reply
-        if tool == "jarvis_sleep":
+        if tool == "jalen_sleep":
             # "sleep" and "pause" are the same thing to a user, and this
             # branch used to only SAY "Sleeping. Say hey Jarvis to wake me."
             # while setting no state whatsoever — it kept right on listening
@@ -352,23 +352,28 @@ class Jarvis:
             self.paused = True
             self.orb.set_state("muted")
             return None
-        if tool == "jarvis_quit":
+        if tool == "jalen_quit":
             # Speak first, then tear down — say() is async and shutdown()
             # stops the speaker, so a plain say() here would be cut off
             # mid-word and the user would never hear the acknowledgement.
             self.say_blocking(intent.reply or "Shutting down.")
             self._quit.set()
             return None
-        if tool == "jarvis_pause":
+        if tool == "jalen_pause":
             self.say_blocking(intent.reply or "Paused.")
             self.paused = True
             self.orb.set_state("muted")
             return None
-        if tool == "jarvis_resume":
+        if tool == "jalen_resume":
             self.paused = False
             self.orb.set_state("idle")
             return intent.reply
-        if tool == "jarvis_restart":
+        if tool == "jalen_ack":
+            # He said the name and nothing else. Answer and stay open — the
+            # follow-up listen in run() is what makes "Jalen ... open chrome"
+            # work as two breaths instead of one failed turn.
+            return intent.reply
+        if tool == "jalen_restart":
             self.say_blocking(intent.reply or "Restarting.")
             self._restart_requested = True
             self._quit.set()

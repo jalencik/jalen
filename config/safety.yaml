@@ -22,17 +22,18 @@ green:
     - search_files
     - list_directory
     - list_aliases         # read-only: what nicknames are known
-    # Jarvis's own controls. These never touch the machine — they change
-    # Jarvis's own state — and gating them is absurd: "quit" would announce
-    # "jarvis quit, say stop if you don't want that" and wait 2s before
+    # Jalen's own controls. These never touch the machine — they change
+    # Jalen's own state — and gating them is absurd: "quit" would announce
+    # "jalen quit, say stop if you don't want that" and wait 2s before
     # quitting. They were unclassified, so they inherited AMBER by accident.
-    - jarvis_quit
-    - jarvis_pause
-    - jarvis_resume
-    - jarvis_restart
-    - jarvis_mute
-    - jarvis_unmute
-    - jarvis_sleep
+    - jalen_quit
+    - jalen_pause
+    - jalen_resume
+    - jalen_restart
+    - jalen_mute
+    - jalen_unmute
+    - jalen_sleep
+    - jalen_ack            # answering to his own name
     - private_mode
     - set_posture
     - reload_config

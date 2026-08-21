@@ -26,6 +26,27 @@ from urllib.parse import quote_plus
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
+# ----------------------------------------------------------------------------
+# What he calls it.
+#
+# One source of truth, used by BOTH the leading strip ("Jalen, open chrome")
+# and the trailing one ("open chrome, Jalen"). Before this existed the name
+# was written literally, in two places, as "jarvis" — so when the assistant
+# was renamed, EVERY name-prefixed command stopped routing at once and went
+# to the LLM instead: "jalen quit" matched nothing, cost a round-trip, and
+# came back as conversation rather than an exit. Measured before the fix:
+# "jarvis quit" routed in 50ms, "jalen quit" routed never.
+#
+# "jarvis" stays in the list on purpose. Speech recognition and a year of
+# habit both still produce the old name; understanding it costs one
+# alternation, and dropping it would silently strand the exact commands he
+# is most practised at saying. He is always ANSWERED as Jalen — see
+# identity.name in config/jarvis.yaml. This is about what it hears, not
+# what it calls itself.
+# ----------------------------------------------------------------------------
+NAME_ALIASES = ("jalen", "jarvis")
+_NAME = "(?:" + "|".join(NAME_ALIASES) + ")"
+
 
 def _web_search_url(query: str) -> str:
     """
@@ -165,21 +186,36 @@ def _rules() -> list[Rule]:
         # app that happens to share a word.
         # ====================================================================
 
-        # ---- talking to Jarvis itself --------------------------------------
+        # ---- talking to Jalen itself ---------------------------------------
+        # The trailing "( <name>| yourself)?" on several of these is belt AND
+        # braces: _normalise() already strips a trailing address, so "quit
+        # jalen" arrives here as plain "quit". It stays because the two
+        # mechanisms guard different things — the normaliser handles the name
+        # said as an ADDRESS ("quit, Jalen"), this handles it said as the
+        # OBJECT ("quit Jalen") — and because a self-command failing to match
+        # is the one failure the user cannot route around: if "quit" doesn't
+        # work, the only remaining exit is killing the process by hand.
         (R(r"^(mute|be quiet|shut up|silence)( yourself)?$", re.I),
-         "jarvis_mute", n, "Muted."),
+         "jalen_mute", n, "Muted."),
         (R(r"^(unmute|speak|you can talk)( now)?$", re.I),
-         "jarvis_unmute", n, "Back."),
+         "jalen_unmute", n, "Back."),
         (R(r"^(go to sleep|sleep|stand by|stop listening)$", re.I),
-         "jarvis_sleep", n, "Sleeping. Say hey Jarvis to wake me."),
-        (R(r"^(quit|exit|shut ?down|close|kill|turn off)( jarvis| yourself)?$", re.I),
-         "jarvis_quit", n, "Shutting down. See you, Boss."),
-        (R(r"^(pause|hold on|take a break)( jarvis)?$", re.I),
-         "jarvis_pause", n, "Paused. Say hey Jarvis when you want me back."),
-        (R(r"^(resume|carry on|start listening|i'?m back|wake up)( jarvis)?$", re.I),
-         "jarvis_resume", n, "Listening again."),
-        (R(r"^(restart|reboot|reload)( jarvis| yourself)?$", re.I),
-         "jarvis_restart", n, "Restarting."),
+         "jalen_sleep", n, "Sleeping. Say hey Jalen to wake me."),
+        (R(r"^(quit|exit|shut ?down|close|kill|turn off)( " + _NAME + r"| yourself)?$", re.I),
+         "jalen_quit", n, "See you, Boss."),
+        (R(r"^(pause|hold on|take a break)( " + _NAME + r")?$", re.I),
+         "jalen_pause", n, "Paused. Say hey Jalen when you want me back."),
+        (R(r"^(resume|carry on|start listening|i'?m back|wake up)( " + _NAME + r")?$", re.I),
+         "jalen_resume", n, "Listening again."),
+        (R(r"^(restart|reboot|reload)( " + _NAME + r"| yourself)?$", re.I),
+         "jalen_restart", n, "Restarting."),
+        # A bare name with nothing after it. STT produces this constantly:
+        # the wake word fires, he starts to speak, and the endpointer closes
+        # on just "Jalen". Without a rule it is a full LLM round-trip to
+        # answer a summons — the single cheapest turn there is, priced like
+        # the most expensive one.
+        (R(r"^(?:hey |ok |okay )?" + _NAME + r"$", re.I),
+         "jalen_ack", n, "Yes, Boss?"),
 
         # ---- media (spec E42) ----------------------------------------------
         # Named media APPS resolve to "launch it", before the generic media-key
@@ -373,9 +409,16 @@ def _rules() -> list[Rule]:
         (R(r"^empty (?:the )?recycle bin$", re.I), "empty_recycle_bin", n, None),
 
         # ---- quick facts, answered locally ---------------------------------
-        (R(r"^what(?:'s| is) the time\??$|^what time is it\??$", re.I),
+        # The apostrophe is OPTIONAL, not decorative. Groq's transcripts drop
+        # it about as often as they keep it, so a required "'" meant "what's
+        # the time" routed for free and "whats the time" — the same words,
+        # same speaker, same second — went to Claude and came back a second
+        # later. A contraction the user cannot control is not a thing to
+        # match on.
+        (R(r"^(?:what(?:'?s| is) the time|what time is it|the time)\??$", re.I),
          "get_time", n, None),
-        (R(r"^what(?:'s| is) (?:the |today'?s )?date\??$|^what day is it\??$", re.I),
+        (R(r"^(?:what(?:'?s| is) (?:the |today'?s )?date|what day is it|"
+           r"the date|what'?s today)\??$", re.I),
          "get_date", n, None),
         (R(r"^(battery|how much battery)( level| percentage)?\??$", re.I),
          "get_battery", n, None),
@@ -601,7 +644,7 @@ class IntentRouter:
         # "well" on its own is a real word ("hey" alone still means greet)
         # and must not be eaten.
         text = re.sub(r"^(?:hey|hi|yo|so|ok|okay|um+|uh+|well|actually)[,\s]+", "", text)
-        text = re.sub(r"^(hey |ok |okay )?jarvis[,\s]+", "", text)
+        text = re.sub(r"^(hey |ok |okay )?" + _NAME + r"[,\s]+", "", text)
         text = re.sub(r"[.!?]+$", "", text)
         text = re.sub(r"\s+", " ", text)
         # strip a trailing address ("pause the music, boss" / "..., Jarvis").
@@ -635,11 +678,27 @@ class IntentRouter:
         # eye. tests/test_response_latency.py now fails if any control
         # character reappears anywhere in this method.
         stripped = re.sub(
-            r"(?:[,\s]+(?:boss|please|mate|man|jarvis|thanks|thank you|for me|"
+            r"(?:[,\s]+(?:boss|please|mate|man|" + _NAME + r"|thanks|thank you|for me|"
             r"real quick|right now|now|asap|quickly|if you can|would you))+$",
             "", text,
         )
-        if not re.search(r"\b(?:for|about|on|with|to|of)$", stripped):
+        # Same guard, second failure mode. A trailing name is usually an
+        # address ("pause the music, Jalen") but sometimes it is the OBJECT
+        # of a verb that cannot stand alone: "google jalen", "search for
+        # jalen", "open jalen". Stripping there leaves a bare transitive
+        # verb with nothing to act on — "google" — which matches no rule,
+        # falls through to the LLM, and asks it to google nothing.
+        #
+        # Note this list is deliberately verbs that REQUIRE an object.
+        # "quit", "mute" and "restart" are complete commands by themselves,
+        # so "quit jalen" must still strip to "quit"; that is the whole
+        # point of the trailing strip and is tested.
+        if not re.search(
+            r"\b(?:for|about|on|with|to|of"
+            r"|google|search|find|look up|open|launch|start|play|call"
+            r"|message|text|email|tell|remind|ask)$",
+            stripped,
+        ):
             text = stripped
         # Strip leading politeness ("can you open chrome" / "please open
         # chrome"). Applied in a LOOP because real speech stacks these:

@@ -86,13 +86,13 @@ def test_window_state_matches_every_article(router, phrase):
 # ------------------------------------------------------------- lifecycle
 @pytest.mark.parametrize(
     "phrase,expected",
-    [("quit jarvis", "jarvis_quit"), ("exit", "jarvis_quit"), ("shut down", "jarvis_quit"),
-     ("pause", "jarvis_pause"), ("hold on", "jarvis_pause"),
-     # "stop listening"/"go to sleep" hit the older jarvis_sleep rule, which
+    [("quit jarvis", "jalen_quit"), ("exit", "jalen_quit"), ("shut down", "jalen_quit"),
+     ("pause", "jalen_pause"), ("hold on", "jalen_pause"),
+     # "stop listening"/"go to sleep" hit the older jalen_sleep rule, which
      # now pauses for real instead of only claiming to.
-     ("stop listening", "jarvis_sleep"), ("go to sleep", "jarvis_sleep"),
-     ("resume", "jarvis_resume"), ("wake up", "jarvis_resume"),
-     ("restart jarvis", "jarvis_restart")],
+     ("stop listening", "jalen_sleep"), ("go to sleep", "jalen_sleep"),
+     ("resume", "jalen_resume"), ("wake up", "jalen_resume"),
+     ("restart jarvis", "jalen_restart")],
 )
 def test_lifecycle_commands_exist(router, phrase, expected):
     """There was no spoken way to stop Jarvis at all — only Ctrl+C in
@@ -111,12 +111,12 @@ def test_no_catch_all_rule_shadows_a_jarvis_command(router):
     window or file name.
     """
     self_commands = {
-        "quit": "jarvis_quit", "exit": "jarvis_quit", "shut down": "jarvis_quit",
-        "pause": "jarvis_pause", "resume": "jarvis_resume", "wake up": "jarvis_resume",
-        "restart": "jarvis_restart", "go to sleep": "jarvis_sleep",
-        "sleep": "jarvis_sleep", "stop listening": "jarvis_sleep",
-        "mute": "jarvis_mute", "unmute": "jarvis_unmute",
-        "be quiet": "jarvis_mute", "shut up": "jarvis_mute",
+        "quit": "jalen_quit", "exit": "jalen_quit", "shut down": "jalen_quit",
+        "pause": "jalen_pause", "resume": "jalen_resume", "wake up": "jalen_resume",
+        "restart": "jalen_restart", "go to sleep": "jalen_sleep",
+        "sleep": "jalen_sleep", "stop listening": "jalen_sleep",
+        "mute": "jalen_mute", "unmute": "jalen_unmute",
+        "be quiet": "jalen_mute", "shut up": "jalen_mute",
     }
     wrong = {}
     for phrase, expected in self_commands.items():
@@ -354,8 +354,8 @@ def test_jarvis_self_controls_are_never_gated():
     from jarvis.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
-    controls = ["jarvis_quit", "jarvis_pause", "jarvis_resume", "jarvis_restart",
-                "jarvis_mute", "jarvis_unmute", "jarvis_sleep", "private_mode",
+    controls = ["jalen_quit", "jalen_pause", "jalen_resume", "jalen_restart",
+                "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_ack", "private_mode",
                 "set_posture", "reload_config", "audit_digest", "morning_brief"]
     gated = {}
     for tool in controls:

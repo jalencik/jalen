@@ -137,15 +137,15 @@ PHRASES: list[tuple[str, str]] = [
     ("find files containing budget", "search_in_files"),
 
     # ---- self (Jarvis's own commands) ------------------------------------------
-    ("quit", "jarvis_quit"),
-    ("pause", "jarvis_pause"),
-    ("resume", "jarvis_resume"),
-    ("be quiet", "jarvis_mute"),
-    ("mute", "jarvis_mute"),
-    ("shut up", "jarvis_mute"),
-    ("unmute", "jarvis_unmute"),
-    ("go to sleep", "jarvis_sleep"),
-    ("wake up", "jarvis_resume"),
+    ("quit", "jalen_quit"),
+    ("pause", "jalen_pause"),
+    ("resume", "jalen_resume"),
+    ("be quiet", "jalen_mute"),
+    ("mute", "jalen_mute"),
+    ("shut up", "jalen_mute"),
+    ("unmute", "jalen_unmute"),
+    ("go to sleep", "jalen_sleep"),
+    ("wake up", "jalen_resume"),
     ("what did you do today", "audit_digest"),
 
     # ---- polite / messy real speech --------------------------------------------
@@ -158,7 +158,7 @@ PHRASES: list[tuple[str, str]] = [
     ("so open chrome", "open_target"),
     ("uh open capcut", "open_target"),
     ("hey jarvis open chrome", "open_target"),
-    ("jarvis, mute", "jarvis_mute"),
+    ("jarvis, mute", "jalen_mute"),
 
     # ---- clipboard / editing (existing coverage, locked in here too) -----------
     ("select all", "keyboard_shortcut"),
@@ -220,8 +220,8 @@ def test_measured_pass_rate(router):
 # test_router_coverage.py's equivalent sweep so this file stands on its own.
 # ============================================================================
 APP_LEVEL_INTENTS = {
-    "jarvis_mute", "jarvis_unmute", "jarvis_sleep", "jarvis_quit", "jarvis_pause",
-    "jarvis_resume", "jarvis_restart", "private_mode", "set_posture", "morning_brief",
+    "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_quit", "jalen_pause",
+    "jalen_resume", "jalen_restart", "private_mode", "set_posture", "morning_brief",
     "audit_digest", "cancel", "acknowledge", "greet", "reload_config",
 }
 
