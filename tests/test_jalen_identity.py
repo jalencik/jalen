@@ -111,14 +111,23 @@ def test_every_transcription_variant_reaches_the_same_command(router, alias):
     assert intent_of(router, f"{alias} quit") == intent_of(router, "jalen quit")
 
 
-def test_the_old_name_is_gone(router):
+def test_the_old_name_is_heard_but_never_spoken(router):
     """
-    At his explicit request: "only Jalen is acceptable, I do not wanna hear
-    about Jarvis." It must not remain as a quiet fallback either — that is
-    how a rename stays half-done for months.
+    Both halves of what he asked, which only look contradictory:
+
+      "I do not wanna hear about Jarvis"   -> he never SAYS it
+      "Jarvis should work everywhere"      -> he still UNDERSTANDS it
+
+    The old name was briefly removed from BOTH, and the audit log shows the
+    cost within the hour: "Hey Jarvis, quit." matched nothing, went to the
+    LLM, and did not quit. Understanding a word he says out of habit is
+    invisible to him and costs nothing.
     """
-    assert "jarvis" not in NAME_ALIASES
-    assert router.route("jarvis quit") is None, "the old name still commands him"
+    assert router.route("jarvis quit").tool == "jalen_quit"
+    assert not [
+        reply for _p, _t, _b, reply in router._rules
+        if reply and "jarvis" in reply.lower()
+    ], "a spoken reply still uses the old name"
 
 
 @pytest.mark.parametrize(

@@ -25,7 +25,12 @@ MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "models"
 class WakeWord:
     def __init__(self, cfg) -> None:
         self.enabled = bool(cfg.get_path("wake.enabled", True))
-        self.model_name = cfg.get_path("wake.model", "hey_jarvis_v0.1")
+        # One name or a list — both accepted, because this key was a single
+        # string for the whole life of the project and every existing config
+        # and test passes one.
+        configured = cfg.get_path("wake.model", "hey_jalen")
+        self.model_names = [configured] if isinstance(configured, str) else list(configured)
+        self.model_name = self.model_names[0]   # kept: callers and tests read it
         self.threshold = float(cfg.get_path("wake.threshold", 0.55))
         self.cooldown_s = float(cfg.get_path("wake.cooldown_s", 1.5))
         self._last_fire = 0.0
@@ -42,12 +47,24 @@ class WakeWord:
                 "openwakeword missing. Run: pip install openwakeword==0.6.0 onnxruntime"
             ) from exc
 
-        local = MODELS_DIR / f"{self.model_name}.onnx"
+        # SEVERAL WAKE MODELS AT ONCE, and predict() returns a score for each.
+        #
+        # He asked for both names to work everywhere, and the acoustic layer
+        # is the one place where that is not free: the "hey jalen" model was
+        # trained with "Hey Jarvis" as an explicit NEGATIVE, so it scores the
+        # old name at 0.00 by design. No threshold recovers that. Loading the
+        # pretrained hey_jarvis model alongside it is what actually makes the
+        # old name wake him.
+        #
+        # Cost is one extra classifier head per frame — the expensive part,
+        # the shared melspectrogram and embedding pass, is computed once for
+        # all of them.
         kwargs = {"inference_framework": "onnx"}  # never omit this on Windows
-        if local.exists():
-            kwargs["wakeword_models"] = [str(local)]
-        else:
-            kwargs["wakeword_models"] = [self.model_name]
+        resolved = []
+        for name in self.model_names:
+            local = MODELS_DIR / f"{name}.onnx"
+            resolved.append(str(local) if local.exists() else name)
+        kwargs["wakeword_models"] = resolved
         self._model = Model(**kwargs)
 
     def reset(self) -> None:

@@ -106,7 +106,17 @@ audio:
 
 wake:
   enabled: true
-  model: "hey_jalen"               # trained here; see scripts/train_wake_word.py
+  # BOTH names wake him, at his request: "Jarvis should work everywhere as
+  # well." The two are listed separately because the acoustic layer cannot
+  # share them — hey_jalen was trained with "Hey Jarvis" as an explicit
+  # negative and scores it 0.00 by design, so no threshold brings the old
+  # name back. Loading the pretrained hey_jarvis model alongside it does.
+  #
+  # Cost is one extra classifier head per frame; the expensive shared
+  # feature pass is computed once for both.
+  model:
+    - "hey_jalen"                  # trained here; see scripts/train_wake_word.py
+    - "hey_jarvis_v0.1"            # pretrained, ships with openWakeWord
 
   # Measured on 2,084 held-out clips the model never saw:
   #

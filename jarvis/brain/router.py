@@ -37,26 +37,78 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 # came back as conversation rather than an exit. Measured before the fix:
 # "jarvis quit" routed in 50ms, "jalen quit" routed never.
 #
-# The old name is GONE from this list, at his explicit request: "only Jalen
-# is acceptable, I do not wanna hear about Jarvis." It survived one day as a
-# legacy alias; keeping it longer meant the old name stayed alive in the one
-# place he interacts with most.
+# A LIST CANNOT COVER THIS, SO IT IS A SHAPE INSTEAD.
 #
-# What replaces it is the set of things SPEECH RECOGNITION actually writes
-# when someone says "Jalen". Whisper does not spell an uncommon name
-# consistently — it produces Jaylen, Jalin, Jaelen, Jalon — and it varies by
-# accent, which matters because he said different people pronounce it
-# differently. A command lost to a spelling the user cannot see or control is
-# the same failure as a command lost to the wrong name.
+# He said it plainly: "I am not being able to speak jalen properly and it is
+# not actually properly hearing that from me... many people speak it
+# different." An enumerated list only ever covers the spellings someone
+# thought of, and every one it misses is a command that silently goes to the
+# LLM or nowhere.
 #
-# "Alan", "Galen" and "Helen" are deliberately NOT here. They are real words
-# and real people's names, and matching them would strip a legitimate subject
-# out of a sentence ("tell Alan I'm late" -> "tell I'm late").
-NAME_ALIASES = (
-    "jalen", "jaylen", "jaylin", "jalin", "jaelen",
-    "jalon", "jaleen", "jalene", "jayleen", "jaylan",
+# So the name is matched by its SHAPE. "Jalen" is j + a vowel + an l + a
+# vowel + n, and every plausible transcription — Jalen, Jaylen, Jaelen,
+# Jailen, Jalin, Jalon, Jaleen, Jaylan, Jhalen, Jaylene — is that shape with
+# different vowels. One pattern covers all of them and the ones nobody has
+# produced yet.
+#
+# Kept deliberately tight at the edges. It requires a leading J, so "Galen"
+# and "Alan" cannot match: those are ordinary names, and matching them would
+# strip a real person out of a sentence ("tell Alan I'm late" -> "tell I'm
+# late"). It also bounds the vowel runs, so it cannot wander into unrelated
+# words.
+_JALEN = r"jh?[aeiouy]{1,3}l{1,2}[aeiouy]{0,3}n{1,2}(?:e|'s|s)?"
+
+# JARVIS WORKS EVERYWHERE, at his explicit request: "alongside it jarvis
+# should work as well, Jarvis should work everywhere as well."
+#
+# This was briefly removed on an earlier instruction to never hear the old
+# name, and the audit log for 21 Aug shows the cost inside the hour —
+# "Hey Jarvis, quit." matched nothing, went to the LLM, and did not quit.
+# Hearing a word and saying it are different things: the old name is gone
+# from everything Jalen SAYS and stays understood in everything he HEARS.
+# "Jaros" and "Jarvers" are in scope because Whisper produced them, from
+# him, in that same session.
+_JARVIS = r"jh?[aeiou]{1,2}r+[vw]?[aeiou]{0,2}r?[sz](?:'s)?|jh?[aeiou]{1,2}r+[oae]s"
+
+# Real names the shape would otherwise swallow. A deny-list is the honest
+# tool here: "Julian" and "Jolene" genuinely ARE j-vowel-l-vowel-n, so no
+# amount of tightening separates them from "Jalen" without also losing real
+# transcriptions of his name. Naming the two exceptions costs nothing and
+# keeps a message addressed to Julian going to Julian.
+_NOT_THE_NAME = (
+    "julian", "juliana", "julianne", "jolene", "jalapeno", "javelin",
 )
-_NAME = "(?:" + "|".join(NAME_ALIASES) + ")"
+# "jolen" is deliberately NOT excluded, though it is a Jolene variant. In
+# this context — spoken at a voice assistant, on his machine — it is far
+# likelier to be a transcription of his name than a reference to a song.
+
+# The trailing word boundary is load-bearing: without it "julian" is only
+# excluded when the utterance ENDS there, so "julian quit" would strip
+# anyway. It was lost once already — a shell here-document turned the
+# backslash-b into a literal 0x08 byte, which compiles fine and matches
+# nothing, so the deny-list silently did nothing at all.
+_NAME = (
+    "(?!(?:" + "|".join(_NOT_THE_NAME) + r")\b)"
+    "(?:" + _JALEN + "|" + _JARVIS + ")"
+)
+
+# The spellings above are also listed explicitly, purely so tests and future
+# readers can see concrete examples of what the shapes are meant to cover.
+# Nothing matches against this list — the patterns do the work.
+NAME_ALIASES = (
+    "jalen", "jaylen", "jaylin", "jalin", "jaelen", "jailen",
+    "jalon", "jaleen", "jalene", "jayleen", "jaylan", "jhalen",
+    "jarvis", "jaros", "jarvers", "jervis", "jarvus",
+)
+
+# What may follow the name and still count as "he was addressing me".
+#
+# This was [,\s]+ — comma or whitespace. Speech recognition punctuates with
+# FULL STOPS, so "Jalen. Hey Jalen. Quit." (his words, 15:54:40) stripped
+# nothing, matched nothing, went to the LLM, and did not quit. A sentence
+# boundary after someone's name is the most natural thing in the world and
+# it made every name-prefixed command fail.
+_AFTER_NAME = r"[.,!?;:\s]+"
 
 
 # ----------------------------------------------------------------------------
@@ -820,7 +872,20 @@ class IntentRouter:
         # "well" on its own is a real word ("hey" alone still means greet)
         # and must not be eaten.
         text = re.sub(r"^(?:hey|hi|yo|so|ok|okay|um+|uh+|well|actually)[,\s]+", "", text, flags=re.I)
-        text = re.sub(r"^(hey |ok |okay )?" + _NAME + r"[,\s]+", "", text, flags=re.I)
+        # Repeated: "Jalen. Hey Jalen. Quit." carries the name twice, and
+        # stripping once leaves "hey jalen. quit" which matches nothing.
+        # (?=\S) — there must be something LEFT after the name. Without it
+        # "Jalen?" stripped to nothing at all: the "?" counted as the
+        # separator and the whole utterance disappeared, so calling his name
+        # on its own stopped being answerable.
+        for _ in range(3):
+            before = text
+            text = re.sub(
+                r"^(?:hey |hi |ok |okay )?" + _NAME + _AFTER_NAME + r"(?=\S)",
+                "", text, flags=re.I,
+            )
+            if text == before:
+                break
         text = re.sub(r"[.!?]+$", "", text)
         text = re.sub(r"\s+", " ", text)
         # strip a trailing address ("pause the music, boss" / "..., Jalen").
