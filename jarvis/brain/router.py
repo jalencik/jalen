@@ -222,6 +222,13 @@ def _rules() -> list[Rule]:
            r"(?:what'?s your |show (?:me )?(?:your )?)?(?:timing|latency)"
            r"(?: report| stats)?|why (?:are you|were you) so slow)\??$", re.I),
          "jalen_timing", n, None),
+        # The self-improvement loop he asked for, reachable without spending
+        # a Claude turn to read a local file.
+        (R(r"^(?:what (?:can'?t|cannot) you do(?: yet)?|"
+           r"what are your (?:gaps|weaknesses|limits)|"
+           r"(?:show|read) (?:me )?(?:your )?weaknesses|"
+           r"what should i fix)\??$", re.I),
+         "review_weaknesses", lambda m: {"limit": 5}, None),
 
         # ---- media (spec E42) ----------------------------------------------
         # Named media APPS resolve to "launch it", before the generic media-key

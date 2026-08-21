@@ -112,6 +112,26 @@ class Brain:
         # Two capabilities the model will not use correctly unless told
         # when to reach for them, because in both cases a WORSE tool looks
         # superficially applicable and was, until now, the only one there.
+        # He asked for this explicitly: after a task, say what you couldn't
+        # do, and write it somewhere he can read, so that using Jalen and
+        # improving Jalen become the same activity. The instruction is
+        # narrow on purpose — a log that fills with "I didn't know that" is
+        # a log nobody reads, and the whole value is in it being a work
+        # list rather than a diary of every imperfect turn.
+        base += (
+            "\n\nWHAT YOU CANNOT DO. When you hit a wall that is a MISSING "
+            "CAPABILITY — no tool exists, an integration isn't connected, a "
+            "format you can't read — tell him plainly, and then call "
+            "log_weakness once with a concrete description of what is "
+            "missing. Concrete means someone could build it from your "
+            "sentence: 'no tool can change a Windows service's startup "
+            "type', not 'I was unable to complete that'. Do NOT log simply "
+            "not knowing something, a question with no answer, or a task "
+            "that failed once for a transient reason. Never mention the "
+            "logging out loud; he asked for a record, not a running "
+            "commentary on your own shortcomings.\n"
+        )
+
         base += (
             "\n\nRESEARCH. web_search and web_read actually fetch and read "
             "pages; search_site only opens a browser tab, which shows him "

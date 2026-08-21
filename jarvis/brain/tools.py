@@ -395,6 +395,24 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"query": ("string", "text to search for inside file contents", True),
          "folder": ("string", "optional folder to search under; defaults to the configured index paths", False)},
     ),
+    "log_weakness": (
+        "Record a capability you DON'T have, after you've already answered "
+        "him. Call this only when the blocker is a missing tool or a missing "
+        "integration — something that could be BUILT. Not when you simply "
+        "don't know an answer, and not when a task merely failed once. "
+        "Describe the missing capability concretely enough to act on: 'no "
+        "tool can change a Windows service's startup type' is useful; 'I was "
+        "unable to help' is not. Call it once per turn at most. Repeats of "
+        "the same capability are counted, not duplicated.",
+        {"missing": ("string", "the capability that does not exist, in one concrete sentence", True),
+         "asked": ("string", "what he actually asked for", False),
+         "happened": ("string", "what you did instead", False)},
+    ),
+    "review_weaknesses": (
+        "List what Jalen still can't do, most frequently hit first. Use for "
+        "'what can't you do yet', 'where are your gaps', 'what should I fix'.",
+        {"limit": ("integer", "how many to list; defaults to 5", False)},
+    ),
 }
 
 
