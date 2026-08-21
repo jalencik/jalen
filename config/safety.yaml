@@ -154,6 +154,12 @@ green:
     # then approves is gated on its own merits, where it belongs.
     # Which browser window is showing what. Read-only, and the thing he
     # has to be able to ask before choosing one to close.
+    - current_page_url      # reads Chrome's own address bar
+    # Typing ordinary text into a field HE has focused. type_text is
+    # already GREEN for the same reason: typing destroys nothing, and he
+    # chose the field.
+    - fill_field
+    - next_field
     - list_browser_tabs
     - focus_browser_tab     # brings a window forward; changes nothing
     - ask_user
@@ -190,6 +196,12 @@ amber:
     # A page can hold unsaved work — a half-written application, a form,
     # a draft. The browser's own "leave site?" prompt is not a substitute
     # for him hearing which window is about to close.
+    # Types a stored secret. AMBER, not RED, because the REAL gate is the
+    # per-domain permission the tool checks itself — RED would ask out
+    # loud on every field even for a site he approved forever, which is
+    # the friction the allowlist exists to remove. He still hears which
+    # secret is going into which domain, and has the stop window.
+    - fill_credential
     - close_browser_tab
     - fix_wifi_power_saving
     - ask_claude_code

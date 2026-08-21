@@ -442,6 +442,31 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
          "body": ("string", "the message", True),
          "file": ("string", "the file, as he'd name it", True)},
     ),
+    "current_page_url": (
+        "The URL of the browser window he is looking at, read from Chrome's "
+        "own address bar. A page cannot forge that, which is why permission "
+        "is checked against it.",
+        {},
+    ),
+    "fill_credential": (
+        "Type a stored secret into the field HE HAS FOCUSED. He clicks the "
+        "box; you type. You never choose the field — that is what stops a "
+        "password landing somewhere unintended.\n"
+        "Checks the site itself. If it comes back saying he has not approved "
+        "the domain, ASK HIM out loud whether it is just this once or from "
+        "now on. Just this once: call again with approved_once=true. From now "
+        "on: call remember_site_decision first, then call again.\n"
+        "NEVER say the secret out loud and never repeat it back.",
+        {"secret": ("string", "which stored secret, by name (list_secrets shows them)", True),
+         "approved_once": ("boolean", "true only after he said 'just this once'", False)},
+    ),
+    "fill_field": (
+        "Type ordinary text into the focused field — a name, a phone number, "
+        "a short answer. Nothing secret goes through here; that is "
+        "fill_credential, which checks the site first.",
+        {"text": ("string", "what to type", True)},
+    ),
+    "next_field": ("Press Tab to move to the next field.", {}),
     "list_browser_tabs": (
         "Every browser window and the page it is showing. Read-only. Call "
         "this BEFORE closing anything so he can choose. Only the ACTIVE tab "
