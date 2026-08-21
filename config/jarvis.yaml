@@ -10,15 +10,10 @@
 # IDENTITY  (spec A1-A8)
 # ---------------------------------------------------------------------------
 identity:
-  # THE WAKE PHRASE AND THE NAME ARE TWO DIFFERENT THINGS, and right now they
-  # disagree on purpose. `name` is what he calls himself and answers to in
-  # every typed or spoken command — that is Jalen, everywhere. `wake_word`
-  # has to match an acoustic model file, and no pretrained model exists for
-  # "hey jalen"; one is being trained (scripts/train_wake_word.py). Until it
-  # passes its false-accept test, the trigger sound stays "hey jarvis"
-  # because a wake model that fires on the television is worse than an old
-  # wake word. Swap both this line and wake.model when the new one ships.
-  wake_word: "hey jarvis"          # acoustic trigger only — see note above
+  # Trained, measured and swapped in. He wakes to his own name now — say
+  # "Hey Jalen", "Hi Jalen" or "OK Jalen". See scripts/train_wake_word.py
+  # for how the model was built and wake.threshold below for the numbers.
+  wake_word: "hey jalen"
   name: "Jalen"
   address_user_as: "Boss"          # A5
   user_name: "O'ktam"
@@ -111,8 +106,33 @@ audio:
 
 wake:
   enabled: true
-  model: "hey_jarvis_v0.1"
-  threshold: 0.55                  # raise if it triggers on the TV, lower if it misses you
+  model: "hey_jalen"               # trained here; see scripts/train_wake_word.py
+
+  # Measured on 2,084 held-out clips the model never saw:
+  #
+  #   threshold    misses him   ordinary speech   deliberate soundalikes
+  #       0.70         2.90%             0.00%                    5.44%
+  #       0.90         3.70%             0.00%                    4.93%
+  #       0.99         7.29%             0.00%                    3.54%
+  #
+  # ORDINARY SPEECH AND ROOM NOISE NEVER TRIGGER IT, at any threshold. That
+  # only became visible when false accepts were split by kind: judged
+  # against one blended number the model looked like it accepted 3-4% of
+  # everything and was refused three times, when in fact every one of those
+  # accepts was a phrase built to sit on the boundary ("Hey Galen", "Hey
+  # Kalen", "Hey Jaylen"). Those are the right thing to train against and
+  # nothing like a room.
+  #
+  # 0.7 rather than the 0.5 the sweep recommends: ordinary speech is clean
+  # at every threshold, so the only real trade is missing him against
+  # someone nearby saying a soundalike, and a little margin costs 0.8% of
+  # wake words. Lower it to 0.5 if it ever misses you; raise it toward 0.99
+  # if a soundalike ever wakes it.
+  #
+  # ONE HONEST CAVEAT: every positive was synthesised speech across 45
+  # voices, not his own voice. The miss rate on him specifically could be
+  # higher than 2.9%, and only using it will show that.
+  threshold: 0.7
   cooldown_s: 1.5                  # ignore re-triggers for this long after a hit
 
 vad:
@@ -395,6 +415,31 @@ telegram:
     # protected by .gitignore, by living under data/, and by safety.yaml's
     # never_touch "*.session" pattern.
     enabled: true                  # Read the E35 warning in SETUP.md
+
+    # Chats Jalen may send to WITHOUT asking out loud first.
+    #
+    # His request, in his words: send to the Machine Learning community and
+    # to Saved Messages "without asking me, without taking my permission".
+    # Both are his own — one is his channel, one is his notebook — and a
+    # spoken confirmation before each of fifty posts is friction with no
+    # safety value.
+    #
+    # Everything NOT on this list still asks, because everything else
+    # send_telegram_message can reach is another person, and a message to a
+    # person cannot be recalled.
+    #
+    # Matching ignores case and punctuation, so "my ML community" and
+    # "AI engineering & Machine learning" resolve to the same entry.
+    #
+    # THIS DOES NOT WEAKEN THE INJECTION GUARD. A pre-approved destination
+    # approves HIM sending there. Text Jalen merely READ — an email, a
+    # message, a web page — asking for a post is still refused outright, and
+    # that ordering is enforced in jarvis/safety.py rather than by
+    # convention. Adding a name here is safe; it is not a way in for anyone
+    # who can get words in front of him.
+    send_without_asking_to:
+      - "Saved Messages"
+      - "AI engineering & Machine learning"
     summarise_unread: true
     monitor_channels: []
 

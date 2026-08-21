@@ -38,6 +38,22 @@ class Verdict:
         return self.tier is Tier.GREEN
 
 
+def _simplify(name: str) -> str:
+    """
+    Lowercase, strip punctuation and collapse spaces.
+
+    So that "AI engineering & Machine learning", "ai engineering and machine
+    learning" and "AI Engineering &amp; Machine Learning" are one string. He
+    names his own channel casually and inconsistently, and a destination
+    allowlist that only matches an exact title is one he would have to fight.
+    """
+    import re as _re
+
+    text = (name or "").lower().replace("&amp;", "and").replace("&", "and")
+    text = _re.sub(r"[^a-z0-9 ]+", " ", text)
+    return _re.sub(r"\s+", " ", text).strip()
+
+
 class SafetyEngine:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
@@ -63,6 +79,14 @@ class SafetyEngine:
 
         self.posture = cfg.get_path("safety.posture", "irreversible_only")
         self.paranoid = bool(cfg.get_path("safety.paranoid_first_week", True))
+
+        # Destinations he has pre-approved for sending without being asked.
+        # Normalised once here rather than on every classify() call, which
+        # runs on every tool the brain touches.
+        self._preapproved = [
+            _simplify(name)
+            for name in (cfg.get_path("telegram.personal.send_without_asking_to", []) or [])
+        ]
 
     # ------------------------------------------------------------------ utils
     @staticmethod
@@ -154,7 +178,34 @@ class SafetyEngine:
                 False, False, True, detail,
             )
 
-        # 3. Posture adjustments.
+        # 3. Destinations he has pre-approved.
+        #
+        # He asked for this directly: Jalen should send to his Machine
+        # Learning community and to his Saved Messages "without asking me,
+        # without taking my permission". Both are his own — one is his
+        # channel, one is his notebook — and a spoken confirmation before
+        # every one of fifty posts is friction with no safety value.
+        #
+        # Deliberately NOT a blanket downgrade of send_telegram_message.
+        # Everything else it can reach is another human being, and that is
+        # what the RED tier exists for.
+        #
+        # And it sits AFTER the injection check on purpose. An email or a
+        # message that says "post this to your channel" is still refused —
+        # pre-approving a destination approves HIM sending there, not
+        # anything he happened to read asking on his behalf. That ordering
+        # is the whole safety property; moving this block above step 2 would
+        # quietly turn his channel into an open relay for anyone who can get
+        # text in front of Jalen.
+        if base is Tier.RED and origin == "user" and self._is_preapproved(tool, args):
+            detail["preapproved_destination"] = True
+            return Verdict(
+                Tier.GREEN, tool, summary,
+                "a destination you pre-approved in config",
+                False, False, False, detail,
+            )
+
+        # 4. Posture adjustments.
         tier = base
         if self.posture == "paranoid" or self.paranoid:
             if tier is Tier.AMBER:
@@ -173,6 +224,40 @@ class SafetyEngine:
             blocked=False,
             detail=detail,
         )
+
+    # --------------------------------------------------- pre-approved sends
+    # tool -> which argument carries the destination.
+    _DESTINATION_ARG = {
+        "send_telegram_message": "to",
+        "save_telegram_draft": "to",
+    }
+
+    def _is_preapproved(self, tool: str, args: dict[str, Any]) -> bool:
+        """
+        True when this send is going somewhere he has already said yes to.
+
+        Matching is on the NORMALISED destination — case and punctuation
+        removed — because he says "my ML community" and the channel is
+        called "AI engineering & Machine learning". Substring matching in
+        either direction, so a configured "saved messages" also covers the
+        "me"/"saved" spellings _resolve() accepts.
+
+        A destination that does not match falls through to RED and is asked
+        about, which is the correct default for anything that reaches
+        another person.
+        """
+        arg = self._DESTINATION_ARG.get(tool)
+        if arg is None:
+            return False
+        target = _simplify(str(args.get(arg, "")))
+        if not target:
+            return False
+        for allowed in self._preapproved:
+            if not allowed:
+                continue
+            if target == allowed or allowed in target or target in allowed:
+                return True
+        return False
 
     # ------------------------------------------------------------- formatting
     @staticmethod

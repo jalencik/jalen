@@ -157,10 +157,19 @@ def check_tts(text: str = "This is a Jalen self test.") -> dict:
 
 
 def check_wake_word() -> dict:
-    """True-positive / true-negative test with no human: 'hey jarvis' must
-    fire, an unrelated sentence must not. Fresh WakeWord instance per case so
-    the cooldown from one case can't mask the other's real score."""
-    positive_audio = synth_16k("hey jarvis")
+    """
+    True-positive / true-negative test with no human: the configured wake
+    phrase must fire, an unrelated sentence must not. Fresh WakeWord
+    instance per case so the cooldown from one case can't mask the other's
+    real score.
+
+    The positive comes from config rather than a literal. It was hardcoded
+    as "hey jarvis", so the day the wake model was retrained for "hey jalen"
+    this test failed while reporting nothing about the new model — it was
+    synthesising a phrase the assistant had deliberately stopped answering
+    to.
+    """
+    positive_audio = synth_16k(CONFIG.get_path("identity.wake_word", "hey jalen"))
     negative_audio = synth_16k("what's the weather like")
 
     wake_pos = WakeWord(CONFIG)

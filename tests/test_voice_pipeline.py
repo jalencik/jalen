@@ -42,8 +42,11 @@ def test_tts_is_real():
 
 
 def test_wake_word_fires_on_true_positive_not_on_true_negative():
-    """Real true-positive/true-negative test: 'hey jarvis' fires,
-    'what's the weather like' does not."""
+    """
+    Real true-positive/true-negative test: the CONFIGURED wake phrase fires,
+    'what's the weather like' does not. Reads the phrase from config so a
+    retrained wake model is tested rather than the phrase it replaced.
+    """
     result = sv.check_wake_word()
     assert result["true_positive_fired"], (
         f"wake word never fired on positive audio (best score "
