@@ -290,6 +290,13 @@ def _rules() -> list[Rule]:
         # the most expensive one.
         (R(r"^(?:hey |ok |okay )?" + _NAME + r"$", re.I),
          "jalen_ack", n, "Yes, Boss?"),
+        # "Read it all." The spoken-length cap is a default for answers he
+        # did not ask to hear, not a ceiling on what he is allowed to hear.
+        (R(r"^(?:read (?:it |that |the )?(?:all|whole thing|rest|everything)"
+           r"|read (?:it|that) (?:out |aloud )?(?:in full|to the end)"
+           r"|finish reading|keep reading|continue reading"
+           r"|read the whole (?:thing|answer|post|email))$", re.I),
+         "jalen_read_all", n, None),
         # Resizing the orb by voice, because the mouse cannot reach it. It is
         # click-through while idle — deliberately, since a 420-pixel circle in
         # the middle of the screen that ate clicks would be intolerable — and

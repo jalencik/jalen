@@ -168,6 +168,9 @@ class Jalen:
         # see the stitching block in process().
         self._last_user_text = ""
         self._last_user_at = 0.0
+        # The last answer that was cut short for length, so he can ask
+        # to hear the rest.
+        self._last_full_text = ""
 
         self.end_phrases = [p.lower() for p in cfg.get_path("conversation.end_phrases", [])]
         self.kill_phrases = [p.lower() for p in cfg.get_path("safety.kill_phrases", [])]
@@ -287,6 +290,7 @@ class Jalen:
         spoken, full = self.speaker.summarise_if_long(text)
         if full:
             self.transcript.show("Full answer", full)
+            self._last_full_text = full
         self.audit.utterance(text, who="jarvis")
         threading.Thread(target=self.speaker.say, args=(spoken,), daemon=True).start()
 
@@ -505,6 +509,18 @@ class Jalen:
             self.paused = False
             self.orb.set_state("idle")
             return intent.reply
+        if tool == "jalen_read_all":
+            # No cap. He asked for this by name: "it should have read that
+            # aloud till the end". The length limit is a default for answers
+            # he did not ask to hear in full, not a rule about what he is
+            # allowed to hear.
+            if not self._last_full_text:
+                return "There's nothing on screen I cut short."
+            threading.Thread(
+                target=self.speaker.say, args=(self._last_full_text,),
+                daemon=True, name="jalen-read-all",
+            ).start()
+            return None
         if tool == "jalen_orb_size":
             delta = int(intent.args.get("delta", 0))
             self.orb.resize_by(delta)
@@ -693,17 +709,35 @@ class Jalen:
         def on_text(chunk: str) -> None:
             # Spec B15 still applies: long answers are summarised aloud and
             # shown in full on screen. Streaming means enforcing that as the
-            # text arrives rather than measuring a finished string — once the
-            # reply runs long, stop feeding the speaker and let the
-            # transcript window carry the remainder.
+            # text arrives rather than measuring a finished string.
+            #
+            # THE CHUNK THAT CROSSES THE LIMIT IS SPOKEN, NOT DISCARDED. It
+            # used to be thrown away whole and replaced with the "short
+            # version" line, which is why he reported Jalen showing him the
+            # transcript window and then stopping "after 2 words": the model
+            # does not stream one character at a time, and a single chunk can
+            # be a whole paragraph. If the FIRST chunk was over the limit,
+            # literally nothing of the answer was spoken — just the apology
+            # for not speaking it.
+            #
+            # Now it speaks up to the limit, cut at a sentence end so it
+            # stops on a full stop rather than mid-word.
             if state["overflowed"]:
                 return
+            room = max_spoken - state["chars"]
             state["chars"] += len(chunk)
-            if state["chars"] > max_spoken:
-                state["overflowed"] = True
-                stream.push(" That's the short version, the full text is on screen.")
+            if state["chars"] <= max_spoken:
+                stream.push(chunk)
                 return
-            stream.push(chunk)
+
+            state["overflowed"] = True
+            head = chunk[:room] if room > 0 else ""
+            cut = max(head.rfind("."), head.rfind("!"), head.rfind("?"))
+            if cut > 0:
+                head = head[: cut + 1]
+            if head.strip():
+                stream.push(head)
+            stream.push(" That's the short version, the full text is on screen.")
 
         # A turn that calls tools first produces no text for seconds. Silence
         # reads as "it's broken" — he said exactly that, more than once, in
@@ -734,6 +768,10 @@ class Jalen:
 
         if state["overflowed"]:
             self.transcript.show("Full answer", reply)
+            # Kept so "read it all" can speak the part he did not hear. The
+            # cap exists because a forty-second monologue is unbearable, not
+            # because the rest of the answer is worthless.
+            self._last_full_text = reply
         stream.close()
         self.audit.utterance(reply, who="jarvis")
 
