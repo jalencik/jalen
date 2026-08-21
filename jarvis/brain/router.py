@@ -216,6 +216,12 @@ def _rules() -> list[Rule]:
         # the most expensive one.
         (R(r"^(?:hey |ok |okay )?" + _NAME + r"$", re.I),
          "jalen_ack", n, "Yes, Boss?"),
+        # "Why are you so slow" was unanswerable for months because nothing
+        # measured a turn. Now it is a question with a number for an answer.
+        (R(r"^(?:how (?:fast|quick|slow) (?:was that|were you|are you)|"
+           r"(?:what'?s your |show (?:me )?(?:your )?)?(?:timing|latency)"
+           r"(?: report| stats)?|why (?:are you|were you) so slow)\??$", re.I),
+         "jalen_timing", n, None),
 
         # ---- media (spec E42) ----------------------------------------------
         # Named media APPS resolve to "launch it", before the generic media-key

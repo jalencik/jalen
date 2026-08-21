@@ -70,6 +70,11 @@ class Speaker:
         self._cache_lock = threading.Lock()
         self._audio_cache: dict[str, tuple[np.ndarray, int]] = {}
         self.on_state = lambda state: None  # set by the orchestrator to drive the orb
+        # Fired the instant audio first reaches the output device. This is
+        # the end of the silence the user experiences as "slowness" — see
+        # jarvis/timing.py for why that moment, specifically, is the one
+        # worth measuring.
+        self.on_audio_start = lambda: None
 
     # --------------------------------------------------------------- control
     @property
@@ -137,6 +142,16 @@ class Speaker:
         chunk = max(256, rate // 20)  # ~50 ms
         stream = sd.OutputStream(samplerate=rate, channels=1, dtype="float32")
         stream.start()
+        # The single moment the waiting ends. Both paths into playback —
+        # say() and SpeechStream — funnel through here, which is why the
+        # hook lives at this level rather than in each of them. Fires once
+        # per sentence; TurnTimer.mark() keeps only the first, because only
+        # the first is when the silence actually stopped.
+        try:
+            self.on_audio_start()
+        except Exception:
+            # Instrumentation must never be able to break speech.
+            pass
         try:
             for i in range(0, len(pcm), chunk):
                 if self._interrupt.is_set():

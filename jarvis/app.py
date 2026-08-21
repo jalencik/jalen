@@ -35,6 +35,7 @@ from .brain.router import IntentRouter
 from .config import CONFIG, SECRETS
 from . import runtime
 from .safety import SafetyEngine, Tier
+from .timing import TimingLog, TurnTimer
 from . import tools as systools
 from .ui.orb import Orb, TranscriptWindow
 
@@ -173,6 +174,14 @@ class Jalen:
         self.address = cfg.get_path("identity.address_user_as", "")
 
         self.speaker.on_state = self.orb.set_state
+
+        # Per-turn stopwatch. "Why is it so slow" had no answer before this,
+        # because the only evidence was the wall-clock gap between his
+        # utterance and Jalen's — a number that conflates waiting with
+        # Jalen talking. See jarvis/timing.py.
+        self.timings = TimingLog()
+        self._turn_timer: TurnTimer | None = None
+        self.speaker.on_audio_start = self._mark_first_audio
 
     # -------------------------------------------------------------- event loop
     def _start_loop(self) -> None:
@@ -336,6 +345,58 @@ class Jalen:
         return None
 
     # ---------------------------------------------------------------- handling
+    # ------------------------------------------------------------- timing
+    def _mark_first_audio(self) -> None:
+        timer = self._turn_timer
+        if timer is not None:
+            timer.mark("first_audio")
+
+    def _await_playback(self, grace_s: float = 0.5, limit_s: float = 180.0) -> None:
+        """
+        Block until the reply has actually finished playing.
+
+        Needed because say() is asynchronous: it hands the audio to a worker
+        thread and returns immediately, so a router turn's dispatch thread
+        reaches its `finally` while Jalen is still mid-sentence — sometimes
+        before the sound has started at all. Marking "done" there recorded
+        turns that spoke for zero seconds and frequently had no first_audio
+        mark whatsoever, which is worse than not measuring: it pulls the
+        median silently toward zero and makes a regression look like an
+        improvement.
+
+        The brain path does not need this (SpeechStream.close() already
+        blocks), but calling it there is harmless — `speaking` is false by
+        then and both loops fall straight through.
+
+        Two waits, not one. The first is a short grace period for playback
+        to START, because the worker thread may not have set the flag yet;
+        without it, a fast turn would sail past a flag that is about to be
+        set. The second is the real wait, bounded so a wedged audio device
+        can never hang a dispatch thread forever.
+        """
+        deadline = time.monotonic() + grace_s
+        while not self.speaker.speaking and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        deadline = time.monotonic() + limit_s
+        while self.speaker.speaking and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+    def _finish_timing(self, timer: TurnTimer | None) -> None:
+        """
+        Close a turn's stopwatch and write one audit line.
+
+        A turn that never produced audio — muted, or a tool-only action with
+        nothing to say — is recorded anyway with whatever marks it does
+        have. Dropping those would bias the median toward the turns that
+        went well, which is the opposite of what this is for.
+        """
+        if timer is None:
+            return
+        timer.mark("done")
+        self.timings.record(timer)
+        self.audit.write("system", summary=timer.summary())
+
     # ------------------------------------------------------------- hotkey
     def _apply_signal(self, signal: str) -> bool:
         """
@@ -414,6 +475,11 @@ class Jalen:
             self.paused = False
             self.orb.set_state("idle")
             return intent.reply
+        if tool == "jalen_timing":
+            # Deliberately reports the PREVIOUS turn, not this one: this
+            # turn has not finished, and its own first_audio mark is the
+            # sound of it answering the question.
+            return self.timings.report()
         if tool == "jalen_ack":
             # He said the name and nothing else. Answer and stay open — the
             # follow-up listen in run() is what makes "Jalen ... open chrome"
@@ -662,6 +728,12 @@ class Jalen:
             return
 
         intent = self.router.route(text)
+        # Which path answered is recorded, because the two have completely
+        # different budgets: a router hit should be under half a second and
+        # a brain turn cannot be. One blended median would hide whichever of
+        # them had regressed.
+        if self._turn_timer is not None:
+            self._turn_timer.route = "router" if intent is not None else "brain"
         if intent is not None:
             reply = self.handle_local(intent)
             if reply is not None:
@@ -729,7 +801,7 @@ class Jalen:
 
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
 
-        def dispatch_turn(text: str, turn_id: int) -> None:
+        def dispatch_turn(text: str, turn_id: int, timer: TurnTimer) -> None:
             """
             Run process() on its own thread so this loop keeps reading mic
             frames while a turn is in flight — including while it's stuck
@@ -747,6 +819,8 @@ class Jalen:
                 with systools.com_initialized():
                     self.process(text)
             finally:
+                self._await_playback()
+                self._finish_timing(timer)
                 with self._turn_lock:
                     self._active_turns.discard(turn_id)
             # Only the newest turn owns the UI state and the follow-up window.
@@ -888,6 +962,12 @@ class Jalen:
                     self.orb.set_state("muted" if self.muted else "idle")
                     continue
 
+                # The stopwatch starts the moment the microphone decided he
+                # had finished — not when the turn is dispatched. Everything
+                # between here and the first sound is silence he sits in.
+                timer = TurnTimer()
+                timer.mark("speech_end")
+
                 self.orb.set_state("thinking")
                 try:
                     text = self.stt.transcribe(utterance)
@@ -896,6 +976,9 @@ class Jalen:
                     self.say("I didn't catch that — speech recognition failed.")
                     self.orb.set_state("idle")
                     continue
+
+                timer.mark("transcript")
+                timer.text = text or ""
 
                 if not text:
                     self.orb.set_state("idle")
@@ -943,9 +1026,14 @@ class Jalen:
                     self.say("I'm still on the last one — give me a second.")
                     self.orb.set_state("thinking")
                     continue
+                # The speaker's first-audio callback needs to find THIS
+                # turn's timer, so publish it before the thread starts.
+                # Overlapping turns overwrite it deliberately: the newest
+                # turn is the one whose silence he is currently sitting in.
+                self._turn_timer = timer
                 threading.Thread(
-                    target=dispatch_turn, args=(text, turn_id), daemon=True,
-                    name=f"jarvis-turn-{turn_id}",
+                    target=dispatch_turn, args=(text, turn_id, timer), daemon=True,
+                    name=f"jalen-turn-{turn_id}",
                 ).start()
 
     def shutdown(self) -> None:
