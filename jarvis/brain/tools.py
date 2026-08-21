@@ -423,6 +423,43 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"max_chats": ("integer", "how many chats to pull from; defaults to 6", False),
          "per_chat": ("integer", "messages per chat; defaults to 12", False)},
     ),
+    "vault_status": (
+        "Whether the credentials vault exists and is unlocked. Never returns "
+        "a secret.",
+        {},
+    ),
+    "unlock_vault": (
+        "Unlock the vault for this session with his passphrase. Ask him for "
+        "it out loud; never guess it, never read it from a file, and never "
+        "repeat it back. It expires by itself after an hour.",
+        {"passphrase": ("string", "the passphrase he says", True)},
+    ),
+    "lock_vault": ("Forget the unlocked secrets immediately.", {}),
+    "list_secrets": (
+        "The NAMES of what is stored — never the values. Use for 'what do "
+        "you have of mine'.",
+        {},
+    ),
+    "site_permission": (
+        "What he has already decided about typing his details into a site: "
+        "always, never, or ask. CALL THIS BEFORE filling any credential "
+        "field. 'ask' means ask him — that is the design, not a failure.",
+        {"url": ("string", "the page URL or domain", True)},
+    ),
+    "remember_site_decision": (
+        "Record that he approves a site FOREVER, or blocks it forever. Only "
+        "after asking him whether this is just this once or from now on — "
+        "'once' is deliberately not storable, which is what makes it once.",
+        {"url": ("string", "the page URL or domain", True),
+         "decision": ("string", "always | never", True)},
+    ),
+    "forget_site_decision": (
+        "Undo a standing decision, so the site is asked about again.",
+        {"url": ("string", "the page URL or domain", True)},
+    ),
+    "list_site_decisions": (
+        "Every site he has approved or blocked, so he can audit it.", {},
+    ),
     "diagnose": (
         "Find out what is actually wrong with this machine. Read-only. Pass "
         "an `area` when he names a symptom — wifi, storage, updates, "

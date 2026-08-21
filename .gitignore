@@ -19,3 +19,5 @@ venv/
 start_jalen*.vbs
 start_jarvis.vbs
 data/wake_training/
+data/vault.json
+data/site_approvals.json

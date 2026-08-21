@@ -139,6 +139,15 @@ green:
     - open_windows_security
     - open_startup_settings
     - open_storage_settings
+    # The vault's read side. None of these returns a secret VALUE — listing
+    # names is useful, and a value in a tool result would land in the
+    # transcript, the audit log and possibly the speakers. get_secret is
+    # deliberately NOT a tool at all; it is called by the code that types.
+    - vault_status
+    - lock_vault            # forgetting a secret is never the dangerous direction
+    - list_secrets          # names only
+    - site_permission       # what he already decided about a site
+    - list_site_decisions   # so he can audit what he has agreed to
     - log_weakness          # appends to Jalen's own notes about itself
     - review_weaknesses     # reads them back
 
@@ -182,6 +191,12 @@ red:
     # the real reason is that a voice assistant which deletes without asking
     # is one bad transcription away from a disaster, and "it was only temp
     # files" is exactly how that boundary erodes.
+    # Unlocking loads every stored secret into memory, and the two decision
+    # tools change what Jalen is allowed to type into a website FOREVER.
+    # Each of those deserves a spoken yes.
+    - unlock_vault
+    - remember_site_decision
+    - forget_site_decision
     - clear_temp_files
     - send_email                # F46
     - send_telegram_message     # F46

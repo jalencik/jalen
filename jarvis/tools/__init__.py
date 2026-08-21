@@ -18,7 +18,7 @@ from typing import Any
 from . import (
     coding, desktop, documents, filesystem, gcalendar, gmail, handoff,
     launcher, memory, messaging, repairs, research, selfeval, sysinfo,
-    system, technician, voice, web,
+    system, technician, vault, voice, web,
 )
 
 
@@ -56,7 +56,7 @@ REGISTRY: dict[str, Any] = {}
 for _module in (
     system, desktop, filesystem, documents, memory, launcher, sysinfo, web,
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
-    technician, repairs,
+    technician, repairs, vault,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:
