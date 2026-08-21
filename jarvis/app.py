@@ -162,6 +162,11 @@ class Jalen:
         self._turn_seq = 0               # monotonic id of the newest turn
         self._active_turns: set[int] = set()
         self._answer_q: queue.Queue[Optional[bool]] = queue.Queue()
+        # Free-text answers, separate from the yes/no queue. Sharing one
+        # queue would let a stray "yes" satisfy "what's your phone
+        # number", and a phone number satisfy a delete confirmation.
+        self._reply_q: queue.Queue[str] = queue.Queue()
+        self._awaiting_reply = False
         self._awaiting_confirmation = False
         self._awaiting_stop = False
         # Last thing he said, for re-attaching a continuation fragment —
@@ -177,6 +182,16 @@ class Jalen:
         self.address = cfg.get_path("identity.address_user_as", "")
 
         self.speaker.on_state = self.orb.set_state
+
+        # Let the brain ask him a question and wait for the answer. The
+        # tool layer gets exactly this one capability rather than a
+        # reference to the whole app.
+        from .tools import interaction
+        interaction.install(
+            lambda question, timeout_s: self._run_coro(
+                self.ask_user(question, timeout_s)
+            )
+        )
 
         # Per-turn stopwatch. "Why is it so slow" had no answer before this,
         # because the only evidence was the wall-clock gap between his
@@ -379,6 +394,48 @@ class Jalen:
         return None
 
     # ---------------------------------------------------------------- handling
+    async def ask_user(self, question: str, timeout_s: float = 180.0) -> str:
+        """
+        Say a question and wait for a spoken answer. Blocks the turn.
+
+        THREE MINUTES, not the twenty seconds a yes/no gets. He asked for
+        exactly this: "after asking the question, it might take some time,
+        and it should not execute anything until I give my answer to it."
+        Looking up a passport number or a referee's email is not a
+        twenty-second job, and a form half-filled with a guess is worse
+        than one that waited.
+
+        Returns "" if he never answers, and the caller must treat that as
+        "stop", never as "carry on without it".
+        """
+        self.orb.set_state("blocked")
+        self.say_blocking(question)
+        self._awaiting_reply = True
+        # Drain first: anything already queued predates the question and is
+        # an answer to something else.
+        while not self._reply_q.empty():
+            try:
+                self._reply_q.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            answer = await asyncio.get_running_loop().run_in_executor(
+                None, self._wait_for_reply, timeout_s
+            )
+        finally:
+            self._awaiting_reply = False
+            self.orb.set_state("thinking")
+        if not answer:
+            self.say_blocking("No answer, so I've left that one.")
+            return ""
+        return answer
+
+    def _wait_for_reply(self, timeout: float) -> str:
+        try:
+            return self._reply_q.get(timeout=timeout)
+        except queue.Empty:
+            return ""
+
     # ------------------------------------------------------------- timing
     def _mark_first_audio(self) -> None:
         timer = self._turn_timer
@@ -808,6 +865,15 @@ class Jalen:
             self._answer_q.put(False)
             return
 
+        # A pending open QUESTION takes everything he says as the answer.
+        # Checked before the yes/no branch and before the router, because
+        # while a question is open there is no other interpretation: "open
+        # chrome" said in answer to "what's your phone number" is an answer,
+        # not a command, and routing it would be both wrong and irreversible.
+        if self._awaiting_reply:
+            self._reply_q.put(text)
+            return
+
         # a pending yes/no takes priority over everything else
         if self._awaiting_confirmation:
             answer = self._parse_yes_no(text)
@@ -1012,7 +1078,10 @@ class Jalen:
                     # itself a listening window — you shouldn't have to say
                     # "hey jarvis" again just to answer a question it just
                     # asked you.
-                    awaiting_reply = self._awaiting_confirmation or self._awaiting_stop
+                    awaiting_reply = (
+                        self._awaiting_confirmation or self._awaiting_stop
+                        or self._awaiting_reply
+                    )
                     if (in_follow_up or awaiting_reply) and self.vad.probability(frame) >= self.vad.threshold:
                         listening = True
                         wake_initiated = False   # a sound opened this, not him

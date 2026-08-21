@@ -423,6 +423,18 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"max_chats": ("integer", "how many chats to pull from; defaults to 6", False),
          "per_chat": ("integer", "messages per chat; defaults to 12", False)},
     ),
+    "ask_user": (
+        "Ask him something and WAIT for the answer. Blocks for up to three "
+        "minutes — use it whenever you need a fact only he has: a phone "
+        "number, a date, which of two options he meant, a referee's email. "
+        "ASK ONE THING AT A TIME; a question with three parts gets one "
+        "answer covering one of them.\n"
+        "If it returns no answer, STOP. Do not fill the field with a guess, "
+        "do not skip it silently, and do not submit the form — say what you "
+        "were missing and leave it for him.",
+        {"question": ("string", "one specific question, phrased for speaking aloud", True),
+         "timeout_s": ("number", "seconds to wait; defaults to 180", False)},
+    ),
     "vault_status": (
         "Whether the credentials vault exists and is unlocked. Never returns "
         "a secret.",

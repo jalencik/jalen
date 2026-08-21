@@ -143,6 +143,9 @@ green:
     # names is useful, and a value in a tool result would land in the
     # transcript, the audit log and possibly the speakers. get_secret is
     # deliberately NOT a tool at all; it is called by the code that types.
+    # Asking him a question and waiting changes nothing by itself. What he
+    # then approves is gated on its own merits, where it belongs.
+    - ask_user
     - vault_status
     - lock_vault            # forgetting a secret is never the dangerous direction
     - list_secrets          # names only
