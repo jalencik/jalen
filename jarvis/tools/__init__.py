@@ -16,7 +16,8 @@ import contextlib
 from typing import Any
 
 from . import (
-    attachments, browsertabs, coding, desktop, documents, filesystem,
+    attachments, browsertabs, bulkmail, coding, desktop, documents,
+    filesystem,
     gcalendar, gmail,
     handoff,
     interaction,
@@ -60,6 +61,7 @@ for _module in (
     system, desktop, filesystem, documents, memory, launcher, sysinfo, web,
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
     technician, repairs, vault, interaction, browsertabs, attachments,
+    bulkmail,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:

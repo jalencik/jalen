@@ -234,7 +234,16 @@ brain:
   model_default: "claude-sonnet-5"     # normal conversation + tool use
   model_deep: "claude-opus-4-5"        # multi-step planning, hard debugging
   escalate_on_keywords: ["plan", "design", "debug", "why does", "architecture", "refactor"]
-  max_turns_per_request: 12        # runaway guard
+  # Runaway guard. Twelve was chosen when a turn meant "open Chrome", and
+  # it is too tight for the work he actually asks for: reading a hundred
+  # emails, researching a lab, writing a post and saving it is a dozen tool
+  # calls before it has done anything wrong. He hit this in a real session —
+  # Jalen ran five searches and was still going when the budget ran out.
+  #
+  # Still a guard, not a licence: every tool call inside it passes the same
+  # safety gate, so a longer leash cannot reach anything a short one could
+  # not. What it costs is allowance, which is why it is not unlimited.
+  max_turns_per_request: 30
   # [NOT IMPLEMENTED] never read; history is not trimmed. The Agent SDK
   # keeps its own conversation context, which is what actually applies.
   context_window_turns: 20         # how much conversation it keeps in working memory

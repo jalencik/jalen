@@ -122,6 +122,7 @@ green:
     # Gmail / Calendar / personal Telegram reads. All strictly read-only, and
     # every body they return is fenced as UNTRUSTED CONTENT and scanned by
     # SafetyEngine.scan_for_injection() before the brain ever sees it.
+    - scan_inbox            # reads a lot of mail in one call; changes nothing
     - unread_email_summary  # "summarise my emails" — lists, changes nothing
     - unread_email_headline # the same count as one spoken sentence
     - google_status         # which account is connected; no message access

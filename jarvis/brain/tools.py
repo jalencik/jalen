@@ -510,6 +510,18 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "list_site_decisions": (
         "Every site he has approved or blocked, so he can audit it.", {},
     ),
+    "scan_inbox": (
+        "Go through a LOT of mail in one call — up to 300 — and sort it into "
+        "worth-a-look, ordinary, and automated. Use this instead of repeated "
+        "search_email whenever he says 'all my emails', 'read 100 emails', "
+        "or 'anything since the 10th'. search_email caps at 25 and grinding "
+        "through 100 that way burns the turn limit.\n"
+        "`query` is Gmail syntax: after:2026/08/10, from:edu, is:unread. "
+        "The sorting is a GUESS from sender and subject — read anything "
+        "close with read_email before calling it an opportunity.",
+        {"query": ("string", "Gmail search syntax; empty means the inbox", False),
+         "max_emails": ("integer", "how many to scan; defaults to 100, max 300", False)},
+    ),
     "diagnose": (
         "Find out what is actually wrong with this machine. Read-only. Pass "
         "an `area` when he names a symptom — wifi, storage, updates, "
