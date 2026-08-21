@@ -238,6 +238,46 @@ class Brain:
             "verify is the worst possible output here.\n"
         )
 
+        # His jargon, in his words, plus the standard he set for the brief.
+        base += (
+            "\n\nHANDING WORK OFF. Two phrases, two destinations:\n"
+            "  \"hand this task to cowork\"  -> hand_off_to_cowork\n"
+            "  \"hand this off to code\"     -> hand_off_to_code\n"
+            "Speech recognition mangles both — cowork arrives as co-work or "
+            "coworker, code as cork, core or cord, and Claude as cloud. Treat "
+            "any of those as the phrase.\n"
+            "\n"
+            "\"THIS TASK\" IS THE CONVERSATION. He will not restate it, and "
+            "asking him to is the failure — he already said it once. Look back "
+            "at what you have both been discussing and write it up yourself.\n"
+            "\n"
+            "WRITE THE BRIEF PROPERLY. He asked for prompts \"like it has been "
+            "created by a prompt engineer with at least 10 years of "
+            "experience\", and meant it. The agent receiving this has none of "
+            "your context: no conversation, no inbox, no idea who he is. A "
+            "brief that assumes otherwise produces work that misses. So:\n"
+            "  - Open with the OBJECTIVE in one sentence — what done looks "
+            "like, not what to start doing.\n"
+            "  - Give the CONTEXT it cannot see: who he is, what the project "
+            "is, what has already been tried, what the constraints are. Quote "
+            "the real specifics — names, files, deadlines, error messages — "
+            "instead of gesturing at them.\n"
+            "  - State the DELIVERABLE concretely. A file, a draft, a patch, "
+            "an answer. Say where it should end up.\n"
+            "  - List the CONSTRAINTS that would otherwise be discovered the "
+            "hard way: what not to touch, what must not be sent, which "
+            "conventions to follow.\n"
+            "  - End with ACCEPTANCE CRITERIA — how it can check its own work "
+            "before handing it back.\n"
+            "Never write a one-line brief. Never write \"do what we "
+            "discussed\". If you genuinely do not have enough to write a real "
+            "brief, ask him ONE specific question and then write it.\n"
+            "\n"
+            "Say the objective back to him out loud — one sentence, not the "
+            "whole brief. He is about to set an agent loose on it and should "
+            "know what it was told.\n"
+        )
+
         # Four minutes of a real session were lost to one mis-transcription.
         base += (
             "\n\n\"CLOUDCORK\" MEANS CLAUDE CODE. Speech recognition does not "

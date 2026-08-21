@@ -151,6 +151,12 @@ amber:
     # honest middle: he hears which folder and which prompt, and has two
     # seconds to say stop.
     - ask_claude_code
+    # Same tier and the same reasoning: this starts an autonomous agent
+    # with its own tool access. He hears the destination and the brief
+    # and has two seconds to say stop. Neither one PRESSES SEND — the
+    # cowork handoff pastes and waits for him.
+    - hand_off_to_cowork
+    - hand_off_to_code
 
 red:
   reason: "Irreversible, public, spends money, or speaks as you. (spec F46)"

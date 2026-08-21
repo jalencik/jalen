@@ -423,6 +423,21 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"max_chats": ("integer", "how many chats to pull from; defaults to 6", False),
          "per_chat": ("integer", "messages per chat; defaults to 12", False)},
     ),
+    "hand_off_to_cowork": (
+        "Open the Claude desktop app with a fully written brief on the "
+        "clipboard, pasted in, ready for him to review and send. This is what "
+        "\"hand this task to cowork\" means. YOU write the prompt — it is "
+        "whatever you were both just discussing, turned into a brief a "
+        "stranger could act on. It does not press send.",
+        {"prompt": ("string", "the complete, self-contained brief", True)},
+    ),
+    "hand_off_to_code": (
+        "Start Claude Code on a fully written brief, in a project folder. "
+        "This is what \"hand this off to code\" means. Use it for work on "
+        "files and repositories; use hand_off_to_cowork for everything else.",
+        {"prompt": ("string", "the complete, self-contained brief", True),
+         "folder": ("string", "project folder; defaults to the current one", False)},
+    ),
     "log_weakness": (
         "Record a capability you DON'T have, after you've already answered "
         "him. Call this only when the blocker is a missing tool or a missing "
