@@ -234,6 +234,64 @@ class Orb:
         ceiling = int(usable * 0.85 / WAVE_HEADROOM)
         return max(MIN_ORB, min(MAX_ORB, ceiling, int(size)))
 
+    def _glow(self, canvas: tk.Canvas, cx: float, cy: float, radius: float,
+              colour: str, *, steps: int = 22, core: float = 1.0) -> None:
+        """
+        A soft sphere, faked with concentric circles.
+
+        A Tk canvas item has no alpha channel, so there is no real radial
+        gradient and no blur. What there IS: enough concentric ovals, each a
+        step further blended toward the background, reads as one glowing
+        ball at any size the eye cares about. Twenty-two steps is where the
+        banding stops being visible on this display.
+
+        Drawn outside-in — largest and dimmest first — because each oval is
+        opaque and paints over the one before it.
+        """
+        for i in range(steps, 0, -1):
+            t = i / steps                       # 1.0 at the rim, ~0 at the core
+            r = radius * t
+            # Squared falloff: light does not fade linearly, and a linear
+            # ramp looks like a flat disc with a fuzzy edge rather than a
+            # sphere.
+            shade = _mix(CHROMA, colour, core * (1.0 - t) ** 2 + 0.06)
+            canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=shade, outline="")
+
+    def _draw_orbits(self, canvas: tk.Canvas, cx: float, cy: float,
+                     base: float, now: float, colour: str) -> None:
+        """
+        Rings around the sphere, tilting as they turn.
+
+        An ellipse whose height oscillates is a circle seen edge-on and then
+        face-on — the cheapest convincing 3D cue there is, and it costs three
+        create_oval calls. This is what makes it read as a sphere with rings
+        around it rather than a flat circle with circles on top.
+        """
+        for index in range(3):
+            phase = (now * 0.35 + index / 3.0) % 1.0
+            tilt = math.sin(phase * math.tau)          # -1 edge-on .. 1 edge-on
+            rx = base * (1.02 + 0.10 * index)
+            ry = max(2.0, abs(tilt) * rx * 0.42)
+            bright = 0.30 + 0.45 * abs(tilt)
+            canvas.create_oval(
+                cx - rx, cy - ry, cx + rx, cy + ry,
+                outline=_mix(CHROMA, colour, bright), width=2,
+            )
+
+    def _draw_motes(self, canvas: tk.Canvas, cx: float, cy: float,
+                    base: float, now: float, colour: str, count: int = 7) -> None:
+        """Small points circling the sphere, to give the motion a grain."""
+        for index in range(count):
+            angle = now * 0.9 + index * math.tau / count
+            distance = base * (1.12 + 0.06 * math.sin(now * 1.7 + index))
+            x = cx + math.cos(angle) * distance
+            y = cy + math.sin(angle) * distance * 0.38
+            size = 2.0 + 1.6 * (0.5 + 0.5 * math.sin(now * 2.3 + index))
+            canvas.create_oval(
+                x - size, y - size, x + size, y + size,
+                fill=_mix(CHROMA, colour, 0.85), outline="",
+            )
+
     def _draw_waves(self, canvas: tk.Canvas, cx: float, cy: float,
                     base: float, now: float, colour: str) -> None:
         """
@@ -275,8 +333,11 @@ class Orb:
         if state == "idle":
             # The quietest thing on screen: no ring, a small core, a breathe
             # so slow (6s) it reads as "alive", not "pulsing".
-            r = base * 0.30 * (1 + 0.05 * math.sin(now * (2 * math.pi / 6.0)))
-            canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=colour, outline="")
+            # Dark and slow, as he asked — "black when stopped". It still
+            # breathes, because a completely static orb reads as a crashed
+            # program rather than a resting one.
+            r = base * 0.34 * (1 + 0.05 * math.sin(now * (2 * math.pi / 6.0)))
+            self._glow(canvas, cx, cy, r, colour, steps=14, core=0.85)
             return
 
         if state == "muted":
@@ -289,17 +350,20 @@ class Orb:
             return
 
         if state == "listening":
-            # Two rings ping outward on a loop (sonar), fading as they grow.
-            # Core swells with live mic energy — the only state that reacts
-            # to your voice in real time.
+            # Sonar rings outward, a lit sphere that breathes with live mic
+            # energy, and orbiting motes. The sphere is what makes it read
+            # as an object rather than a shape.
             for i in range(2):
                 frac = (now * 0.9 + i * 0.5) % 1.0
                 r = base * (0.55 + 0.85 * frac)
                 w = max(1, int(5 * (1 - frac)))
-                ring_colour = _mix(colour, "#000000", frac * 0.6)
-                canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=ring_colour, width=w)
-            r = base * (0.42 + 0.22 * self._level)
-            canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=colour, outline="")
+                canvas.create_oval(
+                    cx - r, cy - r, cx + r, cy + r,
+                    outline=_mix(CHROMA, colour, 0.8 * (1 - frac)), width=w,
+                )
+            self._draw_orbits(canvas, cx, cy, base * 0.72, now, colour)
+            self._glow(canvas, cx, cy, base * (0.60 + 0.20 * self._level), colour)
+            self._draw_motes(canvas, cx, cy, base * 0.72, now, colour)
             return
 
         if state == "thinking":
@@ -307,15 +371,20 @@ class Orb:
             # "pulsing". This is also the state set while a tool call or
             # brain turn is executing (see app.py), i.e. "YELLOW when
             # executing" from the spec.
-            r = base * 0.62
+            r = base * 0.72
             canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=dim, width=2)
-            angle = (now * 220) % 360
-            canvas.create_arc(
-                cx - r, cy - r, cx + r, cy + r, start=angle, extent=110,
-                style=tk.ARC, outline=colour, width=6,
-            )
-            core = base * 0.40
-            canvas.create_oval(cx - core, cy - core, cx + core, cy + core, fill=colour, outline="")
+            # Two arcs at opposite ends, turning at different speeds, so the
+            # motion reads as machinery working rather than one thing
+            # spinning.
+            for offset, speed, extent, width in ((0, 220, 110, 6), (180, -140, 70, 3)):
+                canvas.create_arc(
+                    cx - r, cy - r, cx + r, cy + r,
+                    start=(now * speed + offset) % 360, extent=extent,
+                    style=tk.ARC, outline=colour, width=width,
+                )
+            self._draw_orbits(canvas, cx, cy, base * 0.60, now, colour)
+            self._glow(canvas, cx, cy, base * 0.50, colour)
+            self._draw_motes(canvas, cx, cy, base * 0.60, now, colour, count=5)
             return
 
         if state == "speaking":
@@ -329,9 +398,12 @@ class Orb:
                 outer = inner + base * 0.35 * amp
                 x1, y1 = cx + inner * math.cos(ang), cy + inner * math.sin(ang)
                 x2, y2 = cx + outer * math.cos(ang), cy + outer * math.sin(ang)
-                canvas.create_line(x1, y1, x2, y2, fill=colour, width=4, capstyle=tk.ROUND)
-            r = base * 0.46
-            canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=colour, outline="")
+                canvas.create_line(
+                    x1, y1, x2, y2,
+                    fill=_mix(CHROMA, colour, 0.55 + 0.45 * amp),
+                    width=4, capstyle=tk.ROUND,
+                )
+            self._glow(canvas, cx, cy, base * 0.56, colour)
             return
 
         if state == "blocked":
