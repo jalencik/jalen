@@ -58,6 +58,17 @@ TRANSCRIPT_TTL_S = 8.0
 TRANSCRIPT_MAX_CHARS = 64
 LABEL_H = 20  # extra window height reserved for the caption row
 
+# The canvas is this many times the orb diameter. The expanding wave
+# rings reach 1.55x the base radius and anything past the canvas edge is
+# clipped square, so headroom is what stops the waves being sliced off.
+WAVE_HEADROOM = 1.8
+
+# Resize limits. Below the minimum the per-state shapes stop being
+# distinguishable, which is the whole point of them; above the maximum it
+# has stopped being an overlay.
+MIN_ORB = 120
+MAX_ORB = 900
+
 # States whose animation is worth a smooth ~25fps redraw. Everything else
 # (idle, muted) redraws at ~7fps — see module docstring.
 _ACTIVE_STATES = ("listening", "thinking", "speaking", "blocked")
@@ -183,7 +194,12 @@ class Orb:
     def _geometry(self, root: tk.Tk, w: int, h: int) -> str:
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         taskbar = 48
-        if self.position == "bottom-right":
+        if self.position == "center":
+            # Centred horizontally, and slightly ABOVE centre vertically —
+            # true centre puts it behind whatever he is reading, and the
+            # optical centre of a screen sits a little high anyway.
+            x, y = (sw - w) // 2, int((sh - h) * 0.42)
+        elif self.position == "bottom-right":
             x, y = sw - w - self.margin, sh - h - self.margin - taskbar
         elif self.position == "bottom-left":
             x, y = self.margin, sh - h - self.margin - taskbar
@@ -193,10 +209,68 @@ class Orb:
             x, y = self.margin, self.margin
         return f"{w}x{h}+{x}+{y}"
 
+    def resize_by(self, delta: int) -> None:
+        """Grow or shrink the orb, clamped to something still usable."""
+        self._q.put(("resize", int(delta)))
+
+    @staticmethod
+    def _clamp_size(root: tk.Tk, size: int) -> int:
+        """
+        Keep the orb inside the screen it is being drawn on.
+
+        A fixed MAX_ORB is not enough, and the difference is visible: 600 on
+        this 1536x864 display produced a 1100-pixel-tall window positioned at
+        y = -99, so the top of the orb was simply off the screen. The window
+        is WAVE_HEADROOM times the orb, and it has to fit the SHORT side of
+        whatever monitor it lands on — which is not knowable from a constant.
+
+        0.85 rather than 1.0 so it stays an overlay with desktop visible
+        around it, instead of a disc that reaches the edges.
+        """
+        try:
+            usable = min(root.winfo_screenwidth(), root.winfo_screenheight())
+        except tk.TclError:
+            usable = 864
+        ceiling = int(usable * 0.85 / WAVE_HEADROOM)
+        return max(MIN_ORB, min(MAX_ORB, ceiling, int(size)))
+
+    def _draw_waves(self, canvas: tk.Canvas, cx: float, cy: float,
+                    base: float, now: float, colour: str) -> None:
+        """
+        Rings expanding outward and fading, behind the orb.
+
+        This is what he meant by "waves", and by the orb looking like
+        something is happening rather than a dot in a corner. Drawn FIRST so
+        everything else sits on top of it.
+
+        Fading is faked by mixing toward the background, because a Tk canvas
+        item has no alpha channel — the same trick _mix() already exists for.
+        Rings are staggered by a fixed phase offset so they read as a pulse
+        travelling outward instead of one ring blinking.
+
+        Idle is deliberately quiet: one slow, barely-there ring. He asked for
+        black when stopped, and a resting assistant that keeps pulsing at you
+        is one you end up hiding.
+        """
+        rings, period, reach = (1, 4.0, 1.15) if self._state in ("idle", "muted") else (3, 2.0, 1.55)
+        for index in range(rings):
+            phase = ((now / period) + index / rings) % 1.0
+            radius = base * (0.42 + phase * (reach - 0.42))
+            # Brightest as it leaves the core, gone by the time it reaches
+            # the edge — otherwise the rings pile up at the boundary.
+            fade = 1.0 - phase
+            ring = _mix(CHROMA, colour, fade * (0.30 if self._state in ("idle", "muted") else 0.75))
+            width = max(1, int(3 * fade) + 1)
+            canvas.create_oval(
+                cx - radius, cy - radius, cx + radius, cy + radius,
+                outline=ring, width=width,
+            )
+
     def _draw_orb(self, canvas: tk.Canvas, cx: float, cy: float, base: float, now: float) -> None:
         state = self._state
         colour = self.colours.get(state, self.colours["idle"])
         dim = _mix(colour, "#000000", 0.6)
+        self._draw_waves(canvas, cx, cy, base, now, colour)
 
         if state == "idle":
             # The quietest thing on screen: no ring, a small core, a breathe
@@ -313,9 +387,21 @@ class Orb:
         except tk.TclError:
             pass  # non-Windows: orb shows on a solid square, still works
 
-        orb_wh = self.size + 24
+        # WAVE_HEADROOM, not the old flat +24. The expanding rings reach
+        # 1.55x the base radius, and anything beyond the canvas is simply
+        # clipped — the old margin was sized for a static dot, so rings would
+        # have been sliced off square at the window edge.
         label_h = LABEL_H if self.show_transcript else 0
-        canvas_w, canvas_h = orb_wh, orb_wh + label_h
+
+        def canvas_size() -> tuple[int, int]:
+            wh = int(self.size * WAVE_HEADROOM)
+            return wh, wh + label_h
+
+        # The configured size gets the same treatment as a resize: a
+        # ui.orb_size larger than the screen would otherwise open off-screen
+        # on the very first frame.
+        self.size = self._clamp_size(root, self.size)
+        canvas_w, canvas_h = canvas_size()
         root.geometry(self._geometry(root, canvas_w, canvas_h))
 
         canvas = tk.Canvas(
@@ -324,6 +410,13 @@ class Orb:
         )
         canvas.pack()
 
+        def apply_size() -> None:
+            """Resize the window and canvas around the new orb size."""
+            nonlocal canvas_w, canvas_h
+            canvas_w, canvas_h = canvas_size()
+            canvas.config(width=canvas_w, height=canvas_h)
+            root.geometry(self._geometry(root, canvas_w, canvas_h))
+
         # drag to reposition
         drag = {"x": 0, "y": 0}
         canvas.bind("<Button-1>", lambda e: drag.update(x=e.x, y=e.y))
@@ -331,6 +424,19 @@ class Orb:
             "<B1-Motion>",
             lambda e: root.geometry(f"+{root.winfo_x()+e.x-drag['x']}+{root.winfo_y()+e.y-drag['y']}"),
         )
+
+        # Scroll over the orb to resize it.
+        #
+        # He asked to size it with his hands, like the photo — that is camera
+        # hand-tracking, a webcam and a whole extra dependency, and it is not
+        # in this change. This is the honest thing that works today: point at
+        # the orb and scroll. Recentring after every resize is deliberate;
+        # growing a centred orb from its top-left corner walks it down the
+        # screen.
+        def on_wheel(event) -> None:
+            self.resize_by(24 if event.delta > 0 else -24)
+
+        canvas.bind("<MouseWheel>", on_wheel)
 
         def tick() -> None:
             if self._stop.is_set():
@@ -350,13 +456,17 @@ class Orb:
                     previous = self._state
                     self._state = state
                     root.after(int(float(seconds) * 1000), lambda: setattr(self, "_state", previous))
+                elif kind == "resize":
+                    self.size = self._clamp_size(root, self.size + int(value))  # type: ignore[arg-type]
+                    apply_size()
 
             now = time.monotonic()
             canvas.delete("all")
-            cx = cy = orb_wh / 2
+            orb_area = canvas_h - (LABEL_H if self.show_transcript else 0)
+            cx, cy = canvas_w / 2, orb_area / 2
             base = self.size / 2
             self._draw_orb(canvas, cx, cy, base, now)
-            self._draw_caption(canvas, canvas_w, orb_wh, now)
+            self._draw_caption(canvas, canvas_w, orb_area, now)
 
             if self.click_through_when_idle:
                 want = self._state == "idle"

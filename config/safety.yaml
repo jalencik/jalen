@@ -35,6 +35,7 @@ green:
     - jalen_sleep
     - jalen_ack            # answering to his own name
     - jalen_timing         # reads its own stopwatch; touches nothing
+    - jalen_orb_size       # resizes its own overlay
     - private_mode
     - set_posture
     - reload_config

@@ -505,6 +505,10 @@ class Jalen:
             self.paused = False
             self.orb.set_state("idle")
             return intent.reply
+        if tool == "jalen_orb_size":
+            delta = int(intent.args.get("delta", 0))
+            self.orb.resize_by(delta)
+            return "Bigger." if delta > 0 else "Smaller."
         if tool == "jalen_timing":
             # Deliberately reports the PREVIOUS turn, not this one: this
             # turn has not finished, and its own first_audio mark is the

@@ -290,6 +290,23 @@ def _rules() -> list[Rule]:
         # the most expensive one.
         (R(r"^(?:hey |ok |okay )?" + _NAME + r"$", re.I),
          "jalen_ack", n, "Yes, Boss?"),
+        # Resizing the orb by voice, because the mouse cannot reach it. It is
+        # click-through while idle — deliberately, since a 420-pixel circle in
+        # the middle of the screen that ate clicks would be intolerable — and
+        # a click-through window receives no scroll events either. Voice is
+        # the only control surface that still works.
+        # "orb" is required, not optional. A bare "smaller" would match this
+        # and hijack a follow-up meant for something else — and the follow-up
+        # window is open for twelve seconds after every reply.
+        (R(r"^(?:make (?:the |your )?orb (bigger|larger|smaller|tinier)"
+           r"|(bigger|larger|smaller|tinier) orb"
+           r"|orb (bigger|larger|smaller|tinier))$", re.I),
+         "jalen_orb_size",
+         lambda m: {
+             "delta": 90 if (m.group(1) or m.group(2) or m.group(3)).lower()
+             in ("bigger", "larger") else -90
+         },
+         None),
         # "Why are you so slow" was unanswerable for months because nothing
         # measured a turn. Now it is a question with a number for an answer.
         (R(r"^(?:how (?:fast|quick|slow) (?:was that|were you|are you)|"

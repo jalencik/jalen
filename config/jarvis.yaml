@@ -346,8 +346,16 @@ startup:
 
 ui:
   orb: true                        # C21 floating orb / waveform
-  orb_size: 84
-  orb_position: "bottom-right"     # bottom-right | bottom-left | top-right | top-left | remember
+  # Big and in the middle, with waves. He asked for it directly: it was 84
+  # pixels in a corner, painted near-black when idle and click-through, and
+  # he reported it as simply not appearing — which at that size and colour
+  # is a fair description of what it was doing.
+  #
+  # Scroll the mouse wheel over it to resize (120-900). It recentres itself
+  # as it grows; growing from the top-left corner would walk it down the
+  # screen.
+  orb_size: 420
+  orb_position: "center"           # center | bottom-right | bottom-left | top-right | top-left
   orb_margin: 28
   always_on_top: true
   # Implemented via ctypes (WS_EX_LAYERED | WS_EX_TRANSPARENT on the orb's
