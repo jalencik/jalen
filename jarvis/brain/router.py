@@ -48,6 +48,69 @@ NAME_ALIASES = ("jalen", "jarvis")
 _NAME = "(?:" + "|".join(NAME_ALIASES) + ")"
 
 
+# ----------------------------------------------------------------------------
+# IS THIS ARGUMENT ACTUALLY A NAME?
+#
+# The single worst failure this router has produced, and he described it
+# exactly: "it is rewriting my thing that I told him rather than executing
+# it." From the audit log, 21 Aug 11:41 —
+#
+#   he said:  "I would like you to go to my Gmail and find one random email
+#              about my machine learning community. I would like you to make
+#              an extensive research about the project..."   (48 words)
+#   router:   focus_window(name="my Gmail and find one random email about my
+#              machine learning")
+#   Jalen:    "I can't find a window called my Gmail and find one random
+#              email about my machine learning community. I would like you
+#              to make an extensive research about..."
+#
+# It read his own instruction back to him. Several catch-all rules end in a
+# greedy "(.+)$" — "go to X", "open X", "switch to X" — and a greedy capture
+# will happily swallow an entire paragraph and hand it over as an app name.
+# The request never reached the brain, which would have handled it, because
+# the router answered first and answered wrongly.
+#
+# A name is short and has no clauses in it. Anything else is an instruction
+# that merely STARTS with a verb the router knows, and belongs to the brain.
+# Failing this check makes the rule decline, so matching continues down the
+# table and ultimately falls through — slower, and right, instead of instant
+# and wrong.
+# ----------------------------------------------------------------------------
+MAX_NAME_WORDS = 6
+MAX_NAME_CHARS = 60
+
+# Connectors that turn one phrase into two clauses. "chrome and find the
+# paper I was reading" is not a window; "rock and roll" would be a legitimate
+# name, so this is checked with spaces around it and only alongside the
+# length limits, never on its own.
+_CLAUSE_JOINERS = re.compile(
+    r"\b(?:and then|and also|and|then|after that|so that|because|"
+    r"could you|would you|i want|i need|i'd like|i would like|please)\b",
+    re.I,
+)
+
+
+def looks_like_a_name(value: str) -> bool:
+    """True when this could plausibly be an app, window, file or folder name."""
+    text = (value or "").strip()
+    if not text or len(text) > MAX_NAME_CHARS:
+        return False
+    if len(text.split()) > MAX_NAME_WORDS:
+        return False
+    # A full stop mid-string means he said more than one sentence.
+    if re.search(r"[.!?]\s+\S", text):
+        return False
+    return not _CLAUSE_JOINERS.search(text)
+
+
+# Argument names that must pass looks_like_a_name(). Keyed on the ARGUMENT,
+# not the tool, because the property belongs to the argument: anything a rule
+# calls "name" or "app" is a name by definition. Free-text arguments —
+# "query", "text", "message" — are deliberately absent; a long search query
+# or a long message is perfectly normal.
+_NAME_ARGS = frozenset({"name", "app"})
+
+
 def _web_search_url(query: str) -> str:
     """
     Build a Google search URL for a spoken query.
@@ -811,13 +874,26 @@ class IntentRouter:
 
         for pattern, tool, build, reply in self._rules:
             match = pattern.match(norm)
-            if match:
-                self.hits += 1
-                # The two strings differ only in case and the patterns are
-                # all re.I, so this normally matches identically. If it ever
-                # doesn't, fall back rather than lose the turn.
-                cased_match = pattern.match(cased) or match
-                return Intent(tool=tool, args=build(cased_match), reply=reply)
+            if not match:
+                continue
+            # The two strings differ only in case and the patterns are all
+            # re.I, so this normally matches identically. If it ever doesn't,
+            # fall back rather than lose the turn.
+            cased_match = pattern.match(cased) or match
+            args = build(cased_match)
+
+            # A greedy catch-all can match a whole paragraph. If what it
+            # captured as a NAME is not name-shaped, this rule is not the
+            # right one — keep looking, and let it fall through to the brain
+            # if nothing else fits. See looks_like_a_name().
+            if any(
+                key in _NAME_ARGS and not looks_like_a_name(str(value))
+                for key, value in args.items()
+            ):
+                continue
+
+            self.hits += 1
+            return Intent(tool=tool, args=args, reply=reply)
 
         self.misses += 1
         if self.log_misses:

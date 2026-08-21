@@ -619,7 +619,32 @@ class Jalen:
             return await self.brain.ask(text, on_text=on_text)
         except Exception as exc:
             self.audit.error("brain", exc)
-            return f"My brain hit an error: {exc}"
+
+            # A CLI subprocess that died mid-stream leaves the client
+            # unusable. Brain.ask() reconnects when the failure happens on
+            # the way IN; this covers the way out. Dropping the client here
+            # means the next turn starts a fresh one instead of repeating
+            # this error forever, which is what the audit log shows
+            # happening on 21 Aug — the same "terminated process" three
+            # minutes apart, every turn in between answered with it.
+            from .brain.agent import _looks_like_a_dead_client
+
+            if _looks_like_a_dead_client(exc):
+                try:
+                    await self.brain.stop()
+                except Exception:
+                    pass
+                self.brain = None
+                return (
+                    "My connection to Claude dropped, so I've reset it — "
+                    "say that again and it should work."
+                )
+
+            # Everything else: say what broke in words, not as a traceback.
+            # "My brain hit an error: Cannot write to terminated process
+            # (exit code: 129)" is read out loud by a TTS engine, and it
+            # tells him nothing he can act on.
+            return f"Something went wrong in my head — {type(exc).__name__}. Try again?"
 
     def speak_brain_reply(self, user_text: str) -> None:
         """
@@ -895,12 +920,29 @@ class Jalen:
                     self.orb.set_state("idle")
                     continue
 
-                # barge-in: you talking beats Jarvis talking
+                # barge-in: you talking beats Jalen talking
                 if barge_in and self.speaker.speaking:
                     if self.vad.probability(frame) >= barge_threshold:
                         self.speaker.stop()
                         listening = True
-                        wake_initiated = True    # he talked over it on purpose
+                        # NOT wake_initiated. This used to be True, reasoning
+                        # that he had "talked over it on purpose" — but
+                        # barge-in fires on any SOUND above the threshold, not
+                        # on a decision to speak: a cough, the keyboard, the
+                        # television, or Jalen's own voice coming back through
+                        # the microphone. When nothing coherent followed, the
+                        # window closed and announced "I didn't catch that" at
+                        # a person who had said nothing.
+                        #
+                        # Seen in the log on 21 Aug: a 20-second reply
+                        # finished and "I didn't catch that" was logged in the
+                        # same second. He described it as being told mid-task
+                        # that it didn't catch the task.
+                        #
+                        # Stopping the speech on a noise is still right —
+                        # cheap and instantly reversible. Announcing a failure
+                        # to understand something nobody said is not.
+                        wake_initiated = False
                         self.orb.set_state("listening")
                         self.collector._reset()
                     continue

@@ -16,6 +16,7 @@ SDK would otherwise auto-approve — which is why we use a hook rather than the
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Any, Awaitable, Callable
 
 from ..safety import SafetyEngine, Tier
@@ -32,6 +33,65 @@ MCP_SERVER_NAME = "jarvis"
 # silently reinterpreted as one of ours) before classifying, or every real
 # tool call misclassifies as unclassified-AMBER regardless of its true tier.
 MCP_TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
+
+# Signatures of "the CLI subprocess is gone", as opposed to a real error in
+# the turn. Matched on the message rather than the exception type because the
+# SDK raises CLIConnectionError, BrokenPipeError and ProcessLookupError for
+# what is the same recoverable condition, and it has renamed these before.
+_DEAD_CLIENT_SIGNS = (
+    "terminated process",
+    "cannot write to",
+    "broken pipe",
+    "process exited",
+    "connection closed",
+    "not connected",
+)
+
+
+def _looks_like_a_dead_client(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(sign in text for sign in _DEAD_CLIENT_SIGNS)
+
+
+# Windows only. CreateProcess flag meaning "give this child no console".
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def suppress_cli_console_window() -> None:
+    """
+    Stop the Claude CLI subprocess opening a console window.
+
+    He asked, with some feeling, why a PowerShell window keeps appearing.
+    The SDK runs the Claude CLI as a child process, and on Windows a child
+    launched from a GUI-subsystem parent — which pythonw.exe is, and which
+    is exactly what the login shortcut and the Ctrl+Alt+J hotkey both use —
+    gets a brand new console allocated for it. So a black window appears
+    over whatever he is doing, every session.
+
+    It is worse than ugly. That window is the CLI's console, and closing it
+    sends the process SIGHUP: the audit log shows exit code 129, which is
+    128 + 1, followed by "Cannot write to terminated process" on every turn
+    for the rest of the session. Closing the window he was annoyed by is
+    what killed his assistant's brain.
+
+    anyio.open_process takes creationflags and the SDK does not set them, so
+    this wraps it. Patched by module attribute, which is how the SDK looks it
+    up at call time; guarded so repeated calls are harmless.
+    """
+    if sys.platform != "win32":
+        return
+    import anyio
+
+    original = anyio.open_process
+    if getattr(original, "_jalen_no_window", False):
+        return
+
+    async def open_process_without_a_window(*args, **kwargs):
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _CREATE_NO_WINDOW
+        return await original(*args, **kwargs)
+
+    open_process_without_a_window._jalen_no_window = True
+    anyio.open_process = open_process_without_a_window
 
 
 class Brain:
@@ -297,6 +357,10 @@ class Brain:
 
     # ------------------------------------------------------------------ client
     async def start(self) -> None:
+        # Before anything spawns: no console window for the CLI child, and
+        # therefore no window for him to close and kill the brain with.
+        suppress_cli_console_window()
+
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, HookMatcher
 
         options = ClaudeAgentOptions(
@@ -399,6 +463,27 @@ class Brain:
             finally:
                 self._client = None
 
+    async def _restart_client(self) -> None:
+        """
+        Replace a dead CLI subprocess with a live one.
+
+        Shutting the old one down is best-effort by necessity: it is already
+        gone, so __aexit__ will usually raise trying to talk to it. Letting
+        that propagate would turn a recoverable reconnect into the same
+        permanent failure it exists to fix.
+
+        The conversation itself does not survive. The SDK holds context in
+        the subprocess, so a new one starts fresh — the turn in flight is
+        answered correctly, but earlier turns are forgotten. That is worth
+        saying plainly rather than pretending nothing happened, and it is
+        still enormously better than every subsequent turn failing.
+        """
+        try:
+            await self.stop()
+        except Exception:
+            self._client = None
+        await self.start()
+
     # -------------------------------------------------------------------- ask
     async def ask(self, text: str, on_text=None) -> str:
         """
@@ -428,7 +513,31 @@ class Brain:
             if self._client is None:
                 await self.start()
 
-            await self._client.query(text)
+            try:
+                await self._client.query(text)
+            except Exception as exc:
+                # THE CLIENT DIED AND STAYED DEAD. Straight from the audit
+                # log, 21 Aug:
+                #
+                #   11:32:18  brain: CLIConnectionError: Cannot write to
+                #             terminated process (exit code: 129)
+                #   11:35:00  brain: CLIConnectionError: Cannot write to
+                #             terminated process (exit code: 129)
+                #
+                # The same error three minutes apart, because nothing ever
+                # reconnected. The SDK runs the Claude CLI as a subprocess;
+                # exit 129 is SIGHUP, which is what that process gets when
+                # the console window it was given is closed — and he closed
+                # it, having reasonably asked why a PowerShell window was
+                # opening at all. From that moment every single turn
+                # answered "My brain hit an error" until he restarted Jalen.
+                #
+                # A dead subprocess is recoverable: start a new one. It is
+                # only fatal because it was treated as fatal.
+                if not _looks_like_a_dead_client(exc):
+                    raise
+                await self._restart_client()
+                await self._client.query(text)
             streamed: list[str] = []
             blocks: list[str] = []
             final = ""

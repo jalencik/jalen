@@ -22,6 +22,7 @@ neither works — never a click-and-hope that reports success it can't verify.
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import time
@@ -126,55 +127,89 @@ def play_on_youtube(query: str) -> str:
 
     "play lofi hip hop", "go to youtube and play Timeless".
 
-    How it plays without clicking: YouTube's own keyboard shortcuts. After
-    the results page loads, Tab moves focus into the results list and Enter
-    opens the focused video, which autoplays. This is the documented
-    keyboard path through YouTube's own UI, and it survives layout changes
-    that would break any coordinate- or element-based click.
+    How it plays without clicking: it reads the first video's id out of the
+    results HTML and opens /watch?v=<id>, which autoplays. No keystrokes are
+    sent to anything, so there is no focus to guess at and nothing to type
+    into the wrong box.
     """
     query = (query or "").strip()
     if not query:
         return "Play what?"
 
-    encoded = urllib.parse.quote_plus(query)
-    _launch(f"https://www.youtube.com/results?search_query={encoded}")
-
-    title = _browser_showed(query.split()[0] if query.split() else "youtube", timeout=15.0)
-    if title is None:
-        return f"I searched YouTube for {query} but couldn't confirm the page loaded."
-
-    try:
-        import uiautomation as auto
-
-        win = auto.WindowControl(searchDepth=1, ClassName="Chrome_WidgetWin_1")
-        if not win.Exists(2, 0.3):
-            return f"Searched YouTube for {query}, but I lost track of the browser window."
-        win.SetActive()
-        time.sleep(0.8)
-        # Into the page body, then onto the first result, then open it.
-        for _ in range(6):
-            win.SendKeys("{Tab}", waitTime=0.12)
-        win.SendKeys("{Enter}", waitTime=0.2)
-    except Exception as exc:
+    # Resolve the video BEFORE opening anything, and open it directly.
+    #
+    # This used to open the results page and then send six Tabs and an Enter,
+    # hoping focus had landed on the first result. It had not. Where focus
+    # actually starts after `start <url>` depends on the browser, the tab,
+    # and whether the page has finished loading — very often it is the
+    # YouTube search box, so six Tabs walked along the header and Enter
+    # re-submitted the search. He reported exactly that: it typed into the
+    # search bar and wiped what was there.
+    #
+    # Nothing about that approach can be made reliable, because it is
+    # guessing at a focus state it cannot observe. Reading the video id out
+    # of the results page and opening /watch?v=<id> is deterministic: the
+    # video opens and autoplays, with no keystrokes sent anywhere.
+    video_id, title = _first_youtube_result(query)
+    if video_id is None:
+        # Falling back to the results page is honest and still useful — but
+        # say so, and never claim playback that did not happen.
+        encoded = urllib.parse.quote_plus(query)
+        _launch(f"https://www.youtube.com/results?search_query={encoded}")
         return (
-            f"Searched YouTube for {query} — the results are up, but I couldn't "
-            f"start playback ({type(exc).__name__}). Press Enter on the first video."
+            f"I couldn't reach YouTube to find a video for {query}, so I've "
+            "opened the search results instead. Click the one you want."
         )
 
-    time.sleep(3.0)
-    now = _browser_showed(query.split()[0] if query.split() else "youtube", timeout=6.0)
-    # A video page title loses the "N results" prefix a search page carries.
-    if now and "- YouTube" in now and "results" not in now.lower():
-        name = now.rsplit(" - YouTube", 1)[0].strip()
-        # YouTube prefixes the tab title with an unread-notification count,
-        # "(394) lofi hip hop" — spoken aloud that is noise, and it made the
-        # reply sound broken.
-        name = re.sub(r"^\(\d+\)\s*", "", name)
-        return f"Playing {name} on YouTube."
-    return (
-        f"Searched YouTube for {query} and the results are up. I couldn't "
-        "confirm a video started — press Enter on the first one if it didn't."
+    _launch(f"https://www.youtube.com/watch?v={video_id}")
+    if title:
+        return f"Playing {title} on YouTube."
+    return f"Playing the top result for {query} on YouTube."
+
+
+def _first_youtube_result(query: str) -> tuple[str | None, str | None]:
+    """
+    The video id and title of the first real result, or (None, None).
+
+    YouTube renders results from a JSON blob embedded in the page, so the
+    ids are in the HTML even though the visible list is built by script.
+    `videoRenderer` is what marks an actual video — matching bare "videoId"
+    instead picks up autoplay hints, shorts shelves and sidebar suggestions,
+    which is how you end up playing something unrelated to what he asked
+    for.
+    """
+    encoded = urllib.parse.quote_plus(query)
+    url = f"https://www.youtube.com/results?search_query={encoded}"
+    try:
+        from .research import _get
+
+        status, html = _get(url)
+        if status != 200 or not html:
+            return None, None
+    except Exception:
+        return None, None
+
+    match = re.search(
+        r'"videoRenderer":\s*\{\s*"videoId":\s*"([\w-]{11})"', html
     )
+    if match is None:
+        # Some responses order the keys differently; accept a videoId that
+        # appears within a short distance of a videoRenderer marker.
+        window = re.search(r'"videoRenderer".{0,400}?"videoId":"([\w-]{11})"', html, re.S)
+        if window is None:
+            return None, None
+        match = window
+
+    video_id = match.group(1)
+    title = None
+    after = html[match.end(): match.end() + 2000]
+    title_match = re.search(r'"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)+)"', after)
+    if title_match:
+        try:
+            title = json.loads(f'"{title_match.group(1)}"')
+        except Exception:
+            title = title_match.group(1)
+    return video_id, title
 
 
 REGISTRY: dict[str, Any] = {

@@ -84,7 +84,15 @@ N_FEATURES = EMBEDDING_SHAPE[0] * EMBEDDING_SHAPE[1]
 # where it was too narrow, instead of relying on augmentation noise to do it.
 # Putting them in the NEGATIVE set, which was the first instinct, would have
 # done precisely the opposite.
-WAKE_PHRASES = ["Hey Jalen", "Hi Jalen", "OK Jalen", "Jalen?", "Hey Jalen!"]
+# EVERY ONE OF THESE CARRIES A PREFIX, and that is the point. The second
+# model added bare "Jalen?" as a positive while bare "Jalen" was still in
+# CONFUSABLES as a negative — the same sound labelled both ways. False
+# rejects fell from 10.3% to 2.3% (the prefix variants genuinely helped)
+# but false accepts rose from 0.93% to 4.02%, because a contradiction in
+# the labels is a boundary the model cannot learn. Requiring a prefix
+# keeps the rule clean: "hey/hi/ok Jalen" wakes him, his name alone does
+# not — which is also what you want when someone says it in conversation.
+WAKE_PHRASES = ["Hey Jalen", "Hi Jalen", "OK Jalen"]
 WAKE_PHRASE = WAKE_PHRASES[0]
 
 # Sounds close enough to "Hey Jalen" that the model must be shown the
@@ -627,12 +635,20 @@ def main() -> int:
     parser.add_argument("stage", choices=["generate", "train", "evaluate", "all"])
     parser.add_argument("--voices", type=int, default=40)
     parser.add_argument("--epochs", type=int, default=60)
+    parser.add_argument(
+        "--augment", type=int, default=2,
+        help="augmented copies per clip. Lower once the corpus has real "
+             "variety: 3,240 distinct positives across 45 voices, 5 "
+             "phrasings, 4 rates and 3 pitches teach the boundary far "
+             "better than noise-shifted copies of 540, and every copy "
+             "costs a full embedding pass.",
+    )
     args = parser.parse_args()
 
     if args.stage in ("generate", "all"):
         asyncio.run(generate(args.voices))
     if args.stage in ("train", "evaluate", "all"):
-        x, y = build_dataset()
+        x, y = build_dataset(augmentations=args.augment)
         params, stats = train_head(x, y, epochs=args.epochs)
         out = MODELS_DIR / "hey_jalen.onnx"
         export_onnx(params, stats["mean"], stats["std"], out)
