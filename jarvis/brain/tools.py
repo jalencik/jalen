@@ -423,6 +423,25 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"max_chats": ("integer", "how many chats to pull from; defaults to 6", False),
          "per_chat": ("integer", "messages per chat; defaults to 12", False)},
     ),
+    "send_telegram_file": (
+        "Send a file to a Telegram chat. Name the file the way he says it — "
+        "'my CV', 'the changes pdf' — and it is resolved by the same search "
+        "open_target uses. Refuses if the name matches more than one file, "
+        "rather than guessing which. Reaches a person, so the safety gate "
+        "asks first unless the destination is one he pre-approved.",
+        {"to": ("string", "chat name, @username, or 'Saved Messages'", True),
+         "file": ("string", "the file, as he'd name it", True),
+         "caption": ("string", "optional message to go with it", False)},
+    ),
+    "draft_email_with_file": (
+        "Save a Gmail draft with a file attached. Nothing is sent — it waits "
+        "in his drafts. Use this for 'email my CV to X': write the body, "
+        "attach, and tell him it's ready to review.",
+        {"to": ("string", "recipient address", True),
+         "subject": ("string", "subject line", True),
+         "body": ("string", "the message", True),
+         "file": ("string", "the file, as he'd name it", True)},
+    ),
     "list_browser_tabs": (
         "Every browser window and the page it is showing. Read-only. Call "
         "this BEFORE closing anything so he can choose. Only the ACTIVE tab "

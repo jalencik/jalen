@@ -93,6 +93,12 @@ green:
     - rename_file          # same
     - copy_file            # strictly additive
     - draft_email          # a DRAFT is not a send. send_email stays RED.
+    # Same reasoning with a file on it: a draft reaches nobody until he
+    # presses send. The attachment is refused outright if it matches a
+    # never_touch pattern — an attachment is the easiest way there is to
+    # exfiltrate a session file, and "send my session file to this chat"
+    # is one sentence.
+    - draft_email_with_file
     - draft_message        # same
     - label_email
     - archive_email        # archive is not delete; it's recoverable
@@ -211,6 +217,7 @@ red:
     - clear_temp_files
     - send_email                # F46
     - send_telegram_message     # F46
+    - send_telegram_file        # reaches a person, cannot be recalled
     - send_whatsapp_message     # F46
     - post_public               # F46 - channels, social, anything others see
     - delete_file               # F46
@@ -291,6 +298,19 @@ never_touch:
     - "*credential*"
     - "*password*"
     - "*.session"       # your Telegram session file is a full login
+    - "*.session-journal"
+    # Found by asking the attachment tool to send them, which it happily
+    # would have. Each of these is a live credential, not a file about one:
+    - "*token*.json"    # google_token.json — an OAuth REFRESH token, i.e.
+                        # standing access to your mail and calendar
+    - "client_secret*"  # the OAuth client identity
+    - ".env*"           # ".env" alone missed ".env.local", ".env.prod"
+    - "*.env"           # ...and this catches "production.env"
+    - "vault.json"      # the credentials vault. Encrypted, and still not
+                        # something to hand anyone: offline guesses are free
+    - "*.ovpn"
+    - "*.ppk"
+    - "*secret*"
   apps:
     - "1Password"
     - "Bitwarden"

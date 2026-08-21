@@ -16,7 +16,8 @@ import contextlib
 from typing import Any
 
 from . import (
-    browsertabs, coding, desktop, documents, filesystem, gcalendar, gmail,
+    attachments, browsertabs, coding, desktop, documents, filesystem,
+    gcalendar, gmail,
     handoff,
     interaction,
     launcher, memory, messaging, repairs, research, selfeval, sysinfo,
@@ -58,7 +59,7 @@ REGISTRY: dict[str, Any] = {}
 for _module in (
     system, desktop, filesystem, documents, memory, launcher, sysinfo, web,
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
-    technician, repairs, vault, interaction, browsertabs,
+    technician, repairs, vault, interaction, browsertabs, attachments,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:
