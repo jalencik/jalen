@@ -246,19 +246,36 @@ class Jalen:
                 # down, the real call will surface the error properly later.
                 self.audit.error(f"prewarm.{label}", exc)
 
-        def warm_all() -> None:
-            warm("stt", lambda: self.stt.warmup())
-            warm("tts", lambda: self.speaker.warmup())
+        # CONCURRENTLY, not one after another. These four warmups ran in
+        # sequence and the wait was the SUM of them — measured on this
+        # machine at startup: stt 2.3s + tts 9.4s + sysinfo 0s + brain 7.5s,
+        # so roughly nineteen seconds before he could be answered properly.
+        # He described pressing the hotkey and it "taking too much time to
+        # load", and that is the number he was feeling.
+        #
+        # Nothing here depends on anything else here: three are independent
+        # network handshakes and one is a disk scan. Run together the wait
+        # becomes the SLOWEST of them, about nine seconds, for no extra work
+        # and no extra risk — a failure in one was already isolated by
+        # warm()'s own try/except.
+        jobs = [
+            ("stt", lambda: self.stt.warmup()),
+            ("tts", lambda: self.speaker.warmup()),
             # Disk/cleanup scans take 13s and 41s cold. Doing them here means
             # "what's eating my disk" answers instantly the first time it's
             # asked, instead of after a 41-second silence.
-            warm("sysinfo", lambda: __import__(
+            ("sysinfo", lambda: __import__(
                 "jarvis.tools.sysinfo", fromlist=["prewarm_system_scan"]
-            ).prewarm_system_scan())
-            if bool(self.cfg.get_path("brain.prewarm", True)):
-                warm("brain", lambda: self._run_coro(self._start_brain()))
+            ).prewarm_system_scan()),
+        ]
+        if bool(self.cfg.get_path("brain.prewarm", True)):
+            jobs.append(("brain", lambda: self._run_coro(self._start_brain())))
 
-        threading.Thread(target=warm_all, name="jarvis-prewarm", daemon=True).start()
+        for label, fn in jobs:
+            threading.Thread(
+                target=warm, args=(label, fn),
+                name=f"jalen-prewarm-{label}", daemon=True,
+            ).start()
 
     # ------------------------------------------------------------------ speech
     def say(self, text: str, *, force: bool = False) -> None:
