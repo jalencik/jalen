@@ -423,6 +423,45 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"max_chats": ("integer", "how many chats to pull from; defaults to 6", False),
          "per_chat": ("integer", "messages per chat; defaults to 12", False)},
     ),
+    "diagnose": (
+        "Find out what is actually wrong with this machine. Read-only. Pass "
+        "an `area` when he names a symptom — wifi, storage, updates, "
+        "security, performance — because the full sweep takes ~13 seconds "
+        "and a targeted one takes ~9. Findings say whether each is an "
+        "OBSERVED fact or a LIKELY cause; repeat that distinction to him "
+        "rather than presenting a hypothesis as a diagnosis. If the report "
+        "says COULD NOT CHECK, say so — that is not a clean bill of health.",
+        {"area": ("string", "wifi | storage | updates | security | performance", False)},
+    ),
+    "diagnose_wifi": (
+        "Why the wifi keeps dropping: adapter power saving, signal strength, "
+        "and how many times it actually disconnected in the last two days. "
+        "Read-only. Use for 'my wifi keeps cutting out'.",
+        {},
+    ),
+    "fix_wifi_power_saving": (
+        "Stop Windows powering the wireless adapter down to save battery — "
+        "the commonest cause of wifi dropping every few minutes on a laptop. "
+        "Reversible; the reply says how. Needs administrator rights and says "
+        "so plainly if it does not have them. Pass allow_power_off=true to "
+        "put it back.",
+        {"allow_power_off": ("boolean", "true to re-enable power saving; defaults to false", False)},
+    ),
+    "temp_file_report": (
+        "How much space the temp folders are using. Read-only — deleting is "
+        "clear_temp_files, which asks first.",
+        {},
+    ),
+    "clear_temp_files": (
+        "Delete the contents of the temp folders. Irreversible, so the "
+        "safety gate asks out loud first. Files in use are skipped and the "
+        "reply says how many, so never round the saving up.",
+        {},
+    ),
+    "open_windows_update": ("Show the Windows Update page. He clicks install.", {}),
+    "open_windows_security": ("Show Windows Security / Defender.", {}),
+    "open_startup_settings": ("Show which programs start with Windows.", {}),
+    "open_storage_settings": ("Show where the disk space went.", {}),
     "hand_off_to_cowork": (
         "Open the Claude desktop app with a fully written brief on the "
         "clipboard, pasted in, ready for him to review and send. This is what "

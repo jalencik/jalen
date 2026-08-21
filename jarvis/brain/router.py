@@ -364,6 +364,39 @@ def _rules() -> list[Rule]:
         # the most expensive one.
         (R(r"^(?:hey |ok |okay )?" + _NAME + r"$", re.I),
          "jalen_ack", n, "Yes, Boss?"),
+
+        # ---- the technician ------------------------------------------------
+        # Symptom-first, because that is how he says it: he does not ask for
+        # a diagnostic, he says the wifi keeps cutting out. Each of these
+        # routes straight to the read-only check for that area, so asking
+        # what is wrong costs nothing and he keeps asking.
+        (R(r"^(?:why (?:does|is) )?(?:my )?wi-?fi (?:keeps? )?"
+           r"(?:dropping|disconnect(?:s|ing)?|cutting out|drop out|so bad|slow)\??$"
+           r"|^(?:check|diagnose|what'?s wrong with) (?:my )?wi-?fi\??$", re.I),
+         "diagnose_wifi", lambda m: {}, None),
+        (R(r"^(?:diagnose|check|scan|what'?s wrong with) "
+           r"(?:my |the |this )?(?:computer|machine|laptop|pc|system)\??$"
+           r"|^(?:what'?s wrong|run a diagnostic|health check)\??$", re.I),
+         "diagnose", lambda m: {}, None),
+        (R(r"^(?:diagnose|check) (?:my |the )?(wifi|storage|updates?|security|performance)\??$", re.I),
+         "diagnose", lambda m: {"area": m.group(1).rstrip("s")}, None),
+        (R(r"^(?:stop|don'?t let) (?:my )?wi-?fi (?:from )?(?:sleeping|powering off|turning off)$"
+           r"|^fix (?:my )?wi-?fi(?: power saving)?$", re.I),
+         "fix_wifi_power_saving", lambda m: {"allow_power_off": False}, None),
+        (R(r"^(?:let|allow) (?:my )?wi-?fi (?:to )?sleep(?: again)?$", re.I),
+         "fix_wifi_power_saving", lambda m: {"allow_power_off": True}, None),
+        (R(r"^(?:how (?:much|many)|check) temp(?:orary)? files\??$"
+           r"|^temp files\??$", re.I),
+         "temp_file_report", lambda m: {}, None),
+        (R(r"^(?:clear|clean|delete|empty) (?:the |my )?temp(?:orary)? files\??$", re.I),
+         "clear_temp_files", lambda m: {}, None),
+        (R(r"^(?:open |show |check )?windows update(?: settings)?\??$", re.I),
+         "open_windows_update", lambda m: {}, None),
+        (R(r"^(?:open |show |check )?(?:windows )?(?:security|defender|antivirus)"
+           r"(?: settings)?\??$", re.I),
+         "open_windows_security", lambda m: {}, None),
+        (R(r"^(?:open |show )?startup (?:apps|programs|settings)\??$", re.I),
+         "open_startup_settings", lambda m: {}, None),
         # "Read it all." The spoken-length cap is a default for answers he
         # did not ask to hear, not a ceiling on what he is allowed to hear.
         (R(r"^(?:read (?:it |that |the )?(?:all|whole thing|rest|everything)"
@@ -735,6 +768,7 @@ def _rules() -> list[Rule]:
          "telegram_status", lambda m: {}, None),
         (R(r"^(?:is )?claude code (?:installed|status|there|available)\??$", re.I),
          "claude_code_status", lambda m: {}, None),
+
 
         # ---- handing a job to Claude Code -----------------------------------
         # Passed through verbatim, which is the one place raw dictation is

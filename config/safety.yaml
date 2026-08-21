@@ -128,6 +128,17 @@ green:
     - community_post_guide  # reads the channel's post format off local disk
     - save_telegram_draft   # a DRAFT reaches nobody. send_telegram_message stays RED.
     - claude_code_status    # reports whether a CLI is installed; runs nothing
+    # The technician's eyes. Every one of these READS system state and
+    # changes nothing — that is enforced by the module split, not by
+    # convention: jarvis/tools/technician.py contains no write of any kind.
+    # Diagnosis has to be free to run, or he stops asking.
+    - diagnose
+    - diagnose_wifi
+    - temp_file_report      # measures the temp folders; deleting is a separate RED tool
+    - open_windows_update   # opens a Settings page. Installing updates is his click.
+    - open_windows_security
+    - open_startup_settings
+    - open_storage_settings
     - log_weakness          # appends to Jalen's own notes about itself
     - review_weaknesses     # reads them back
 
@@ -150,6 +161,10 @@ amber:
     # runs its OWN permission prompts for anything destructive. AMBER is the
     # honest middle: he hears which folder and which prompt, and has two
     # seconds to say stop.
+    # Changes a driver power setting. Reversible in one command, and the
+    # tool names that command in its own reply — but it IS a change to how
+    # his hardware behaves, so he hears it first.
+    - fix_wifi_power_saving
     - ask_claude_code
     # Same tier and the same reasoning: this starts an autonomous agent
     # with its own tool access. He hears the destination and the brief
@@ -162,6 +177,12 @@ red:
   reason: "Irreversible, public, spends money, or speaks as you. (spec F46)"
   confirm_template: "{summary}. Confirm?"
   tools:
+    # Deleting files, even files that are safe to delete by definition.
+    # An application writing to its temp file right now can lose work — but
+    # the real reason is that a voice assistant which deletes without asking
+    # is one bad transcription away from a disaster, and "it was only temp
+    # files" is exactly how that boundary erodes.
+    - clear_temp_files
     - send_email                # F46
     - send_telegram_message     # F46
     - send_whatsapp_message     # F46
