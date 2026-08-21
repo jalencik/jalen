@@ -72,7 +72,20 @@ CLIP_SAMPLES = int(SAMPLE_RATE * CLIP_SECONDS)
 EMBEDDING_SHAPE = (16, 96)
 N_FEATURES = EMBEDDING_SHAPE[0] * EMBEDDING_SHAPE[1]
 
-WAKE_PHRASE = "Hey Jalen"
+# All of these WAKE HIM. "Hey Jalen" is the canonical phrase, but people do
+# not address someone the same way every time, and an assistant that ignores
+# "Hi Jalen" because it was only ever trained on "Hey" is one you learn to
+# speak stiffly to.
+#
+# There is a second reason, and it is the measured one. The first model's
+# problem was false REJECTS — 10.26% at the threshold where accepts were
+# acceptable. These variants are acoustically very close to the canonical
+# phrase, so training them as positives widens the accept region exactly
+# where it was too narrow, instead of relying on augmentation noise to do it.
+# Putting them in the NEGATIVE set, which was the first instinct, would have
+# done precisely the opposite.
+WAKE_PHRASES = ["Hey Jalen", "Hi Jalen", "OK Jalen", "Jalen?", "Hey Jalen!"]
+WAKE_PHRASE = WAKE_PHRASES[0]
 
 # Sounds close enough to "Hey Jalen" that the model must be shown the
 # difference explicitly. Without these it learns "someone is speaking".
@@ -81,6 +94,16 @@ CONFUSABLES = [
     "Hey Dylan", "Hey Elena", "Hey Kaylen", "Hey Jane", "Hey Jarvis",
     "Jalen", "Jalen Rose", "Hey there", "Hey you", "Hey",
     "A Jalen", "Say Jalen", "Hey Jill", "Hey Jenna", "Hey Alien",
+    # Second round, added after a measured run. At threshold 0.9 the first
+    # model reached 0.93% false accepts against 10.26% false rejects — the
+    # accept side passed, the reject side missed by a quarter of a point. The
+    # curve says the boundary is nearly right and simply needs more of it,
+    # so these push on the specific places it is still soft: the "hey J..."
+    # onset, the "-alen" ending, and names one syllable away.
+    "Hey Jaden", "Hey Jalon", "Hey Julian", "Hey Jolene", "Hey Jaleel",
+    "Hey Jamal", "Hey Valen", "Hey Kalen", "Hey Talon", "Hey Salem",
+    "Hey Ellen", "Hey Aiden", "Hey Nolan", "Hey Jalapeno", "Hey Jetson",
+    "Hey, Jay", "Hey Len", "They Fallen", "Hey Jalen's", "Hey, Jared",
 ]
 
 # Ordinary speech, so the model is not merely a "is this a "hey X" phrase"
@@ -254,8 +277,9 @@ async def generate(voices_limit: int = 40) -> None:
     for voice in voices:
         for rate in rates:
             for pitch in pitches:
-                stem = f"{voice}_{rate}_{pitch}".replace("%", "p").replace("+", "")
-                jobs.append((WAKE_PHRASE, voice, rate, pitch, POS_DIR / f"{stem}.wav"))
+                for index, phrase in enumerate(WAKE_PHRASES):
+                    stem = f"{voice}_{rate}_{pitch}_{index}".replace("%", "p").replace("+", "")
+                    jobs.append((phrase, voice, rate, pitch, POS_DIR / f"{stem}.wav"))
 
     negatives = CONFUSABLES + BACKGROUND_SPEECH
     for voice in voices:
