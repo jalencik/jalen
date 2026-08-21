@@ -21,7 +21,7 @@ def main() -> int:
         from scripts.check_env import main as check
         return check()
 
-    from jalen import runtime
+    from jarvis import runtime
 
     if args.status:
         print(runtime.status())
@@ -55,9 +55,9 @@ def main() -> int:
 
 
 def _serve(args) -> int:
-    from jalen.app import Jalen
-    from jalen.config import CONFIG
-    from jalen import tools as jarvis_tools
+    from jarvis.app import Jalen
+    from jarvis.config import CONFIG
+    from jarvis import tools as jalen_tools
 
     jalen = Jalen()
     if args.unmuted:
@@ -111,7 +111,7 @@ def _serve(args) -> int:
                 # not a crash, just silently never doing what was asked. See
                 # jalen/tools/__init__.py's com_initialized() docstring.
                 def _run_turn(t=text):
-                    with jarvis_tools.com_initialized():
+                    with jalen_tools.com_initialized():
                         jalen.process(t)
 
                 threading.Thread(target=_run_turn, daemon=True).start()
@@ -136,7 +136,7 @@ def _serve(args) -> int:
 
         import asyncio
 
-        from jalen.integrations.telegram_bot import run_bot
+        from jarvis.integrations.telegram_bot import run_bot
 
         print("Jalen — Telegram mode. Ctrl+C to quit.\n")
         jalen.muted = True

@@ -1,4 +1,4 @@
-"""
+r"""
 Diagnostics. Run this whenever something doesn't work:
 
     .\jalen.ps1 check
