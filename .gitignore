@@ -18,3 +18,4 @@ venv/
 @AutomationLog.txt
 start_jalen*.vbs
 start_jarvis.vbs
+data/wake_training/
