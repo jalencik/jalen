@@ -110,6 +110,28 @@ NAME_ALIASES = (
 # it made every name-prefixed command fail.
 _AFTER_NAME = r"[.,!?;:\s]+"
 
+# ----------------------------------------------------------------------------
+# "CLAUDE CODE", AS SPEECH RECOGNITION ACTUALLY WRITES IT.
+#
+# From the audit log, 21 Aug, four wasted minutes in a row: he asked to hand
+# a task to Claude Code and Whisper transcribed it as "CloudCork" every
+# time. Jalen searched his Desktop for an app by that name, found nothing,
+# said so, and logged a weakness — all correct behaviour for a word it had
+# no reason to recognise, and all useless to him.
+#
+#   16:06:08  "hand this task off to CloudCork"
+#   16:07:56  "open cloud core and paste a prompt"
+#   16:10:45  "That's the cloud. Could you please open that app"
+#
+# "Claude" is a French name that English speech recognition does not expect,
+# so it lands on "cloud" almost every time, and "code" becomes "cork",
+# "core" or "cord". These are not typos he can avoid by speaking more
+# clearly — they are what the transcriber produces.
+_CLAUDE_CODE = (
+    r"(?:cl(?:aude|oud)\s*(?:code|cork|core|cord|coat|kode)"
+    r"|claude code|claude|cowork|co-?work)"
+)
+
 
 # ----------------------------------------------------------------------------
 # IS THIS ARGUMENT ACTUALLY A NAME?
@@ -736,13 +758,20 @@ def _rules() -> list[Rule]:
         # brain, which resolves the folder properly and can ask which one it
         # meant. Starting a coding agent in the wrong repository is the one
         # mistake here worth a round-trip to avoid.
-        (R(r"^(?:ask|tell) claude(?: code)? to use (cowork|code) (?:on |for |to )?"
+        (R(r"^(?:ask|tell) " + _CLAUDE_CODE + r" to use (cowork|code) (?:on |for |to )?"
            r"(?!.*\b(?:folder|directory|repo|repository|project)\b)(.+)$", re.I),
          "ask_claude_code",
          lambda m: {"agent": m.group(1).strip(), "prompt": m.group(2).strip()}, None),
-        (R(r"^(?:ask|tell) claude(?: code)? to "
+        (R(r"^(?:ask|tell|get|have) " + _CLAUDE_CODE + r" to "
            r"(?!.*\b(?:folder|directory|repo|repository|project)\b)(.+)$", re.I),
          "ask_claude_code", lambda m: {"prompt": m.group(1).strip()}, None),
+        # "Hand this off to Claude Code" is deliberately NOT routed. It names
+        # no task — "this" is whatever they were just discussing — so the
+        # router has nothing to pass along and would launch a coding agent on
+        # a placeholder. The brain has the conversation and can write the
+        # prompt properly. What the router contributes here is only the
+        # ALIASES above, so the brain stops being told the user meant an app
+        # called "CloudCork".
 
         # ---- files: create / rename / copy ----------------------------------
         # "make me a new folder called Projects" / "create a file called
