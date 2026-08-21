@@ -55,6 +55,7 @@ green:
     - search_email
     - read_calendar
     - read_telegram
+    - telegram_unread       # unread message BODIES, fenced as untrusted
     - read_github
     - read_notion
     - media_play_pause
@@ -122,6 +123,8 @@ green:
     - list_telegram_chats   # chat names and unread counts, no message bodies
     - search_telegram       # searches his OWN messages
     - voice_guide           # reads his own skill file off local disk
+    - community_post_guide  # reads the channel's post format off local disk
+    - save_telegram_draft   # a DRAFT reaches nobody. send_telegram_message stays RED.
     - claude_code_status    # reports whether a CLI is installed; runs nothing
     - log_weakness          # appends to Jalen's own notes about itself
     - review_weaknesses     # reads them back

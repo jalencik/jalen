@@ -135,6 +135,58 @@ def read_telegram(chat: str, limit: int = 15) -> str:
     return RUNTIME.run(work)
 
 
+def telegram_unread(max_chats: int = 6, per_chat: int = 12) -> str:
+    """
+    What he actually missed: the UNREAD messages themselves, not a count.
+
+    "You have 43 unread" is not an answer to "what did I miss" — it is the
+    question restated as a number. This pulls the unread messages out of the
+    busiest chats and hands them over as text, so the brain can summarise
+    what was being discussed rather than reporting arithmetic.
+
+    Bounded twice, because a single active channel can hold thousands of
+    unread messages and a voice assistant reading them all is useless in a
+    different way: at most `max_chats` conversations, at most `per_chat`
+    messages from each. When something is cut, the reply says so — a
+    silently truncated digest reads as "that was everything".
+    """
+    _enabled()
+
+    async def work(client):
+        dialogs = await client.get_dialogs(limit=50)
+        unread = [d for d in dialogs if getattr(d, "unread_count", 0) > 0]
+        if not unread:
+            return "Nothing unread on Telegram."
+
+        unread.sort(key=lambda d: d.unread_count, reverse=True)
+        shown, hidden = unread[:max_chats], unread[max_chats:]
+
+        blocks = []
+        for dialog in shown:
+            count = dialog.unread_count
+            take = min(count, per_chat)
+            messages = await client.get_messages(dialog.entity, limit=take)
+            lines = []
+            for m in reversed(messages):
+                text = getattr(m, "text", None)
+                if not text:
+                    continue
+                stamp = m.date.astimezone().strftime("%d %b %H:%M") if m.date else ""
+                lines.append(f"  [{stamp}] {_sender_name(m)}: {text}")
+            header = f"{_title(dialog)} — {count} unread"
+            if count > take:
+                header += f" (showing the most recent {take})"
+            blocks.append(header + "\n" + ("\n".join(lines) or "  (no text messages)"))
+
+        body = "\n\n".join(blocks)
+        if hidden:
+            names = ", ".join(_title(d) for d in hidden[:8])
+            body += f"\n\nAlso unread, not shown: {names}"
+        return _fence(body, "unread Telegram messages")
+
+    return RUNTIME.run(work)
+
+
 def search_telegram(query: str, limit: int = 15) -> str:
     """Search his own messages across all chats."""
     _enabled()
@@ -173,6 +225,73 @@ def send_telegram_message(to: str, text: str) -> str:
             return f"I couldn't find a Telegram chat called {to!r} — nothing sent."
         await client.send_message(entity, text)
         return f"Sent to {_title_of(entity)}: {text!r}"
+
+    return RUNTIME.run(work)
+
+
+def save_telegram_draft(to: str, text: str) -> str:
+    """
+    Put text into a chat's draft box WITHOUT sending it.
+
+    This is what he asked for by name: compose the community post, leave it
+    sitting in the channel, and let him read it on his phone and press send
+    himself. A draft is not a send — it reaches nobody — which is why this
+    is GREEN while send_telegram_message is RED.
+
+    Telegram stores one draft per chat, server-side, and syncs it to every
+    client. So the post appears in the message box of his channel on his
+    phone exactly as if he had typed it there. Saving a second draft to the
+    same chat REPLACES the first; that is Telegram's model, not a choice
+    made here, and it is why the reply says so out loud.
+
+    Sent as HTML because the format depends on it — bold names and the
+    expandable Q&A block are the whole point. If Telegram rejects the markup
+    the draft is saved as plain text instead, with the reason reported,
+    rather than silently losing the post.
+    """
+    _enabled()
+
+    async def work(client):
+        from telethon.tl.functions.messages import SaveDraftRequest
+
+        entity = await _resolve(client, to)
+        if entity is None:
+            return f"I couldn't find a Telegram chat called {to!r} — nothing saved."
+
+        title = _title_of(entity)
+        # HTML explicitly. Telethon's DEFAULT parse mode is markdown, and the
+        # post format is HTML — bold tags and <blockquote expandable>. Left on
+        # the default, every tag would arrive as literal visible text: the
+        # draft would read "<b>Lab Opportunity</b>" instead of being bold.
+        try:
+            from telethon.extensions import html as tg_html
+
+            message, entities = tg_html.parse(text)
+        except Exception:
+            message, entities = text, []
+
+        try:
+            await client(SaveDraftRequest(
+                peer=entity, message=message, entities=entities,
+            ))
+        except Exception as exc:
+            # Retry once with no formatting. A post that saved plain is
+            # recoverable; one that vanished into an exception is not.
+            try:
+                await client(SaveDraftRequest(peer=entity, message=text))
+            except Exception as inner:
+                return f"Couldn't save the draft to {title}: {inner}"
+            return (
+                f"Saved a draft to {title}, but WITHOUT formatting — Telegram "
+                f"rejected the markup ({exc}). Worth checking before you post it."
+            )
+
+        preview = text.strip().splitlines()[0][:80] if text.strip() else ""
+        return (
+            f"Saved as a draft in {title} — nothing was sent. It starts "
+            f"\"{preview}\". Open the chat to read it, and press send yourself. "
+            "Saving another draft there will replace this one."
+        )
 
     return RUNTIME.run(work)
 
@@ -238,8 +357,10 @@ REGISTRY: dict[str, Any] = {
     "telegram_status": telegram_status,
     "list_telegram_chats": list_telegram_chats,
     "read_telegram": read_telegram,
+    "telegram_unread": telegram_unread,
     "search_telegram": search_telegram,
     "send_telegram_message": send_telegram_message,
+    "save_telegram_draft": save_telegram_draft,
 }
 
 

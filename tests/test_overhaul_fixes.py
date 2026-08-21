@@ -614,7 +614,13 @@ def test_trailing_courtesy_is_not_part_of_the_name(router, phrase, expected_name
     """
     intent = router.route(phrase)
     assert intent is not None, f"{phrase!r} fell through to Claude (3-7s)"
-    assert intent.args["name"] == expected_name
+    # Compared case-insensitively: router arguments now preserve the
+    # capitalisation the user actually used, because they carry message
+    # bodies and search queries as well as app names — "telegram Rodion
+    # saying I'll be late" was going out to a real person as "i'll be late".
+    # Safe for names specifically because launcher.py lowercases every name
+    # it is given, at each of its entry points, before matching.
+    assert intent.args["name"].lower() == expected_name.lower()
 
 
 @pytest.mark.parametrize("phrase", [

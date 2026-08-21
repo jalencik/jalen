@@ -80,8 +80,42 @@ def voice_guide() -> str:
     )
 
 
+_POST_FORMAT = Path(__file__).resolve().parent.parent.parent / "docs" / "community_post_format.md"
+
+
+def community_post_guide() -> str:
+    """
+    The house style for his AI Engineering & Machine Learning channel.
+
+    Same reasoning as voice_guide: a tool, not part of the system prompt.
+    It is only relevant on the handful of turns that write a post, and
+    carrying it on every "what time is it" would cost him allowance for
+    nothing.
+
+    Separate FROM voice_guide, though, because they answer different
+    questions. voice_guide is how he sounds; this is how a channel post is
+    laid out — the bullet character, where bold goes, the expandable Q&A
+    block, and the two sign-off lines that never change. A post can be
+    perfectly in his voice and still look wrong in the channel.
+    """
+    try:
+        body = _POST_FORMAT.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return (
+            f"I couldn't read the post format guide at {_POST_FORMAT} ({exc}). "
+            "Tell me the layout you want and I'll follow it."
+        )
+    return (
+        "This is the format for his channel. Follow the STRUCTURE exactly and "
+        "vary the words. Output Telegram HTML — only the tags listed below are "
+        "allowed, and anything else makes the post fail to save. Write the post "
+        "and nothing else: no preamble, no explanation.\n\n" + body
+    )
+
+
 REGISTRY: dict[str, Any] = {
     "voice_guide": voice_guide,
+    "community_post_guide": community_post_guide,
 }
 
 

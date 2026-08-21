@@ -331,7 +331,23 @@ def build_dataset(augmentations: int = 4, seed: int = 0) -> tuple[np.ndarray, np
     if not clips:
         raise SystemExit("No training clips. Run: python scripts\\train_wake_word.py generate")
 
-    print(f"{len(clips)} clips ({sum(labels)} positive) -> embedding")
+    # Embedding ten thousand two-second clips takes about twelve minutes on
+    # this CPU, and it is entirely deterministic given the same wavs and the
+    # same seed. Caching it turns "try a different threshold" from a
+    # twelve-minute round trip into a two-second one, which is the
+    # difference between tuning this properly and accepting the first model
+    # that trains. The key includes the inputs, so adding clips invalidates
+    # it automatically.
+    cache = DATA_DIR / f"features_{len(clips)}_{augmentations}_{seed}.npz"
+    if cache.exists():
+        try:
+            blob = np.load(cache)
+            print(f"{len(clips)} clips ({sum(labels)} positive) -> cached embeddings")
+            return blob["x"], blob["y"]
+        except Exception:
+            pass   # corrupt cache is not a reason to fail; just recompute
+
+    print(f"{len(clips)} clips ({sum(labels)} positive) -> embedding (~12 min, cached after)")
     features = _audio_features().embed_clips(
         np.array(clips, dtype=np.int16), batch_size=64
     )
@@ -340,10 +356,30 @@ def build_dataset(augmentations: int = 4, seed: int = 0) -> tuple[np.ndarray, np
         raise SystemExit(
             f"Feature width {features.shape[1]} != {N_FEATURES}. CLIP_SECONDS is wrong."
         )
-    return features.astype(np.float32), np.array(labels, dtype=np.float32)
+    x = features.astype(np.float32)
+    y = np.array(labels, dtype=np.float32)
+    try:
+        np.savez_compressed(cache, x=x, y=y)
+    except OSError:
+        pass
+    return x, y
 
 
 # ---------------------------------------------------------------- training
+def _sigmoid(z: np.ndarray) -> np.ndarray:
+    """
+    Overflow-free logistic. np.exp(-z) overflows for confidently-negative
+    logits and floods training with RuntimeWarnings; the piecewise form is
+    exact and silent.
+    """
+    out = np.empty_like(z, dtype=np.float32)
+    pos = z >= 0
+    out[pos] = 1.0 / (1.0 + np.exp(-z[pos]))
+    e = np.exp(z[~pos])
+    out[~pos] = e / (1.0 + e)
+    return out
+
+
 def train_head(x: np.ndarray, y: np.ndarray, *, epochs: int = 60,
                hidden: int = 128, seed: int = 0) -> tuple[list[np.ndarray], dict]:
     """
@@ -398,7 +434,7 @@ def train_head(x: np.ndarray, y: np.ndarray, *, epochs: int = 60,
             sel = idx[start:start + batch]
             xb, yb = x_train[sel], y_train[sel]
             h1, h2, logit = forward(xb)
-            prob = 1.0 / (1.0 + np.exp(-logit))
+            prob = _sigmoid(logit)
 
             weight = np.where(yb == 1, pos_weight, 1.0).astype(np.float32)
             d_logit = ((prob - yb) * weight / len(sel)).astype(np.float32)
@@ -423,7 +459,7 @@ def train_head(x: np.ndarray, y: np.ndarray, *, epochs: int = 60,
 
         if epoch % 10 == 0 or epoch == epochs - 1:
             _, _, logit = forward(x_val)
-            prob = 1.0 / (1.0 + np.exp(-logit))
+            prob = _sigmoid(logit)
             acc = ((prob > 0.5) == (y_val > 0.5)).mean()
             print(f"  epoch {epoch:3d}  val accuracy {acc:.3f}")
 
@@ -484,14 +520,27 @@ def export_onnx(params: list[np.ndarray], mean: np.ndarray, std: np.ndarray,
     print(f"wrote {path}")
 
 
-def evaluate(model_path: Path, x_val: np.ndarray, y_val: np.ndarray,
-             mean: np.ndarray, std: np.ndarray, threshold: float = 0.55) -> dict:
-    """
-    False-accept and false-reject on audio the model never saw.
+MAX_FALSE_ACCEPT = 0.01     # above this it fires on the television
+MAX_FALSE_REJECT = 0.10     # above this it ignores him
 
-    These two numbers are the ship gate. A wake word that fires on the
-    television is worse than an old wake word, and "it seemed to work when I
-    tried it" is not a measurement.
+
+def evaluate(model_path: Path, x_val: np.ndarray, y_val: np.ndarray,
+             mean: np.ndarray, std: np.ndarray) -> dict:
+    """
+    False-accept and false-reject on audio the model never saw, AND the
+    threshold that gets the best of both.
+
+    THE THRESHOLD IS PART OF THE MODEL, and inheriting one is a mistake this
+    made once already. config/jarvis.yaml carries wake.threshold: 0.55,
+    tuned for the pretrained hey_jarvis network — a completely different
+    classifier with its own score distribution. Judged at 0.55 the first
+    "Hey Jalen" model accepted 1.96% of non-wake audio and was refused,
+    which said nothing about the model and everything about being scored
+    against someone else's operating point.
+
+    So: sweep, and pick the LOWEST threshold that holds false accepts under
+    the limit. Lowest, not highest, because every step up costs sensitivity —
+    the cheapest acceptable point is the one that misses him least.
     """
     import onnxruntime as ort
 
@@ -503,24 +552,49 @@ def evaluate(model_path: Path, x_val: np.ndarray, y_val: np.ndarray,
         session.run(None, {name: row.reshape(1, *EMBEDDING_SHAPE).astype(np.float32)})[0][0][0]
         for row in raw
     ])
-
     positives, negatives = scores[y_val == 1], scores[y_val == 0]
+    if not len(positives) or not len(negatives):
+        raise SystemExit("Validation split has only one class — cannot evaluate.")
+
+    print(f"\n{'threshold':>10}  {'false accept':>13}  {'false reject':>13}")
+    sweep = []
+    for threshold in [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.97, 0.99, 0.995, 0.999]:
+        fa = float((negatives >= threshold).mean())
+        fr = float((positives < threshold).mean())
+        sweep.append((threshold, fa, fr))
+        print(f"{threshold:>10.3f}  {fa:>12.2%}  {fr:>12.2%}")
+
+    usable = [row for row in sweep if row[1] <= MAX_FALSE_ACCEPT and row[2] <= MAX_FALSE_REJECT]
+    best = usable[0] if usable else None
+
     result = {
-        "threshold": threshold,
-        "false_reject_rate": float((positives < threshold).mean()) if len(positives) else None,
-        "false_accept_rate": float((negatives >= threshold).mean()) if len(negatives) else None,
         "n_positive": int(len(positives)),
         "n_negative": int(len(negatives)),
+        "recommended_threshold": best[0] if best else None,
+        "false_accept_rate": best[1] if best else None,
+        "false_reject_rate": best[2] if best else None,
     }
-    print(json.dumps(result, indent=2))
-    if result["false_accept_rate"] and result["false_accept_rate"] > 0.01:
-        print("\nDO NOT SHIP: it accepts more than 1% of non-wake audio. "
-              "It will fire on the television.")
-    elif result["false_reject_rate"] and result["false_reject_rate"] > 0.10:
-        print("\nDO NOT SHIP: it misses more than 10% of real wake words.")
+    print("\n" + json.dumps(result, indent=2))
+
+    if best is None:
+        tightest = min(sweep, key=lambda row: row[1])
+        print(
+            "\nDO NOT SHIP. No threshold satisfies both limits "
+            f"(false accept <= {MAX_FALSE_ACCEPT:.0%}, false reject <= {MAX_FALSE_REJECT:.0%}). "
+            f"Best false-accept is {tightest[1]:.2%} at {tightest[0]}, where it "
+            f"misses {tightest[2]:.2%} of real wake words.\n"
+            "More CONFUSABLE negatives is what fixes this — phrases that sound "
+            "like 'Hey Jalen' and are not."
+        )
     else:
-        print("\nGood enough to swap in. Set wake.model to 'hey_jalen' and "
-              "identity.wake_word to 'hey jalen' in config/jarvis.yaml.")
+        print(
+            f"\nReady to swap in. In config/jarvis.yaml set:\n"
+            f"    identity.wake_word: \"hey jalen\"\n"
+            f"    wake.model: \"hey_jalen\"\n"
+            f"    wake.threshold: {best[0]}\n"
+            f"At that threshold it misses {best[2]:.2%} of real wake words and "
+            f"fires on {best[1]:.2%} of everything else."
+        )
     return result
 
 

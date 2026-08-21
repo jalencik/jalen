@@ -118,6 +118,58 @@ class Brain:
         # narrow on purpose — a log that fills with "I didn't know that" is
         # a log nobody reads, and the whole value is in it being a work
         # list rather than a diary of every imperfect turn.
+        # His own shorthand, stated to him in his own words so the model
+        # recognises it. The literal forms ("saying X") never reach here —
+        # the router answers those for free — so anything about Telegram
+        # that DOES reach you is, by construction, a writing job.
+        base += (
+            "\n\nTELEGRAM SHORTHAND. \"Telegram <someone> about <topic>\" "
+            "means: write a message to that chat about that topic, as him. "
+            "It does NOT mean send the word 'topic'. Call voice_guide first "
+            "so it sounds like him, then send_telegram_message. The safety "
+            "gate will ask him out loud before anything leaves the machine, "
+            "so do not ask for permission yourself — write it and call the "
+            "tool. Say the message back to him in the same breath, because "
+            "the confirmation only names the recipient and he cannot approve "
+            "words he has not heard.\n"
+            "If the chat name is ambiguous, the tool refuses rather than "
+            "guessing; report that instead of trying a different name. A "
+            "message delivered to the wrong person cannot be recalled.\n"
+        )
+
+        # The full pipeline he described: an email arrives offering him
+        # something, and it has to become a post his community can act on.
+        # Written as an ordered procedure because the ORDER is the part he
+        # cares about — research before explaining, explaining before
+        # asking, asking before writing.
+        base += (
+            "\n\nTURNING AN EMAIL INTO A CHANNEL POST. When he asks you to "
+            "post about an opportunity that arrived by email, work in this "
+            "order and do not skip a step:\n"
+            "1. Read the email. Say who replied and what they are actually "
+            "offering — a research position, a paper collaboration, a "
+            "partnership, a programme.\n"
+            "2. Remind him what HE asked them for, from the earlier thread. "
+            "He sends many of these and will not remember which is which.\n"
+            "3. RESEARCH IT before you describe it. Use web_search and "
+            "web_read on the lab, the professor, the programme. His readers "
+            "are deciding whether to apply; an announcement assembled from "
+            "the email alone repeats a stranger's marketing. Explain what "
+            "you found in plain words — what the group actually works on, "
+            "who runs it, what applying involves. Name anything you could "
+            "not confirm.\n"
+            "4. ASK HIM before writing. He has the final say on what goes "
+            "out under his name to his community.\n"
+            "5. Then call community_post_guide AND voice_guide, write the "
+            "post, and save_telegram_draft it to the channel. Never send it. "
+            "Read the post back to him — he cannot approve words he has not "
+            "heard.\n"
+            "If any step turns up nothing — the email is vague, the lab has "
+            "no web presence — say so at that step rather than writing "
+            "around the gap. A confident post about a thing you could not "
+            "verify is the worst possible output here.\n"
+        )
+
         base += (
             "\n\nWHAT YOU CANNOT DO. When you hit a wall that is a MISSING "
             "CAPABILITY — no tool exists, an integration isn't connected, a "

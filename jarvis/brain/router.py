@@ -504,6 +504,45 @@ def _rules() -> list[Rule]:
          "list_telegram_chats", lambda m: {"limit": 15}, None),
         (R(r"^(?:read|show|check) (?:my )?telegram (?:from |with )(.+)$", re.I),
          "read_telegram", lambda m: {"chat": m.group(1).strip()}, None),
+        # "What did I miss." Routed rather than left to the brain because the
+        # answer is a tool call with no decision in it — but note the RESULT
+        # still needs summarising, so handle_local speaks it via the brain
+        # path only if he asked for a summary. Here it returns the raw digest.
+        (R(r"^(?:what did i miss|catch me up)(?: on telegram)?\??$"
+           r"|^(?:any |my )?unread (?:telegram )?messages\??$"
+           r"|^(?:show|read) (?:me )?(?:my )?unread(?: telegram)?(?: messages)?\??$", re.I),
+         "telegram_unread", lambda m: {"max_chats": 6, "per_chat": 12}, None),
+
+        # ---- "telegram X saying Y" — the jargon he asked for -------------
+        #
+        # ONLY THE LITERAL FORMS ARE ROUTED HERE. "telegram Rodion SAYING
+        # I'll be late" is a message he has already written: the words are
+        # in the sentence, so sending them costs nothing and needs no model.
+        # "telegram Rodion ABOUT the meeting" is a different request — it
+        # asks Jalen to COMPOSE something in his voice — and deliberately
+        # falls through to the brain, which calls voice_guide first. Routing
+        # that here would send the literal string "the meeting" to a person,
+        # which is worse than being slow.
+        #
+        # The name is captured non-greedily up to the separator, so "telegram
+        # SAT Talk saying hello" splits at "saying" and not at the first
+        # space. Sending still passes through the RED gate — this makes the
+        # phrasing free, not the send unconfirmed.
+        # The "on telegram" qualifier is stripped FIRST. Placed after the
+        # generic rule it never got the chance: "message sat talk on telegram
+        # saying hi" split at the first "saying" and captured the recipient as
+        # "sat talk on telegram", which resolves to no chat at all.
+        (R(r"^(?:tell|message|text|dm|write|send) (.+?) on telegram "
+           r"(?:that |saying |to say )?(.+)$", re.I),
+         "send_telegram_message",
+         lambda m: {"to": m.group(1).strip(), "text": m.group(2).strip()}, None),
+        (R(r"^(?:telegram|message|text|dm|write to|send to) (.+?) "
+           r"(?:saying|to say|that says|with the message|with) (.+)$", re.I),
+         "send_telegram_message",
+         lambda m: {"to": m.group(1).strip(), "text": m.group(2).strip()}, None),
+        (R(r"^(?:telegram|message|text|dm) (.+?) that (.+)$", re.I),
+         "send_telegram_message",
+         lambda m: {"to": m.group(1).strip(), "text": m.group(2).strip()}, None),
 
         # ---- connection status: plainly a fact, no thinking required --------
         (R(r"^(?:is (?:my )?)?(?:google|gmail|e-?mail) (?:connected|status|working)\??$", re.I),
@@ -645,8 +684,22 @@ class IntentRouter:
         self.misses = 0
 
     @staticmethod
-    def _normalise(text: str) -> str:
-        text = text.strip().lower()
+    def _normalise(text: str, lower: bool = True) -> str:
+        """
+        Strip the noise around a command so a rule can match it.
+
+        `lower=False` runs every identical step but keeps capitalisation.
+        route() needs both: rules are matched against the lowercased form
+        (which is what all the alternation lists below are written in), but
+        ARGUMENTS are taken from the cased form. Without that split, "telegram
+        Rodion saying I'll be late" reached Telegram as "i'll be late" — a
+        message going out under his name, in lower case, because of an
+        implementation detail of intent matching. Every sub below is
+        case-insensitive so the two passes agree on what to remove.
+        """
+        text = text.strip()
+        if lower:
+            text = text.lower()
         # Real speech opens with throat-clearing: "hey", "so", "umm" before
         # the actual request. Stripped FIRST, before the "hey jarvis" wake-
         # word rule right below, so "hi jarvis, open chrome" still reaches it
@@ -656,8 +709,8 @@ class IntentRouter:
         # Requires trailing content (`[,\s]+`, not `$`): a bare "hey" or
         # "well" on its own is a real word ("hey" alone still means greet)
         # and must not be eaten.
-        text = re.sub(r"^(?:hey|hi|yo|so|ok|okay|um+|uh+|well|actually)[,\s]+", "", text)
-        text = re.sub(r"^(hey |ok |okay )?" + _NAME + r"[,\s]+", "", text)
+        text = re.sub(r"^(?:hey|hi|yo|so|ok|okay|um+|uh+|well|actually)[,\s]+", "", text, flags=re.I)
+        text = re.sub(r"^(hey |ok |okay )?" + _NAME + r"[,\s]+", "", text, flags=re.I)
         text = re.sub(r"[.!?]+$", "", text)
         text = re.sub(r"\s+", " ", text)
         # strip a trailing address ("pause the music, boss" / "..., Jarvis").
@@ -693,7 +746,7 @@ class IntentRouter:
         stripped = re.sub(
             r"(?:[,\s]+(?:boss|please|mate|man|" + _NAME + r"|thanks|thank you|for me|"
             r"real quick|right now|now|asap|quickly|if you can|would you))+$",
-            "", text,
+            "", text, flags=re.I,
         )
         # Same guard, second failure mode. A trailing name is usually an
         # address ("pause the music, Jalen") but sometimes it is the OBJECT
@@ -710,7 +763,7 @@ class IntentRouter:
             r"\b(?:for|about|on|with|to|of"
             r"|google|search|find|look up|open|launch|start|play|call"
             r"|message|text|email|tell|remind|ask)$",
-            stripped,
+            stripped, flags=re.I,
         ):
             text = stripped
         # Strip leading politeness ("can you open chrome" / "please open
@@ -736,9 +789,9 @@ class IntentRouter:
                 r"i need you to|let'?s)\s+"
                 r"|^you (?:please|could|can)\s+"
                 r"|^please\s+",
-                "", text,
+                "", text, flags=re.I,
             )
-            text = re.sub(r"^(?:like|just|kinda|sorta) ", "", text)
+            text = re.sub(r"^(?:like|just|kinda|sorta) ", "", text, flags=re.I)
             if text == before:
                 break
         return text.strip()
@@ -748,12 +801,23 @@ class IntentRouter:
         if not self.enabled or not text:
             return None
         norm = self._normalise(text)
+        # Matched on the lowercased form (every alternation list in _rules is
+        # written lowercase), but ARGUMENTS come from the cased form. A
+        # message body, a search query or an essay line keeps the
+        # capitalisation he actually used. Before this split, "telegram
+        # Rodion saying I'll be late" was delivered to a real person, under
+        # his name, as "i'll be late".
+        cased = self._normalise(text, lower=False)
 
         for pattern, tool, build, reply in self._rules:
             match = pattern.match(norm)
             if match:
                 self.hits += 1
-                return Intent(tool=tool, args=build(match), reply=reply)
+                # The two strings differ only in case and the patterns are
+                # all re.I, so this normally matches identically. If it ever
+                # doesn't, fall back rather than lose the turn.
+                cased_match = pattern.match(cased) or match
+                return Intent(tool=tool, args=build(cased_match), reply=reply)
 
         self.misses += 1
         if self.log_misses:

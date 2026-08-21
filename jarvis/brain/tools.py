@@ -395,6 +395,34 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"query": ("string", "text to search for inside file contents", True),
          "folder": ("string", "optional folder to search under; defaults to the configured index paths", False)},
     ),
+    "save_telegram_draft": (
+        "Write text into a chat's DRAFT box without sending it. Nothing "
+        "reaches anyone — it appears in the message box of that chat on his "
+        "phone, for him to read and send himself. This is what to use for a "
+        "channel post: compose it, save it here, and tell him it's waiting. "
+        "Never use send_telegram_message for a post he hasn't seen. Saving a "
+        "second draft to the same chat replaces the first.",
+        {"to": ("string", "chat or channel name, @username, or 'Saved Messages'", True),
+         "text": ("string", "the full post in Telegram HTML", True)},
+    ),
+    "community_post_guide": (
+        "The layout rules for his AI Engineering & Machine Learning channel: "
+        "bullet character, where bold goes, the expandable Q&A block, the "
+        "fixed sign-off. Call this BEFORE writing any channel post, and call "
+        "voice_guide too — one is how a post is laid out, the other is how he "
+        "sounds, and a post needs both.",
+        {},
+    ),
+    "telegram_unread": (
+        "The unread Telegram messages THEMSELVES, from the busiest chats — "
+        "not a count. Use for 'what did I miss', 'catch me up on Telegram', "
+        "'read the community messages I haven't seen'. Summarise what was "
+        "being DISCUSSED; never read the messages out one by one, and never "
+        "answer with the number of unread messages, which is the question "
+        "restated rather than answered.",
+        {"max_chats": ("integer", "how many chats to pull from; defaults to 6", False),
+         "per_chat": ("integer", "messages per chat; defaults to 12", False)},
+    ),
     "log_weakness": (
         "Record a capability you DON'T have, after you've already answered "
         "him. Call this only when the blocker is a missing tool or a missing "
