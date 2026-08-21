@@ -286,11 +286,17 @@ def save_telegram_draft(to: str, text: str) -> str:
                 f"rejected the markup ({exc}). Worth checking before you post it."
             )
 
-        preview = text.strip().splitlines()[0][:80] if text.strip() else ""
+        # The PARSED text, not the raw HTML. This string is spoken aloud, and
+        # the first version read the markup out: "open angle bracket b close
+        # angle bracket Test Post". The tags are how the post is formatted,
+        # not part of what it says.
+        plain = (message or text).strip()
+        preview = plain.splitlines()[0][:80] if plain else ""
         return (
             f"Saved as a draft in {title} — nothing was sent. It starts "
-            f"\"{preview}\". Open the chat to read it, and press send yourself. "
-            "Saving another draft there will replace this one."
+            f"\"{preview}\", {len(plain)} characters with "
+            f"{len(entities)} pieces of formatting. Open the chat to read it, "
+            "and press send yourself. Saving another draft there replaces this one."
         )
 
     return RUNTIME.run(work)
