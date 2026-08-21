@@ -156,32 +156,44 @@ async def _english_voices(limit: int) -> list[str]:
     return names[:limit]
 
 
-async def _say(text: str, voice: str, rate: str, pitch: str, path: Path) -> bool:
+async def _say(text: str, voice: str, rate: str, pitch: str, path: Path,
+               attempts: int = 4) -> bool:
     """
-    Render one utterance to a wav. Returns False on failure.
+    Render one utterance to a wav. Returns False if every attempt failed.
 
-    edge-tts is a network service and this makes thousands of calls, so
-    individual failures are expected and must not abort a generation run
-    that may already be an hour in. The file is simply missing and the next
-    resumable run picks it up.
+    RETRIES WITH BACKOFF, because the first full run proved they are needed:
+    702 clips rendered fine and then all 1104 remaining failed in a row. The
+    service had not broken — a single request sent by hand immediately
+    afterwards worked — it was throttling a burst. Without backoff the run
+    "completed" having silently skipped 60% of the negatives, which is
+    exactly the half of the dataset that stops the model firing on the
+    television.
+
+    Individual permanent failures still must not abort a run that may be an
+    hour in; the file is simply missing and the next resumable run picks it
+    up.
     """
     import edge_tts
 
-    try:
-        communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
-        mp3 = b""
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                mp3 += chunk["data"]
-        if not mp3:
-            return False
-        pcm = _decode_mp3(mp3)
-        if pcm is None or len(pcm) < SAMPLE_RATE // 4:
-            return False
-        write_wav(path, fit_to_clip(pcm, offset=0.35))
-        return True
-    except Exception:
-        return False
+    for attempt in range(attempts):
+        try:
+            communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+            mp3 = b""
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    mp3 += chunk["data"]
+            if mp3:
+                pcm = _decode_mp3(mp3)
+                if pcm is not None and len(pcm) >= SAMPLE_RATE // 4:
+                    write_wav(path, fit_to_clip(pcm, offset=0.35))
+                    return True
+        except Exception:
+            pass
+        if attempt < attempts - 1:
+            # Exponential, with jitter so a burst that got throttled together
+            # does not retry together and get throttled together again.
+            await asyncio.sleep((2 ** attempt) + random.random())
+    return False
 
 
 def _decode_mp3(data: bytes) -> np.ndarray | None:
@@ -258,9 +270,10 @@ async def generate(voices_limit: int = 40) -> None:
           f"{len(todo)} to render")
 
     done = failed = 0
-    # Six at a time: enough to hide the round-trip, gentle enough not to get
-    # throttled and start failing every request.
-    semaphore = asyncio.Semaphore(6)
+    # Three at a time. Six was measured to get throttled: after ~700 clips
+    # every subsequent request failed until the burst stopped. Slower and
+    # complete beats faster and two-thirds missing.
+    semaphore = asyncio.Semaphore(3)
 
     async def worker(job):
         nonlocal done, failed

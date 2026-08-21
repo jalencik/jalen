@@ -75,6 +75,10 @@ class Speaker:
         # jarvis/timing.py for why that moment, specifically, is the one
         # worth measuring.
         self.on_audio_start = lambda: None
+        # The stream currently holding _say_lock, if any. say_now() needs to
+        # know, because during a streamed reply that thread is the only one
+        # that can speak. See say_now() for the deadlock this prevents.
+        self._active_stream: "SpeechStream | None" = None
 
     # --------------------------------------------------------------- control
     @property
@@ -336,7 +340,35 @@ class Speaker:
         until he hears something -- is set by the first sentence, not the
         last one.
         """
-        return SpeechStream(self)
+        stream = SpeechStream(self)
+        self._active_stream = stream
+        return stream
+
+    def say_now(self, text: str) -> bool:
+        """
+        Say something that cannot wait — a RED confirmation, an AMBER
+        announcement — even if a reply is currently streaming.
+
+        THIS IS NOT A CONVENIENCE. Speaker.say() takes _say_lock, and
+        SpeechStream holds that lock for an entire reply. The safety hook
+        runs while the turn is still in flight, so a confirmation asked
+        through say() blocked on a lock that could only be released by a
+        turn that was itself blocked waiting for the confirmation. Both
+        halves waited for the other, forever: no question spoken, no
+        timeout, no action, no error. Every RED tool the brain reached for
+        did nothing at all, and Jalen simply stopped responding.
+
+        So: if a stream is running, ask IT to speak the line — it is the
+        thread holding the lock, so it is the only one that can. Otherwise
+        this is an ordinary blocking say().
+        """
+        stream = self._active_stream
+        if stream is not None and not stream.finished:
+            if stream.interject(text):
+                return True
+            # It finished, or could not get to it in time. The lock is free
+            # (or about to be), so the ordinary path is safe now.
+        return self.say(text)
 
     def summarise_if_long(self, text: str) -> tuple[str, str | None]:
         """
@@ -355,6 +387,37 @@ class Speaker:
 # Conflating the two is how a stream either ends early or hangs forever.
 _NOTHING_YET = object()
 
+# Pushed into the sentence queue purely to wake a consumer that is blocked on
+# get(), so it goes round the loop and notices an urgent item. Carries no text
+# and is skipped.
+_WAKE = object()
+
+
+class _Urgent:
+    """
+    Something that must be said NOW, in the middle of a streaming reply.
+
+    Exists because of a real deadlock. A RED confirmation ("send this
+    message, confirm?") is spoken from the safety hook, which runs while the
+    turn is still in flight — and therefore while SpeechStream is holding
+    _say_lock for the whole reply. Speaker.say() blocked on that lock, the
+    stream could not finish because close() is only reached after the turn
+    returns, and the turn could not return because it was stuck in the hook.
+    Jalen went silent and stayed silent, which is what "it is ignoring me"
+    was.
+
+    The alternative fix — stop the stream, then speak — is simpler and
+    wrong: it destroys whatever the model says after the confirmation, and
+    it does so silently.
+    """
+
+    __slots__ = ("text", "done", "spoken")
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.done = threading.Event()
+        self.spoken = False
+
 
 class SpeechStream:
     """
@@ -371,6 +434,10 @@ class SpeechStream:
     def __init__(self, speaker: "Speaker") -> None:
         self._speaker = speaker
         self._q: "queue.Queue[str | None]" = queue.Queue()
+        # A separate lane, checked at the top of every consumer iteration, so
+        # an urgent line jumps ahead of the model's remaining sentences
+        # instead of queueing behind a reply that may still be arriving.
+        self._urgent: "queue.Queue[_Urgent]" = queue.Queue()
         self._spoken: list[str] = []
         self._pending_text = ""
         self._first_audio = threading.Event()
@@ -427,6 +494,58 @@ class SpeechStream:
         self._pending_text = ""
         self._q.put(None)
 
+    @property
+    def finished(self) -> bool:
+        return self._done.is_set()
+
+    def interject(self, text: str, timeout: float = 30.0) -> bool:
+        """
+        Speak something urgent inside this session. True if it was spoken.
+
+        The consumer already owns the speaker's lock, so it is the only
+        thread that CAN speak right now — asking it to do so is what breaks
+        the deadlock described on _Urgent.
+
+        Returns False rather than blocking forever if the stream is already
+        finished or does not get to it in time; the caller then falls back
+        to the ordinary locking path, which is safe once the stream has let
+        the lock go.
+        """
+        if self._done.is_set() or not text:
+            return False
+        item = _Urgent(text)
+        self._urgent.put(item)
+        # The consumer is very likely parked on self._q.get(), waiting for
+        # the model's next sentence. Nudge it so it goes round the loop and
+        # sees the urgent lane.
+        self._q.put(_WAKE)
+        if not item.done.wait(timeout):
+            return False
+        return item.spoken
+
+    def _drain_urgent(self, sp: "Speaker") -> None:
+        """Say anything waiting in the urgent lane, in order."""
+        while True:
+            try:
+                item = self._urgent.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                rendered = sp._render_cached(item.text)
+                if rendered is not None:
+                    pcm, rate = rendered
+                    self._first_audio.set()
+                    sp._play(pcm, rate)
+                    item.spoken = True
+            except Exception:
+                # A confirmation that cannot be rendered must not take the
+                # reply down with it — but it must also not report success,
+                # or the caller will wait for an answer to a question that
+                # was never asked out loud.
+                item.spoken = False
+            finally:
+                item.done.set()
+
     # ------------------------------------------------------------- consuming
     @property
     def has_spoken(self) -> bool:
@@ -446,6 +565,12 @@ class SpeechStream:
                 ) as pool:
                     ahead: tuple | None = None
                     while not sp._interrupt.is_set():
+                        # Checked FIRST, every iteration. This thread holds
+                        # _say_lock, so it is the only one that can speak —
+                        # which is why an urgent line has to be spoken here
+                        # rather than by whoever asked for it.
+                        self._drain_urgent(sp)
+
                         if ahead is not None:
                             future, text = ahead
                             ahead = None
@@ -453,6 +578,8 @@ class SpeechStream:
                             item = self._q.get()
                             if item is None:
                                 break
+                            if item is _WAKE:
+                                continue      # nudged; the urgent lane has it
                             future, text = pool.submit(sp._render_cached, item), item
 
                         # If the next sentence is ALREADY available, start
@@ -466,6 +593,8 @@ class SpeechStream:
                             nxt = _NOTHING_YET
                         if nxt is None:
                             producer_finished = True
+                        elif nxt is _WAKE:
+                            pass          # a nudge, not a sentence
                         elif nxt is not _NOTHING_YET:
                             ahead = (pool.submit(sp._render_cached, nxt), nxt)
 
@@ -484,7 +613,18 @@ class SpeechStream:
                         if producer_finished and ahead is None:
                             break
             finally:
+                # Release anyone still waiting on an urgent line before the
+                # lock goes. They are marked NOT spoken, so the caller falls
+                # back to the ordinary path rather than waiting for an answer
+                # to a question nobody heard.
+                while True:
+                    try:
+                        self._urgent.get_nowait().done.set()
+                    except queue.Empty:
+                        break
                 sp._speaking.clear()
                 sp._interrupt.clear()
                 sp.on_state("idle")
                 self._done.set()
+                if sp._active_stream is self:
+                    sp._active_stream = None

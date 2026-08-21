@@ -274,10 +274,23 @@ class Jalen:
         threading.Thread(target=self.speaker.say, args=(spoken,), daemon=True).start()
 
     def say_blocking(self, text: str) -> None:
+        """
+        Say it and wait until it has actually been said.
+
+        say_now(), not say(). Both confirmations and AMBER announcements come
+        through here, and both are spoken from the safety hook WHILE a turn
+        is still streaming its reply — which is exactly the case say()
+        deadlocks on. See Speaker.say_now().
+
+        Note the audit line is written before the audio, so a line in the log
+        is evidence the question was ASKED FOR, not that anyone heard it.
+        That distinction is what made the original deadlock so hard to see:
+        the log looked completely normal.
+        """
         if not text:
             return
         self.audit.utterance(text, who="jarvis")
-        self.speaker.say(text)
+        self.speaker.say_now(text)
 
     # ------------------------------------------------------------ confirmations
     async def confirm(self, question: str) -> bool:
