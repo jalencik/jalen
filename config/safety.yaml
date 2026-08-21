@@ -154,6 +154,10 @@ green:
     # then approves is gated on its own merits, where it belongs.
     # Which browser window is showing what. Read-only, and the thing he
     # has to be able to ask before choosing one to close.
+    # Writing a long piece to a local file. Additive, like create_file:
+    # timestamped, never overwriting a previous attempt.
+    - save_draft_text
+    - list_drafts
     - current_page_url      # reads Chrome's own address bar
     # Typing ordinary text into a field HE has focused. type_text is
     # already GREEN for the same reason: typing destroys nothing, and he
@@ -231,6 +235,9 @@ red:
     - send_email                # F46
     - send_telegram_message     # F46
     - send_telegram_file        # reaches a person, cannot be recalled
+    # Batching the WORK, not the permission — each post still goes
+    # through send_telegram_message and its destination check.
+    - send_posts
     - send_whatsapp_message     # F46
     - post_public               # F46 - channels, social, anything others see
     - delete_file               # F46

@@ -17,6 +17,7 @@ from typing import Any
 
 from . import (
     attachments, autofill, browsertabs, bulkmail, coding, desktop,
+    drafting,
     documents,
     filesystem,
     gcalendar, gmail,
@@ -62,7 +63,7 @@ for _module in (
     system, desktop, filesystem, documents, memory, launcher, sysinfo, web,
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
     technician, repairs, vault, interaction, browsertabs, attachments,
-    bulkmail, autofill,
+    bulkmail, autofill, drafting,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:

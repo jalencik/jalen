@@ -442,6 +442,26 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
          "body": ("string", "the message", True),
          "file": ("string", "the file, as he'd name it", True)},
     ),
+    "save_draft_text": (
+        "Write a long piece — an essay, a personal statement, an application "
+        "answer, a post — to a file AND his clipboard. Use this for anything "
+        "over a paragraph: speaking 600 words aloud is absurd and a reply "
+        "that long gets truncated anyway. Call voice_guide FIRST for anything "
+        "going out under his name. Tell him the word count and that it is on "
+        "the clipboard.",
+        {"name": ("string", "short name for the file, e.g. 'mit personal statement'", True),
+         "text": ("string", "the full text", True)},
+    ),
+    "list_drafts": ("The drafts written so far, newest first.", {}),
+    "send_posts": (
+        "Send SEVERAL posts to one Telegram chat in a single call. Use when "
+        "he asks for many at once — one tool call per post would exhaust the "
+        "turn budget around the eighth. Each post is reported individually, "
+        "and failures are listed rather than rounded away.",
+        {"to": ("string", "chat or channel name", True),
+         "posts": ("array", "the posts, one string each", True),
+         "as_draft": ("boolean", "save as drafts instead of sending; only works for ONE", False)},
+    ),
     "current_page_url": (
         "The URL of the browser window he is looking at, read from Chrome's "
         "own address bar. A page cannot forge that, which is why permission "
