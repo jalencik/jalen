@@ -185,7 +185,7 @@ def prewarm_system_scan() -> None:
     """
     Run the expensive scans once at startup, off the critical path, so the
     first time the user actually asks the answer is already sitting there.
-    Called by Jarvis.prewarm() alongside the STT/TTS/brain warmups.
+    Called by Jalen.prewarm() alongside the STT/TTS/brain warmups.
     """
     def warm() -> None:
         for key, fn in (("disk", _disk_report_uncached), ("cleanup", _cleanup_uncached)):

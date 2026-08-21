@@ -1,5 +1,5 @@
 """
-Wake word: "Hey Jarvis".
+Wake word: "Hey Jalen".
 
 openWakeWord ships a PRETRAINED hey_jarvis model, which is the entire reason
 the wake word in the spec is worth keeping as-is — no training, no cost, ~3% of

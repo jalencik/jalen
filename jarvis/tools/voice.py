@@ -2,7 +2,7 @@
 His writing voice, on demand.
 
 He has a my-voice skill — 35 KB of analysis of how he actually writes,
-built from his real essays. Asked to "draft a reply in my voice", Jarvis
+built from his real essays. Asked to "draft a reply in my voice", Jalen
 was writing in ITS voice and calling it his, which is worse than declining:
 an email that sounds like a language model went out under his name.
 

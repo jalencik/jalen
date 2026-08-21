@@ -1,5 +1,5 @@
 """
-Fetch the local models Jarvis needs. Run once after install:
+Fetch the local models Jalen needs. Run once after install:
 
     python scripts/download_models.py
 

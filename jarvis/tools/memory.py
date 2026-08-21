@@ -15,7 +15,7 @@ a credential before it ever reaches the embedding model or the database.
 This is a heuristic, not a guarantee — it catches the shapes real secrets
 take (long random-looking tokens, "api_key: ...", etc.), not everything
 a secret could ever look like. The real backstop is the same one
-everywhere else in this project: don't hand Jarvis something you don't
+everywhere else in this project: don't hand Jalen something you don't
 want remembered.
 """
 from __future__ import annotations

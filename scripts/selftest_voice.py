@@ -10,7 +10,7 @@ nothing here is a canned fixture. Real edge-tts synthesis, real ONNX
 inference through the real wake-word and VAD models, a real Groq API call,
 a real microphone capture, real playback.
 
-Only three things genuinely need O'ktam, per the handoff: how Jarvis
+Only three things genuinely need O'ktam, per the handoff: how Jalen
 actually sounds to him, whether the wake word fires on HIS voice in HIS
 room, and the Google OAuth consent click. Everything below is provable by
 machine, on purpose, before asking him for anything.
@@ -68,7 +68,7 @@ def resample(pcm: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
 
 
 def synth_16k(text: str) -> np.ndarray:
-    """Synthesise and resample straight to the 16 kHz Jarvis actually runs on."""
+    """Synthesise and resample straight to the 16 kHz Jalen actually runs on."""
     pcm, rate = synth_24k(text)
     return resample(pcm, rate, SAMPLE_RATE)
 
@@ -131,7 +131,7 @@ def check_mic(seconds: float = 2.0) -> dict:
     }
 
 
-def check_tts(text: str = "This is a Jarvis self test.") -> dict:
+def check_tts(text: str = "This is a Jalen self test.") -> dict:
     """Real synthesis + decode + playback. Non-silent PCM at the expected
     rate, and the output stream accepts the frames."""
     try:
@@ -291,7 +291,7 @@ def check_barge_in_latency() -> dict:
     from the start of injection to playback actually stopping."""
     speaker = Speaker(CONFIG)
     long_text = " ".join(
-        ["This is a long passage meant to keep Jarvis talking for a while."] * 6
+        ["This is a long passage meant to keep Jalen talking for a while."] * 6
     )
     barge_in_audio = synth_16k("stop talking right now")
     vad = VAD(CONFIG)
@@ -341,7 +341,7 @@ def check_barge_in_latency() -> dict:
 
 def check_failure_paths() -> dict:
     """Empty audio, pure silence, a 30s utterance, an invalid Groq key, a
-    simulated timeout, no network — Jarvis must stay alive through all of
+    simulated timeout, no network — Jalen must stay alive through all of
     them: either a clean result, or the controlled RuntimeError
     Transcriber.transcribe() already raises when every engine fails. Never
     an unhandled crash."""
@@ -439,7 +439,7 @@ CHECKS = [
 
 
 def main() -> int:
-    print("\n=== Jarvis voice pipeline self-test (handoff §5) ===\n")
+    print("\n=== Jalen voice pipeline self-test (handoff §5) ===\n")
     problems = 0
     for name, fn in CHECKS:
         try:

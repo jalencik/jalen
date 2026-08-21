@@ -94,7 +94,7 @@ class UtteranceCollector:
 
     ENDPOINTING (why this is not just one silence threshold)
     --------------------------------------------------------
-    The delay between "you stop talking" and "Jarvis starts working" is a
+    The delay between "you stop talking" and "Jalen starts working" is a
     fixed tax on EVERY turn, and it used to be the single largest item in
     the budget: 2000ms, more than the STT round-trip and the router put
     together. It was 700ms once, and got raised because 700ms guillotined
@@ -199,7 +199,7 @@ class UtteranceCollector:
         #
         #   never started    -- VAD stayed below threshold the whole time.
         #   started, but ... -- ONE 32ms blip (a keystroke, a door, the tail
-        #                       of Jarvis's own voice bleeding into the mic)
+        #                       of Jalen's own voice bleeding into the mic)
         #                       set _started, leaving _speech_ms at 32ms.
         #                       done_talking needs _speech_ms >= 250, which
         #                       can never now happen, and the old gave_up

@@ -1,7 +1,7 @@
 """
 Telegram bot control (Phase D, spec C22/C24, H62).
 
-The bot is a second front door onto the exact same Jarvis: it drives
+The bot is a second front door onto the exact same Jalen: it drives
 process() the same way run.py --text does, so every message gets the same
 router, the same brain, the same safety gate — no separate code path to
 keep in sync with the others (handoff §7: "prove there is no fourth path
@@ -40,7 +40,7 @@ def is_authorized(user_id: int | None, allowed_user_ids: list[int]) -> bool:
 
 def build_dispatcher(jarvis: Any, allowed_user_ids: list[int]):
     """
-    Wires an aiogram Dispatcher to drive the given Jarvis instance.
+    Wires an aiogram Dispatcher to drive the given Jalen instance.
     jarvis.say / jarvis.say_blocking are overridden per message to send a
     Telegram reply to that chat — the same pattern run.py --text already
     uses to print instead of speak. Like --text mode, this is a

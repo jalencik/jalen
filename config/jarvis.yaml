@@ -121,7 +121,7 @@ vad:
   # ---- ENDPOINTING: the largest fixed cost on every single turn ----
   #
   # There are TWO silence thresholds, because silence alone cannot tell
-  # "he's finished" from "he's thinking" — only the words can. Jarvis
+  # "he's finished" from "he's thinking" — only the words can. Jalen
   # closes the utterance at the fast one, transcribes, and then looks at
   # how the sentence ENDS: a complete thought goes straight through, one
   # ending on "and"/"to"/"the" puts the audio back and keeps listening on
@@ -172,7 +172,7 @@ conversation:
   # this many seconds it is re-attached to what it continues. Beyond it, a
   # sentence starting with "and" is treated as a new thought.
   stitch_window_s: 8
-  end_phrases: ["that's all", "thats all", "that is all", "thank you jalen", "thank you jarvis", "we're done", "nothing else"]
+  end_phrases: ["that's all", "thats all", "that is all", "thank you jalen", "we're done", "nothing else"]
   barge_in: true                   # C20 you can talk over it
   barge_in_threshold: 0.6          # how confident it must be that you're speaking, before it shuts up
 
@@ -218,7 +218,7 @@ brain:
   # enough. Raise to medium/high if answers get careless.
   effort: "low"
   # Extended thinking, off. Same trade, more extreme: it can spend seconds
-  # before saying anything. Turn on only if you want Jarvis to deliberate.
+  # before saying anything. Turn on only if you want Jalen to deliberate.
   thinking: false
   # If a turn has produced no text after this long (because it is calling
   # tools first), say one short pre-rendered line so the silence doesn't
@@ -253,7 +253,7 @@ safety:
   # falls back to the next free candidate, writing which one it took to
   # data/hotkeys.log. It will never again fail silently.
   kill_switch_hotkey: "ctrl+alt+k"
-  kill_phrases: ["stop", "stop stop", "cancel", "abort", "jalen stop", "jarvis stop"]
+  kill_phrases: ["stop", "stop stop", "cancel", "abort", "jalen stop"]
 
 # ---------------------------------------------------------------------------
 # MEMORY  (spec G53-G58)
@@ -286,7 +286,7 @@ index:
   max_file_mb: 25
 
 # ---------------------------------------------------------------------------
-# PROJECT CONTEXT  (spec G57) — what Jarvis should know deeply about your work.
+# PROJECT CONTEXT  (spec G57) — what Jalen should know deeply about your work.
 # Drop notes, papers and README files into docs/context/ and they get indexed.
 # ---------------------------------------------------------------------------
 projects:
@@ -337,7 +337,7 @@ ui:
   click_through_when_idle: true
   transcript_window: true          # C15 long content appears here instead of being read out
   show_transcript: true            # small caption under the orb showing the last thing
-                                    # Jarvis heard (the STT transcript); auto-hides after ~8s
+                                    # Jalen heard (the STT transcript); auto-hides after ~8s
   theme:
     idle:      "#161c24"           # deliberately dark/near-off — "silent when idle"
     listening: "#2f8fff"           # BLUE — listening
@@ -349,7 +349,7 @@ ui:
 # PROACTIVITY  (spec H59-H64)
 # ---------------------------------------------------------------------------
 # H59 says "never speak first". H60 wants a daily briefing and H61 wants
-# interrupts. Resolution: Jarvis never SPEAKS unprompted. It pulses the orb
+# interrupts. Resolution: Jalen never SPEAKS unprompted. It pulses the orb
 # and sends the content to Telegram. Say "brief me" and it reads it out.
 proactive:
   speak_unprompted: false          # H59 - hard rule
@@ -405,7 +405,7 @@ integrations:
   # Gmail and Calendar share ONE Google login (jarvis/integrations/
   # google_auth.py). Connect it once with:
   #     .venv\Scripts\python.exe scripts\connect_google.py
-  # He approves in his own browser; Jarvis never sees the password.
+  # He approves in his own browser; Jalen never sees the password.
   # Scopes are deliberately narrow: read, draft, send, calendar events —
   # NOT full account control, and never permanent deletion.
   gmail:    { enabled: true, send_requires_confirmation: true }    # E33

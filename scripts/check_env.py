@@ -1,7 +1,7 @@
 """
 Diagnostics. Run this whenever something doesn't work:
 
-    .\jarvis.ps1 check
+    .\jalen.ps1 check
 
 Tells you exactly which piece is missing, in plain language.
 """
@@ -40,7 +40,7 @@ PACKAGES = [
 
 def main() -> int:
     problems = 0
-    print("\n=== Jarvis diagnostics ===\n")
+    print("\n=== Jalen diagnostics ===\n")
 
     print("System")
     print(f"{OK}Python {platform.python_version()} ({platform.architecture()[0]})")
@@ -160,7 +160,7 @@ def main() -> int:
     # PowerShell refuses to run a script from the current folder without a
     # ".\" prefix, and bare "python" is a different install with none of
     # this project's packages. The launcher handles both.
-    print("\n" + ("All good — start it with:  .\\jarvis.ps1" if problems == 0
+    print("\n" + ("All good — start it with:  .\\jalen.ps1" if problems == 0
                   else f"{problems} blocking problem(s) above."))
     return 1 if problems else 0
 

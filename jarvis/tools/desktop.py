@@ -2,7 +2,7 @@
 Desktop control via UIA — the accessibility tree as text (Phase C).
 
 uiautomation gives Claude the screen as text: far cheaper and faster than
-screenshots into a vision model, and it's what lets Jarvis actually operate
+screenshots into a vision model, and it's what lets Jalen actually operate
 apps rather than just describe them.
 
 Two hard-won details, confirmed live against real Notepad/Chrome/Explorer/
@@ -54,8 +54,8 @@ SPARSE_TREE_NAMED_NODE_THRESHOLD = 8
 CHROME_ACCESSIBILITY_HINT = (
     "Chrome's accessibility tree comes back empty unless Chrome was launched "
     "with --force-renderer-accessibility (a Chrome launch flag, not something "
-    "Jarvis can turn on after the fact). Close Chrome and relaunch it with "
-    "that flag if you need Jarvis to read the page — otherwise UIA only sees "
+    "Jalen can turn on after the fact). Close Chrome and relaunch it with "
+    "that flag if you need Jalen to read the page — otherwise UIA only sees "
     "the window chrome (tabs, address bar), not page content."
 )
 

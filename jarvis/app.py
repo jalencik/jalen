@@ -1,7 +1,7 @@
 """
-The orchestrator. This is the loop that makes Jarvis feel like a person.
+The orchestrator. This is the loop that makes Jalen feel like a person.
 
-    idle -> "hey jarvis" -> listening -> you stop talking -> thinking
+    idle -> "hey jalen" -> listening -> you stop talking -> thinking
          -> speaking (interruptible) -> follow-up window -> idle
 
 Design notes worth knowing before you change anything here:
@@ -155,7 +155,7 @@ class Jalen:
         self.muted = bool(cfg.get_path("startup.start_muted", True))
         self.running = threading.Event()
         self.kill = threading.Event()
-        self._quit = threading.Event()   # "quit jarvis" / --stop: exit the loop
+        self._quit = threading.Event()   # "quit jalen" / --stop: exit the loop
         self.paused = False              # "pause": stay alive, stop listening
         self._restart_requested = False  # run.py re-execs when this is set
         self._turn_lock = threading.Lock()
@@ -482,7 +482,7 @@ class Jalen:
             return intent.reply
         if tool == "jalen_sleep":
             # "sleep" and "pause" are the same thing to a user, and this
-            # branch used to only SAY "Sleeping. Say hey Jarvis to wake me."
+            # branch used to only SAY "Sleeping. Say hey Jalen to wake me."
             # while setting no state whatsoever — it kept right on listening
             # and acting. Now it does what it says.
             self.say_blocking(intent.reply or "Sleeping.")
@@ -531,7 +531,7 @@ class Jalen:
         if tool == "morning_brief":
             # This rule existed with reply=None and no implementation, so
             # "brief me" produced total silence — indistinguishable from
-            # Jarvis being broken. Report what's actually wired, and say
+            # Jalen being broken. Report what's actually wired, and say
             # plainly what isn't, rather than pretending or staying quiet.
             #
             # It then had a subtler version of the same fault. The original
@@ -918,7 +918,7 @@ class Jalen:
 
                 if self.paused:
                     # Paused means "stop reacting", not "go deaf" — the wake
-                    # word stays live (it's ~3% of one core) so "Hey Jarvis"
+                    # word stays live (it's ~3% of one core) so "Hey Jalen"
                     # brings it back. Deafening it entirely would make the
                     # spoken "resume" impossible to hear, which is how you
                     # end up with an assistant you can't turn back on.
@@ -982,7 +982,7 @@ class Jalen:
                         self.orb.set_state("listening")
                         # Do NOT drain here. The frames still queued behind
                         # this one are the rest of what was just said — for
-                        # "Hey Jarvis, open Chrome" spoken in one breath, the
+                        # "Hey Jalen, open Chrome" spoken in one breath, the
                         # wake word fires ~0.77s in and the queued frames hold
                         # "open Chrome". Draining threw exactly that away, so
                         # the collector then heard only silence, waited out
@@ -1014,7 +1014,7 @@ class Jalen:
                     # indistinguishable from "heard you and ignored you".
                     #
                     # A NOISE opened it — a keystroke, a door, the tail of
-                    # Jarvis's own voice arriving back through the mic during
+                    # Jalen's own voice arriving back through the mic during
                     # the follow-up window — and announcing that is pure
                     # self-inflicted interruption. He never asked anything,
                     # so there was nothing to catch. Worse, the announcement
@@ -1022,7 +1022,7 @@ class Jalen:
                     # the window open again.
                     #
                     # This was not a rare edge: "I didn't catch that" was
-                    # 30 of the 255 things Jarvis said in data/audit.jsonl,
+                    # 30 of the 255 things Jalen said in data/audit.jsonl,
                     # 11.8% of its entire spoken output, and it fired in the
                     # middle of a RED delete confirmation — talking over the
                     # question it had just asked, then cancelling the action

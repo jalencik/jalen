@@ -3,7 +3,7 @@ The local intent router — the single most important cost decision in this buil
 
 Why it exists: Agent SDK usage draws on your Claude Pro allowance. A voice
 assistant you talk to all day will send hundreds of turns. If "pause the music"
-costs a Claude round-trip, you will hit your limit by Thursday and Jarvis goes
+costs a Claude round-trip, you will hit your limit by Thursday and Jalen goes
 silent — which is the one failure mode that makes people stop using an
 assistant for good.
 
@@ -37,14 +37,25 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 # came back as conversation rather than an exit. Measured before the fix:
 # "jarvis quit" routed in 50ms, "jalen quit" routed never.
 #
-# "jarvis" stays in the list on purpose. Speech recognition and a year of
-# habit both still produce the old name; understanding it costs one
-# alternation, and dropping it would silently strand the exact commands he
-# is most practised at saying. He is always ANSWERED as Jalen — see
-# identity.name in config/jarvis.yaml. This is about what it hears, not
-# what it calls itself.
-# ----------------------------------------------------------------------------
-NAME_ALIASES = ("jalen", "jarvis")
+# The old name is GONE from this list, at his explicit request: "only Jalen
+# is acceptable, I do not wanna hear about Jarvis." It survived one day as a
+# legacy alias; keeping it longer meant the old name stayed alive in the one
+# place he interacts with most.
+#
+# What replaces it is the set of things SPEECH RECOGNITION actually writes
+# when someone says "Jalen". Whisper does not spell an uncommon name
+# consistently — it produces Jaylen, Jalin, Jaelen, Jalon — and it varies by
+# accent, which matters because he said different people pronounce it
+# differently. A command lost to a spelling the user cannot see or control is
+# the same failure as a command lost to the wrong name.
+#
+# "Alan", "Galen" and "Helen" are deliberately NOT here. They are real words
+# and real people's names, and matching them would strip a legitimate subject
+# out of a sentence ("tell Alan I'm late" -> "tell I'm late").
+NAME_ALIASES = (
+    "jalen", "jaylen", "jaylin", "jalin", "jaelen",
+    "jalon", "jaleen", "jalene", "jayleen", "jaylan",
+)
 _NAME = "(?:" + "|".join(NAME_ALIASES) + ")"
 
 
@@ -182,7 +193,7 @@ def _site_lookup(m: re.Match) -> dict:
 def _default_to_desktop(name: str) -> str:
     """
     "make me a new folder called Projects" names a THING, not a location —
-    nobody means "in whatever directory Jarvis happens to be running from."
+    nobody means "in whatever directory Jalen happens to be running from."
     A bare name defaults to the Desktop, same as double-clicking "New
     Folder" there; anything that already looks like a real path (a drive
     letter, a leading slash, or an explicit ~) is left exactly as spoken.
@@ -199,7 +210,7 @@ def _resolve_doc(raw: str) -> str:
     would — a bare filename or a nickname, not a full path. read_document
     itself only resolves a literal path (same contract as read_file), so
     without this it would look for "changes.pdf" relative to wherever
-    Jarvis's process happens to be running and almost always fail. Reuse
+    Jalen's process happens to be running and almost always fail. Reuse
     launcher.find_files — the exact search open_target already relies on —
     to turn that spoken name into a real path first; fall back to the raw
     name (letting read_document report "no such file" honestly) when
@@ -244,8 +255,8 @@ def _rules() -> list[Rule]:
         # silently swallows anything more specific placed after it. Three real
         # bugs came from exactly this: "open the folder X" was eaten by
         # open_app, and "go to sleep" was eaten by focus_window (as a window
-        # literally named "sleep"). Jarvis's own commands go FIRST, because a
-        # command aimed at Jarvis must never be mistaken for one aimed at an
+        # literally named "sleep"). Jalen's own commands go FIRST, because a
+        # command aimed at Jalen must never be mistaken for one aimed at an
         # app that happens to share a word.
         # ====================================================================
 
@@ -323,7 +334,7 @@ def _rules() -> list[Rule]:
          "volume_step", lambda m: {"direction": m.group(1).lower()}, None),
         (R(r"^(set )?volume (to )?(\d{1,3})\s*(percent|%)?$", re.I),
          "volume_set", lambda m: {"level": int(m.group(3))}, None),
-        # NOTE: bare "mute" means "Jarvis be quiet", not "silence the speakers" —
+        # NOTE: bare "mute" means "Jalen be quiet", not "silence the speakers" —
         # that's what you mean 9 times in 10. System mute needs an explicit object.
         (R(r"^(mute|unmute) (the )?(sound|volume|audio|speakers)$", re.I),
          "volume_mute_toggle", lambda m: {"mute": m.group(1).lower() == "mute"}, None),
@@ -491,10 +502,22 @@ def _rules() -> list[Rule]:
         # same speaker, same second — went to Claude and came back a second
         # later. A contraction the user cannot control is not a thing to
         # match on.
-        (R(r"^(?:what(?:'?s| is) the time|what time is it|the time)\??$", re.I),
+        # Every way he has actually asked, plus the obvious neighbours. He
+        # reported that it "cannot even tell me the time properly": the tool
+        # was correct all along, but "tell me the time" matched no rule and
+        # went to the LLM, which answers a clock question from a model that
+        # has no clock. A wrong answer from the brain is worse than a slow
+        # one, and this is the cheapest fact on the machine.
+        (R(r"^(?:(?:can you |could you |please )?tell me )?"
+           r"(?:what(?:'?s| is) the time(?: now| right now)?"
+           r"|what time is it(?: now| right now)?"
+           r"|the time(?: now)?|time(?: now| please)?"
+           r"|do you (?:know|have) the time)\??$", re.I),
          "get_time", n, None),
-        (R(r"^(?:what(?:'?s| is) (?:the |today'?s )?date|what day is it|"
-           r"the date|what'?s today)\??$", re.I),
+        (R(r"^(?:(?:can you |could you |please )?tell me )?"
+           r"(?:what(?:'?s| is) (?:the |today'?s )?date"
+           r"|what day is it(?: today)?|the date|what'?s today"
+           r"|what is today'?s date)\??$", re.I),
          "get_date", n, None),
         (R(r"^(battery|how much battery)( level| percentage)?\??$", re.I),
          "get_battery", n, None),
@@ -507,7 +530,7 @@ def _rules() -> list[Rule]:
         (R(r"^what(?:'s| is) (?:eating|using|hogging)(?: up)?(?: all)? my (?:memory|ram)\??$", re.I),
          "get_system_status", n, None),
 
-        # ---- Jarvis's own settings (mute/sleep/quit live at the top) --------
+        # ---- Jalen's own settings (mute/sleep/quit live at the top) --------
         (R(r"^private mode( on)?$", re.I), "private_mode",
          lambda m: {"on": True}, "Private mode on. Nothing is being logged or remembered."),
         (R(r"^(private mode off|end private mode|resume logging)$", re.I),
@@ -542,7 +565,7 @@ def _rules() -> list[Rule]:
         # - 14:00 Dentist", which is what you would say out loud anyway.
         #
         # RESEARCH DELIBERATELY DOES NOT. web_search returns fenced results
-        # with URLs; routing "research X" here would have Jarvis read a list
+        # with URLs; routing "research X" here would have Jalen read a list
         # of links aloud instead of answering the question. Synthesising
         # across sources is exactly what the brain is for, so research stays
         # on the brain path on purpose — faster there would mean worse.
@@ -633,7 +656,7 @@ def _rules() -> list[Rule]:
         # a directory. Without that guard, "use cowork on the eco pulse
         # folder" routes here with prompt="the eco pulse folder" -- handing
         # an autonomous agent a LOCATION as its task, in whatever directory
-        # Jarvis happened to be started from. Those sentences go to the
+        # Jalen happened to be started from. Those sentences go to the
         # brain, which resolves the folder properly and can ask which one it
         # meant. Starting a coding agent in the wrong repository is the one
         # mistake here worth a round-trip to avoid.
@@ -717,7 +740,7 @@ def _rules() -> list[Rule]:
         # learn something", which is the brain's job now that web_search
         # actually reads pages. Without this exclusion, "find out about the
         # Horizon deadline" searched his DISK for a file called "out about
-        # the horizon deadline" and reported nothing, which reads as Jarvis
+        # the horizon deadline" and reported nothing, which reads as Jalen
         # being useless at the exact moment he asked it to research
         # something. Pre-existing; only visible once research existed as a
         # real alternative.
@@ -776,9 +799,9 @@ class IntentRouter:
         text = re.sub(r"^(hey |ok |okay )?" + _NAME + r"[,\s]+", "", text, flags=re.I)
         text = re.sub(r"[.!?]+$", "", text)
         text = re.sub(r"\s+", " ", text)
-        # strip a trailing address ("pause the music, boss" / "..., Jarvis").
+        # strip a trailing address ("pause the music, boss" / "..., Jalen").
         # "jarvis" matters: only the LEADING wake word was stripped above, so
-        # "open chrome, Jarvis" reached open_app as name="chrome, jarvis" and
+        # "open chrome, Jalen" reached open_app as name="chrome, jarvis" and
         # tried to launch an app by that name.
         # Trailing courtesy and urgency. This mattered more than it looks:
         # heard live, "could you please open Telegram FOR ME" reached

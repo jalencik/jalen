@@ -382,11 +382,11 @@ class Brain:
             # disables the built-in set entirely — Claude can only call
             # what's registered on the jarvis MCP server, nothing else.
             tools=[],
-            # Jarvis must run on ITS OWN tools only. Left at the default
+            # Jalen must run on ITS OWN tools only. Left at the default
             # (None), the SDK loads every filesystem settings source —
             # ~/.claude/settings.json included — so whatever MCP servers and
             # skills happen to be configured for Claude Code on this machine
-            # get injected into Jarvis. Seen for real in the audit log: asked
+            # get injected into Jalen. Seen for real in the audit log: asked
             # to open a local PDF, it reached for a chrome-devtools MCP tool
             # from an unrelated developer setup. Those tools aren't in
             # safety.yaml, so they classify as unclassified-AMBER — powerful
@@ -487,7 +487,7 @@ class Brain:
     # -------------------------------------------------------------------- ask
     async def ask(self, text: str, on_text=None) -> str:
         """
-        One conversational turn. Returns what Jarvis should say out loud.
+        One conversational turn. Returns what Jalen should say out loud.
 
         `on_text` receives text as the model produces it. Pass it and the
         reply is spoken while it is still being written; omit it and this
@@ -500,7 +500,7 @@ class Brain:
         3.0s, p75 8.0s, p90 23.0s, and ALL of it was silence, because TTS
         could not begin until this returned. The work itself was not the
         problem; the ordering was. Now the clock a person actually feels --
-        how long until Jarvis says something -- is set by the first
+        how long until Jalen says something -- is set by the first
         sentence rather than the last.
 
         Tool calls still take as long as they take. The difference is that

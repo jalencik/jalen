@@ -79,7 +79,11 @@ def intent_of(router: IntentRouter, text: str):
         pytest.param(lambda c, n: f"{c} {n}", id="trailing-bare"),
     ],
 )
-@pytest.mark.parametrize("name", NAME_ALIASES)
+# The canonical spelling plus two transcription variants. Not the whole
+# alias list: crossed with 24 commands and 6 decorations that is fourteen
+# hundred cases proving the same property, and a suite people stop running
+# protects nothing. Every alias IS checked individually, cheaply, below.
+@pytest.mark.parametrize("name", ["jalen", "jaylen", "jalin"])
 def test_name_never_changes_the_intent(router, command, decorate, name):
     """
     Saying his name is addressing, not instructing. Whatever "open chrome"
@@ -95,13 +99,39 @@ def test_name_never_changes_the_intent(router, command, decorate, name):
     )
 
 
-def test_both_names_are_understood(router):
+@pytest.mark.parametrize("alias", NAME_ALIASES)
+def test_every_transcription_variant_reaches_the_same_command(router, alias):
     """
-    "jarvis" stays a live alias deliberately. Speech recognition and habit
-    both still produce it; dropping it would strand the commands he is most
-    practised at saying, for no gain.
+    Whisper does not spell an uncommon name consistently — it writes Jaylen,
+    Jalin, Jaelen, Jalon — and which one it picks varies with accent. He
+    raised exactly this: different people pronounce it differently. A command
+    lost to a spelling the speaker cannot see or control is indistinguishable
+    from the assistant ignoring them.
     """
-    assert intent_of(router, "jalen quit") == intent_of(router, "jarvis quit")
+    assert intent_of(router, f"{alias} quit") == intent_of(router, "jalen quit")
+
+
+def test_the_old_name_is_gone(router):
+    """
+    At his explicit request: "only Jalen is acceptable, I do not wanna hear
+    about Jarvis." It must not remain as a quiet fallback either — that is
+    how a rename stays half-done for months.
+    """
+    assert "jarvis" not in NAME_ALIASES
+    assert router.route("jarvis quit") is None, "the old name still commands him"
+
+
+@pytest.mark.parametrize(
+    "real_name",
+    ["alan", "galen", "helen", "jason", "dylan"],
+)
+def test_similar_real_names_are_not_swallowed(router, real_name):
+    """
+    The variant list must not grow into ordinary names. Matching "Alan"
+    would strip a real person out of a sentence — "tell Alan I'm late"
+    becoming "tell I'm late" — which is a worse failure than not matching.
+    """
+    assert real_name not in NAME_ALIASES
 
 
 @pytest.mark.parametrize(
@@ -120,7 +150,7 @@ def test_every_way_of_leaving_says_see_you_boss(router, phrase):
     assert hit.reply == "See you, Boss."
 
 
-@pytest.mark.parametrize("phrase", ["jalen", "hey jalen", "jalen?", "Jalen", "jarvis"])
+@pytest.mark.parametrize("phrase", ["jalen", "hey jalen", "jalen?", "Jalen", "jaylen"])
 def test_bare_name_is_answered_not_reasoned_about(router, phrase):
     """
     The endpointer closes on just the name constantly — wake fires, he draws

@@ -3,7 +3,7 @@ Single-instance ownership and clean shutdown.
 
 Two problems this solves, both reported from real use:
 
-  D. "I saw two Jarvis instances." Nothing prevented a second launch, and a
+  D. "I saw two Jalen instances." Nothing prevented a second launch, and a
      second launch is not harmless: two processes both open the microphone,
      both poll Telegram, both drive TTS to the same output device, and both
      write the audit database. The symptom is doubled/competing replies.
@@ -17,7 +17,7 @@ Design notes:
 
 * The lock stores the PID *and* the process start time. A bare PID file is
   not enough: Windows reuses PIDs, so a stale lock whose PID now belongs to
-  some unrelated process would otherwise make Jarvis refuse to start
+  some unrelated process would otherwise make Jalen refuse to start
   forever. Matching the start time as well makes reuse effectively
   impossible to mistake for a live instance.
 
@@ -77,7 +77,7 @@ def _read_lock() -> InstanceInfo | None:
 
 
 def running_instance() -> InstanceInfo | None:
-    """The live Jarvis instance, or None. Clears the lock if it's stale."""
+    """The live Jalen instance, or None. Clears the lock if it's stale."""
     info = _read_lock()
     if info is None:
         return None

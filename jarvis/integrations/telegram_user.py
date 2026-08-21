@@ -4,7 +4,7 @@ His PERSONAL Telegram account, over MTProto (Telethon).
 NOT THE SAME THING AS THE BOT
 -----------------------------
 integrations/telegram_bot.py is a *bot* — a separate identity people talk
-TO, and the way he drives Jarvis from his phone. This module is his own
+TO, and the way he drives Jalen from his phone. This module is his own
 account: it reads the chats he actually has and can send as him. Two
 different credentials, two different trust levels, deliberately two files.
 
@@ -21,11 +21,11 @@ which Telethon stores a *session file* that stands in for all of it.
 That session file is a complete, password-less login to his account. It is
 guarded three ways: .gitignore excludes *.session, it lives under data/
 which is git-ignored wholesale, and safety.yaml's never_touch patterns list
-*.session so Jarvis's own file tools refuse to read or move it.
+*.session so Jalen's own file tools refuse to read or move it.
 
 THREADING
 ---------
-Telethon binds its client to the event loop that created it, and Jarvis
+Telethon binds its client to the event loop that created it, and Jalen
 calls tools from asyncio.to_thread worker threads that each have no loop at
 all. Creating a client per call would work but pays a full reconnect
 (~1-2s) on every "read my telegram" — the exact kind of cost this project

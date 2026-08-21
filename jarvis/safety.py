@@ -1,5 +1,5 @@
 """
-The gate. Every action Jarvis takes passes through classify() before it runs.
+The gate. Every action Jalen takes passes through classify() before it runs.
 
 Design rule: this module decides, it does not ask. Asking is the caller's job
 (voice, Telegram, or the console), because the question has to reach whichever
@@ -100,7 +100,7 @@ class SafetyEngine:
         return None
 
     def scan_for_injection(self, text: str) -> list[str]:
-        """Return the suspicious phrases found in content Jarvis has READ."""
+        """Return the suspicious phrases found in content Jalen has READ."""
         if not self.guard_enabled or not text:
             return []
         low = text.lower()
@@ -118,7 +118,7 @@ class SafetyEngine:
         """
         origin:
           "user"    - O'ktam said it (voice) or sent it (authenticated Telegram)
-          "content" - derived from something Jarvis read: email, web page, file.
+          "content" - derived from something Jalen read: email, web page, file.
                       These can never trigger RED tools. This is the
                       prompt-injection defence and it is not overridable.
         """

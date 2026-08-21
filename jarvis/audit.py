@@ -46,7 +46,7 @@ class AuditLog:
         self.jsonl_path = root / cfg.get_path("audit.jsonl_path", "data/audit.jsonl")
         self.session_id = session_id
         self._lock = threading.Lock()
-        # memory.private_mode_default was configurable but ignored — Jarvis
+        # memory.private_mode_default was configurable but ignored — Jalen
         # always started logging regardless of the flag (spec G58).
         self._private = bool(cfg.get_path("memory.private_mode_default", False))
 

@@ -1,18 +1,18 @@
 """
 Wraps jarvis.tools.REGISTRY (system.py + desktop.py + filesystem.py, every
-tool Jarvis owns) as Claude Agent SDK tools, so the brain can actually use
+tool Jalen owns) as Claude Agent SDK tools, so the brain can actually use
 them — the handoff's "no empty tools=[]".
 
 One data-driven table rather than 31 hand-written @tool blocks: keeping
 that many blocks in sync with jarvis.tools.REGISTRY by hand is exactly the
 kind of thing that drifts silently. build_sdk_tools() asserts the table and
-the registry match at call time, before Jarvis ever starts talking to
+the registry match at call time, before Jalen ever starts talking to
 Claude — a tool present in one but not the other is a startup error, not a
 runtime surprise discovered mid-conversation.
 
 Every wrapped call runs jarvis.tools.call() in a worker thread (via
 asyncio.to_thread, so a slow tool — a subprocess, a UIA wait — never blocks
-Jarvis's single persistent event loop) inside tools.com_initialized():
+Jalen's single persistent event loop) inside tools.com_initialized():
 UIA/COM-based tools (desktop.py, and system.py's focus_window/
 window_state/volume_set) raise "CoInitialize has not been called" on any
 thread that hasn't had COM explicitly initialized, and asyncio.to_thread's
@@ -248,7 +248,7 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     # ---- research.py: actually READING the web ----------------------------
     # Distinct from web.py's search_site, which only OPENS a results page in
     # Chrome. That is right for "put YouTube on screen" and useless for
-    # "research this" — a browser tab is not an answer and Jarvis can't see
+    # "research this" — a browser tab is not an answer and Jalen can't see
     # inside it.
     "web_search": (
         "Search the web and get the results back AS TEXT — titles, snippets "

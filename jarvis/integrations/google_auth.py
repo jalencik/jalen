@@ -3,7 +3,7 @@ One Google login, shared by Gmail and Calendar.
 
 WHY OAUTH AND NOT A PASSWORD
 ----------------------------
-He asked, more than once and with some frustration, why Jarvis can't just
+He asked, more than once and with some frustration, why Jalen can't just
 type his Gmail address and password like he would. The honest answer is not
 "I'm not allowed" — it's that the password route is both worse and weaker:
 
@@ -11,11 +11,11 @@ type his Gmail address and password like he would. The honest answer is not
     outcome of scripting it is not access, it's a security lock on the
     account and a phone-verification loop.
   * It cannot survive two-factor auth, which he has on.
-  * The credential would have to live somewhere Jarvis can read it, which
+  * The credential would have to live somewhere Jalen can read it, which
     makes every future bug a credential-disclosure bug.
 
 OAuth is the route Google actually built for this, and it is strictly MORE
-capable: he approves once, in his own browser, and Jarvis receives a refresh
+capable: he approves once, in his own browser, and Jalen receives a refresh
 token scoped to exactly the permissions granted — never the password, and
 revocable at myaccount.google.com/permissions without changing it.
 

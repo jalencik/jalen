@@ -336,21 +336,54 @@ def _audio_features():
     )
 
 
-def build_dataset(augmentations: int = 4, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
-    """Every clip on disk, plus augmented copies, as (features, labels)."""
+# What a clip IS, beyond positive/negative. Reported separately at
+# evaluation time, because one blended false-accept number is misleading in
+# a way that matters for the ship decision: this negative set is 80%
+# DELIBERATE near-misses ("Hey Galen", "Hey Kalen", "Hey Jaylen"), which is
+# the right training signal and completely unlike a real room. Accepting 3%
+# of adversarial soundalikes and 3% of ordinary conversation are wildly
+# different products, and only the second predicts how it behaves on his
+# desk.
+KIND_POSITIVE = 0
+KIND_CONFUSABLE = 1      # "Hey Galen" — engineered to sit on the boundary
+KIND_AMBIENT = 2         # ordinary speech, the television, conversation
+KIND_NOISE = 3           # room tone and silence
+
+
+def build_dataset(
+    augmentations: int = 4, seed: int = 0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every clip on disk, plus augmented copies, as (features, labels, kinds)."""
     rng = random.Random(seed)
     np.random.seed(seed)
 
     clips: list[np.ndarray] = []
     labels: list[int] = []
-    for directory, label in ((POS_DIR, 1), (NEG_DIR, 0)):
-        for path in sorted(directory.glob("*.wav")):
-            pcm = read_wav(path)
-            clips.append(fit_to_clip(pcm, offset=0.35))
+    kinds: list[int] = []
+
+    def add(pcm, label, kind):
+        clips.append(fit_to_clip(pcm, offset=0.35))
+        labels.append(label)
+        kinds.append(kind)
+        for _ in range(augmentations):
+            clips.append(augment(pcm, rng))
             labels.append(label)
-            for _ in range(augmentations):
-                clips.append(augment(pcm, rng))
-                labels.append(label)
+            kinds.append(kind)
+
+    for path in sorted(POS_DIR.glob("*.wav")):
+        add(read_wav(path), 1, KIND_POSITIVE)
+
+    # Negative filenames end in the index of the phrase that produced them,
+    # and CONFUSABLES comes before BACKGROUND_SPEECH in that list — so the
+    # index says which kind it is without storing a second manifest that
+    # could drift out of step with the audio.
+    for path in sorted(NEG_DIR.glob("*.wav")):
+        try:
+            index = int(path.stem.rsplit("_", 1)[1])
+        except (IndexError, ValueError):
+            index = 0
+        kind = KIND_CONFUSABLE if index < len(CONFUSABLES) else KIND_AMBIENT
+        add(read_wav(path), 0, kind)
 
     # Pure noise and near-silence as negatives. Without them the model has
     # never seen "nothing is happening" and scores it unpredictably — which
@@ -359,6 +392,7 @@ def build_dataset(augmentations: int = 4, seed: int = 0) -> tuple[np.ndarray, np
         level = rng.uniform(1.0, 600.0)
         clips.append((np.random.randn(CLIP_SAMPLES) * level).astype(np.float32))
         labels.append(0)
+        kinds.append(KIND_NOISE)
 
     if not clips:
         raise SystemExit("No training clips. Run: python scripts\\train_wake_word.py generate")
@@ -375,7 +409,7 @@ def build_dataset(augmentations: int = 4, seed: int = 0) -> tuple[np.ndarray, np
         try:
             blob = np.load(cache)
             print(f"{len(clips)} clips ({sum(labels)} positive) -> cached embeddings")
-            return blob["x"], blob["y"]
+            return blob["x"], blob["y"], blob["k"]
         except Exception:
             pass   # corrupt cache is not a reason to fail; just recompute
 
@@ -390,11 +424,12 @@ def build_dataset(augmentations: int = 4, seed: int = 0) -> tuple[np.ndarray, np
         )
     x = features.astype(np.float32)
     y = np.array(labels, dtype=np.float32)
+    k = np.array(kinds, dtype=np.int8)
     try:
-        np.savez_compressed(cache, x=x, y=y)
+        np.savez_compressed(cache, x=x, y=y, k=k)
     except OSError:
         pass
-    return x, y
+    return x, y, k
 
 
 # ---------------------------------------------------------------- training
@@ -412,8 +447,9 @@ def _sigmoid(z: np.ndarray) -> np.ndarray:
     return out
 
 
-def train_head(x: np.ndarray, y: np.ndarray, *, epochs: int = 60,
-               hidden: int = 128, seed: int = 0) -> tuple[list[np.ndarray], dict]:
+def train_head(x: np.ndarray, y: np.ndarray, kinds: np.ndarray | None = None, *,
+               epochs: int = 60, hidden: int = 128,
+               seed: int = 0) -> tuple[list[np.ndarray], dict]:
     """
     Fit the classification head with plain numpy and Adam.
 
@@ -425,10 +461,12 @@ def train_head(x: np.ndarray, y: np.ndarray, *, epochs: int = 60,
     rng = np.random.default_rng(seed)
     order = rng.permutation(len(x))
     x, y = x[order], y[order]
+    kinds = kinds[order] if kinds is not None else np.zeros(len(x), dtype=np.int8)
 
     split = int(len(x) * 0.85)
     x_train, y_train = x[:split], y[:split]
     x_val, y_val = x[split:], y[split:]
+    k_val = kinds[split:]
 
     # Normalise on the TRAINING set only. Using the whole set leaks the
     # validation distribution into the model and flatters every number
@@ -495,7 +533,7 @@ def train_head(x: np.ndarray, y: np.ndarray, *, epochs: int = 60,
             acc = ((prob > 0.5) == (y_val > 0.5)).mean()
             print(f"  epoch {epoch:3d}  val accuracy {acc:.3f}")
 
-    stats = {"mean": mean, "std": std, "x_val": x_val, "y_val": y_val}
+    stats = {"mean": mean, "std": std, "x_val": x_val, "y_val": y_val, "k_val": k_val}
     return params, stats
 
 
@@ -557,7 +595,8 @@ MAX_FALSE_REJECT = 0.10     # above this it ignores him
 
 
 def evaluate(model_path: Path, x_val: np.ndarray, y_val: np.ndarray,
-             mean: np.ndarray, std: np.ndarray) -> dict:
+             mean: np.ndarray, std: np.ndarray,
+             k_val: np.ndarray | None = None) -> dict:
     """
     False-accept and false-reject on audio the model never saw, AND the
     threshold that gets the best of both.
@@ -588,35 +627,51 @@ def evaluate(model_path: Path, x_val: np.ndarray, y_val: np.ndarray,
     if not len(positives) or not len(negatives):
         raise SystemExit("Validation split has only one class — cannot evaluate.")
 
-    print(f"\n{'threshold':>10}  {'false accept':>13}  {'false reject':>13}")
-    sweep = []
-    for threshold in [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.97, 0.99, 0.995, 0.999]:
-        fa = float((negatives >= threshold).mean())
-        fr = float((positives < threshold).mean())
-        sweep.append((threshold, fa, fr))
-        print(f"{threshold:>10.3f}  {fa:>12.2%}  {fr:>12.2%}")
+    # Split the negatives. One blended false-accept number would decide this
+    # wrongly: the set is 80% deliberate soundalikes, which is the right
+    # training signal and nothing like a real room. What predicts behaviour
+    # on his desk is how often ORDINARY speech and room noise trip it.
+    if k_val is None:
+        k_val = np.zeros(len(y_val), dtype=np.int8)
+    ambient = scores[(y_val == 0) & ((k_val == KIND_AMBIENT) | (k_val == KIND_NOISE))]
+    confusable = scores[(y_val == 0) & (k_val == KIND_CONFUSABLE)]
 
+    print(
+        f"\n{'threshold':>10}  {'miss him':>10}  {'ordinary speech':>16}  {'soundalikes':>12}"
+    )
+    sweep = []
+    for threshold in [0.5, 0.7, 0.8, 0.9, 0.95, 0.97, 0.99, 0.995, 0.999]:
+        fr = float((positives < threshold).mean())
+        fa_all = float((negatives >= threshold).mean())
+        fa_amb = float((ambient >= threshold).mean()) if len(ambient) else 0.0
+        fa_con = float((confusable >= threshold).mean()) if len(confusable) else 0.0
+        sweep.append((threshold, fa_amb, fr, fa_con, fa_all))
+        print(f"{threshold:>10.3f}  {fr:>9.2%}  {fa_amb:>15.2%}  {fa_con:>11.2%}")
+
+    # The gate is on AMBIENT accepts, not on the adversarial set. Soundalikes
+    # are reported because a high number there means someone shouting "Hey
+    # Galen" wakes him — worth knowing, not worth blocking a release over.
     usable = [row for row in sweep if row[1] <= MAX_FALSE_ACCEPT and row[2] <= MAX_FALSE_REJECT]
     best = usable[0] if usable else None
 
     result = {
         "n_positive": int(len(positives)),
-        "n_negative": int(len(negatives)),
+        "n_ambient_negative": int(len(ambient)),
+        "n_confusable_negative": int(len(confusable)),
         "recommended_threshold": best[0] if best else None,
-        "false_accept_rate": best[1] if best else None,
+        "false_accept_ordinary_speech": best[1] if best else None,
         "false_reject_rate": best[2] if best else None,
+        "false_accept_soundalikes": best[3] if best else None,
     }
     print("\n" + json.dumps(result, indent=2))
 
     if best is None:
         tightest = min(sweep, key=lambda row: row[1])
         print(
-            "\nDO NOT SHIP. No threshold satisfies both limits "
-            f"(false accept <= {MAX_FALSE_ACCEPT:.0%}, false reject <= {MAX_FALSE_REJECT:.0%}). "
-            f"Best false-accept is {tightest[1]:.2%} at {tightest[0]}, where it "
-            f"misses {tightest[2]:.2%} of real wake words.\n"
-            "More CONFUSABLE negatives is what fixes this — phrases that sound "
-            "like 'Hey Jalen' and are not."
+            "\nDO NOT SHIP. No threshold keeps ordinary speech under "
+            f"{MAX_FALSE_ACCEPT:.0%} while missing him less than {MAX_FALSE_REJECT:.0%}. "
+            f"Best is {tightest[1]:.2%} on ordinary speech at {tightest[0]}, where it "
+            f"misses {tightest[2]:.2%} of real wake words."
         )
     else:
         print(
@@ -624,8 +679,8 @@ def evaluate(model_path: Path, x_val: np.ndarray, y_val: np.ndarray,
             f"    identity.wake_word: \"hey jalen\"\n"
             f"    wake.model: \"hey_jalen\"\n"
             f"    wake.threshold: {best[0]}\n"
-            f"At that threshold it misses {best[2]:.2%} of real wake words and "
-            f"fires on {best[1]:.2%} of everything else."
+            f"It misses {best[2]:.2%} of real wake words, fires on {best[1]:.2%} of "
+            f"ordinary speech, and on {best[3]:.2%} of deliberate soundalikes."
         )
     return result
 
@@ -648,11 +703,12 @@ def main() -> int:
     if args.stage in ("generate", "all"):
         asyncio.run(generate(args.voices))
     if args.stage in ("train", "evaluate", "all"):
-        x, y = build_dataset(augmentations=args.augment)
-        params, stats = train_head(x, y, epochs=args.epochs)
+        x, y, k = build_dataset(augmentations=args.augment)
+        params, stats = train_head(x, y, k, epochs=args.epochs)
         out = MODELS_DIR / "hey_jalen.onnx"
         export_onnx(params, stats["mean"], stats["std"], out)
-        evaluate(out, stats["x_val"], stats["y_val"], stats["mean"], stats["std"])
+        evaluate(out, stats["x_val"], stats["y_val"], stats["mean"], stats["std"],
+                 stats["k_val"])
     return 0
 
 

@@ -44,9 +44,9 @@ def test_every_launch_verb_routes_locally(router, phrase):
 
 
 def test_trailing_self_address_is_stripped(router):
-    """"open chrome, Jarvis" reached open_app as name="chrome, jarvis" and
+    """"open chrome, Jalen" reached open_app as name="chrome, jalen" and
     tried to launch an app by that literal name."""
-    intent = router.route("open chrome, jarvis")
+    intent = router.route("open chrome, jalen")
     assert intent.tool == "open_target"
     assert intent.args["name"] == "chrome"
 
@@ -86,28 +86,28 @@ def test_window_state_matches_every_article(router, phrase):
 # ------------------------------------------------------------- lifecycle
 @pytest.mark.parametrize(
     "phrase,expected",
-    [("quit jarvis", "jalen_quit"), ("exit", "jalen_quit"), ("shut down", "jalen_quit"),
+    [("quit jalen", "jalen_quit"), ("exit", "jalen_quit"), ("shut down", "jalen_quit"),
      ("pause", "jalen_pause"), ("hold on", "jalen_pause"),
      # "stop listening"/"go to sleep" hit the older jalen_sleep rule, which
      # now pauses for real instead of only claiming to.
      ("stop listening", "jalen_sleep"), ("go to sleep", "jalen_sleep"),
      ("resume", "jalen_resume"), ("wake up", "jalen_resume"),
-     ("restart jarvis", "jalen_restart")],
+     ("restart jalen", "jalen_restart")],
 )
 def test_lifecycle_commands_exist(router, phrase, expected):
-    """There was no spoken way to stop Jarvis at all — only Ctrl+C in
+    """There was no spoken way to stop Jalen at all — only Ctrl+C in
     whichever terminal launched it, useless once that window is closed."""
     assert route_tool(router, phrase) == expected
 
 
-def test_no_catch_all_rule_shadows_a_jarvis_command(router):
+def test_no_catch_all_rule_shadows_a_self_command(router):
     """
     Guards the whole CLASS of bug, not just the instances found.
 
     Three separate defects were catch-all rules eating specific ones:
     "open the folder X" -> open_app, "go to sleep" -> focus_window (a window
-    named "sleep"), "play spotify" -> media key. Any command aimed at Jarvis
-    itself must reach a jarvis_* tool and never be reinterpreted as an app,
+    named "sleep"), "play spotify" -> media key. Any command aimed at Jalen
+    itself must reach a jalen_* tool and never be reinterpreted as an app,
     window or file name.
     """
     self_commands = {
@@ -123,7 +123,7 @@ def test_no_catch_all_rule_shadows_a_jarvis_command(router):
         got = route_tool(router, phrase)
         if got != expected:
             wrong[phrase] = f"expected {expected}, got {got}"
-    assert not wrong, f"catch-all rules are shadowing Jarvis's own commands: {wrong}"
+    assert not wrong, f"catch-all rules are shadowing Jalen's own commands: {wrong}"
 
 
 # ---------------------------------------------------- window title matching
@@ -342,12 +342,12 @@ def test_black_tier_is_still_absolute():
         assert engine.classify(tool, {}).blocked is True, tool
 
 
-# --------------------------------------- Jarvis's own controls never gate
-def test_jarvis_self_controls_are_never_gated():
+# --------------------------------------- Jalen's own controls never gate
+def test_self_controls_are_never_gated():
     """
     "quit" used to classify as unclassified-AMBER, so it announced
     "jarvis quit, say stop if you don't want that" and waited 2 seconds
-    before quitting. These change Jarvis's own state, not the machine —
+    before quitting. These change Jalen's own state, not the machine —
     gating them is absurd, and the AMBER was inherited by accident rather
     than decided.
     """
@@ -362,7 +362,7 @@ def test_jarvis_self_controls_are_never_gated():
         verdict = engine.classify(tool, {})
         if verdict.tier.value != "green" or verdict.detail.get("unclassified"):
             gated[tool] = verdict.tier.value
-    assert not gated, f"Jarvis's own controls must run instantly: {gated}"
+    assert not gated, f"Jalen's own controls must run instantly: {gated}"
 
 
 @pytest.mark.parametrize("phrase,tool", [
@@ -461,7 +461,7 @@ def test_the_fast_endpoint_is_actually_faster_than_the_patient_one():
 
 def test_a_noise_blip_cannot_hang_the_collector():
     """
-    A single 32ms VAD blip (a keystroke, a door, Jarvis's own voice coming
+    A single 32ms VAD blip (a keystroke, a door, Jalen's own voice coming
     back through the mic) used to hold the microphone for a full
     max_utterance_s — 30 SECONDS of a live assistant appearing dead.
 
@@ -500,7 +500,7 @@ def test_a_noise_blip_cannot_hang_the_collector():
 
     assert closed_at is not None, (
         "the collector never released the microphone — this is the 30-second "
-        "hang, and it is indistinguishable from Jarvis being crashed"
+        "hang, and it is indistinguishable from Jalen being crashed"
     )
     assert closed_at <= collector.no_speech_timeout_ms + 4 * collector.frame_ms
     assert closed_at < collector.max_s * 1000, "still waiting out max_utterance_s"
@@ -602,7 +602,7 @@ def test_open_in_reports_missing_app_and_target_honestly():
     ("Could you please open Telegram for me?", "telegram"),
     ("can you open chrome for me", "chrome"),
     ("could you open notepad real quick", "notepad"),
-    ("jarvis open chrome now", "chrome"),
+    ("jalen open chrome now", "chrome"),
     ("open my cv for me please", "my cv"),
 ])
 def test_trailing_courtesy_is_not_part_of_the_name(router, phrase, expected_name):

@@ -1,20 +1,20 @@
 """
 Handing a job to Claude Code by voice.
 
-He describes what he wants in his own words; Jarvis opens Claude Code in
+He describes what he wants in his own words; Jalen opens Claude Code in
 the right folder and starts it on that prompt.
 
 WHY THIS LAUNCHES A PROCESS INSTEAD OF TYPING INTO A WINDOW
 -----------------------------------------------------------
 The obvious build is desktop automation: open a terminal, find the window,
-type the prompt, press Enter. Jarvis already has type_text and
+type the prompt, press Enter. Jalen already has type_text and
 keyboard_shortcut, so it looks like free reuse.
 
 It is not. That approach has to guess which window is focused, race the
 shell's startup before it starts typing, and survive the prompt containing
 a quote or a newline — and every one of those failures is silent and looks
-identical to success from Jarvis's side. The audit log already contains one
-of these: asked to play a song, Jarvis "typed and cancelled" and reported
+identical to success from Jalen's side. The audit log already contains one
+of these: asked to play a song, Jalen "typed and cancelled" and reported
 that it had played it.
 
 The CLI takes an initial prompt as an argument. Passing it as an argv entry
@@ -73,7 +73,7 @@ def _resolve_folder(name: str) -> tuple[str | None, str | None]:
 
     # .resolve() matters: a bare "jarvis" is a valid RELATIVE directory, so
     # this would otherwise hand Popen a path interpreted against whatever
-    # cwd Jarvis happened to be launched from — which, started from the
+    # cwd Jalen happened to be launched from — which, started from the
     # tray or an autostart entry, is not the project folder at all. The
     # agent would then start in the wrong place while reporting the right
     # one.
@@ -125,9 +125,9 @@ def ask_claude_code(prompt: str, folder: str = "", agent: str = "") -> str:
     initial = f"/{slash} {text}" if slash else text
 
     # A NEW console window, so Claude Code gets a real terminal to draw its
-    # interface in and keeps running after Jarvis's call returns. Without
-    # CREATE_NEW_CONSOLE it inherits Jarvis's (which has no visible window
-    # when Jarvis runs from the launcher) and he sees nothing happen at all.
+    # interface in and keeps running after Jalen's call returns. Without
+    # CREATE_NEW_CONSOLE it inherits Jalen's (which has no visible window
+    # when Jalen runs from the launcher) and he sees nothing happen at all.
     creation = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
     try:
         subprocess.Popen(

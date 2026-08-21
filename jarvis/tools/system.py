@@ -207,7 +207,7 @@ def open_app(name: str) -> str:
     The old version called Popen on the raw spoken name and unconditionally
     replied "Opening X" as long as Popen itself didn't raise — which it
     doesn't for a nonexistent program, since `cmd /c start` succeeds and the
-    failure surfaces in a window the user never sees. So Jarvis cheerfully
+    failure surfaces in a window the user never sees. So Jalen cheerfully
     claimed success while nothing opened. Now: resolve deterministically,
     then verify a process or window actually appeared before saying so.
     """

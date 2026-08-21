@@ -1,10 +1,10 @@
 """
-Sign Jarvis in to your PERSONAL Telegram account. Run once.
+Sign Jalen in to your PERSONAL Telegram account. Run once.
 
     .venv\\Scripts\\python.exe scripts\\connect_telegram.py
 
 This is NOT the bot. The bot is a separate identity you send messages TO.
-This signs in as YOU, so Jarvis can read your real chats and send as you.
+This signs in as YOU, so Jalen can read your real chats and send as you.
 
 You will be asked for:
   1. your phone number, in full international form (+998...)
@@ -15,7 +15,7 @@ None of those are stored. What IS stored is a session file at
 data/telegram_user.session, which is a complete password-less login to your
 account — treat it exactly like a password. It is protected three ways:
 .gitignore excludes *.session, data/ is git-ignored wholesale, and
-safety.yaml's never_touch patterns stop Jarvis's own file tools reading it.
+safety.yaml's never_touch patterns stop Jalen's own file tools reading it.
 
     --status   check the current session without changing anything
     --logout   sign out and delete the session
@@ -81,7 +81,7 @@ async def _connect() -> int:
     )
 
     print(BAR)
-    print("  Signing Jarvis in to your PERSONAL Telegram account")
+    print("  Signing Jalen in to your PERSONAL Telegram account")
     print(BAR)
     print()
     print("  This is not the bot. This is you.")
@@ -154,7 +154,7 @@ async def _connect() -> int:
         print(BAR)
         print()
         print("  That file is a full login to your account. It is git-ignored")
-        print("  and Jarvis's own file tools are blocked from reading it.")
+        print("  and Jalen's own file tools are blocked from reading it.")
         print("  To revoke: this script with --logout, or Telegram >")
         print("  Settings > Devices > terminate session.")
         return 0

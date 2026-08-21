@@ -1,12 +1,12 @@
 """
-Connect Jarvis to Gmail + Google Calendar. Run once.
+Connect Jalen to Gmail + Google Calendar. Run once.
 
     .venv\\Scripts\\python.exe scripts\\connect_google.py
 
 What happens: your browser opens, you sign in to Google and press Allow,
-and Jarvis stores a refresh token in data/google_token.json.
+and Jalen stores a refresh token in data/google_token.json.
 
-Jarvis never sees your password. The token is scoped to exactly four
+Jalen never sees your password. The token is scoped to exactly four
 permissions — read mail, create drafts, send mail, calendar events — and
 you can revoke it any time at myaccount.google.com/permissions without
 changing your password.
@@ -51,10 +51,10 @@ def logout() -> int:
 
 def connect() -> int:
     print(BAR)
-    print("  Connecting Jarvis to Gmail and Google Calendar")
+    print("  Connecting Jalen to Gmail and Google Calendar")
     print(BAR)
     print()
-    print("  Jarvis is asking for exactly these permissions:")
+    print("  Jalen is asking for exactly these permissions:")
     for scope in google_auth.SCOPES:
         print(f"    - {scope.rsplit('/', 1)[-1]}")
     print()

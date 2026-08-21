@@ -169,7 +169,7 @@ class Speaker:
             except Exception:
                 pass
 
-    # Short confirmations Jarvis says constantly. Synthesising "Opening
+    # Short confirmations Jalen says constantly. Synthesising "Opening
     # chrome." costs ~1.5s of network round-trip EVERY time — measured, and
     # it is the largest remaining delay on an otherwise sub-second command
     # (the app itself opens ~0.5s after you stop talking). The words never
@@ -222,7 +222,7 @@ class Speaker:
         except ImportError:
             pass
         asyncio.run(self._synthesise("ready"))
-        # Pre-render the phrases Jarvis says constantly, so the reply to
+        # Pre-render the phrases Jalen says constantly, so the reply to
         # "open chrome" is instant instead of a 1.5s round-trip.
         # In PARALLEL: serially this took 55s (16 phrases x ~1.5s of network
         # round-trip each), which is most of a minute where common replies
@@ -425,7 +425,7 @@ class SpeechStream:
 
     Holds the speaker's lock and its `speaking` flag for the WHOLE session,
     not per sentence. That matters for more than tidiness: app.py's main
-    loop treats `speaker.speaking` as "this is Jarvis's own voice, ignore
+    loop treats `speaker.speaking` as "this is Jalen's own voice, ignore
     it". Speaking sentence-by-sentence through say() would drop that flag
     in every gap between sentences, and the microphone would hear the tail
     of his own speech in those gaps and treat it as the user talking.

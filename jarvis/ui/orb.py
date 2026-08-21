@@ -393,7 +393,7 @@ class TranscriptWindow:
         except queue.Empty:
             return
         root = tk.Tk()
-        root.title(f"Jarvis — {title}")
+        root.title(f"Jalen — {title}")
         root.geometry("760x560")
         root.configure(bg="#14181d")
         frame = tk.Frame(root, bg="#14181d")
