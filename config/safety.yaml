@@ -145,6 +145,10 @@ green:
     # deliberately NOT a tool at all; it is called by the code that types.
     # Asking him a question and waiting changes nothing by itself. What he
     # then approves is gated on its own merits, where it belongs.
+    # Which browser window is showing what. Read-only, and the thing he
+    # has to be able to ask before choosing one to close.
+    - list_browser_tabs
+    - focus_browser_tab     # brings a window forward; changes nothing
     - ask_user
     - vault_status
     - lock_vault            # forgetting a secret is never the dangerous direction
@@ -176,6 +180,10 @@ amber:
     # Changes a driver power setting. Reversible in one command, and the
     # tool names that command in its own reply — but it IS a change to how
     # his hardware behaves, so he hears it first.
+    # A page can hold unsaved work — a half-written application, a form,
+    # a draft. The browser's own "leave site?" prompt is not a substitute
+    # for him hearing which window is about to close.
+    - close_browser_tab
     - fix_wifi_power_saving
     - ask_claude_code
     # Same tier and the same reasoning: this starts an autonomous agent

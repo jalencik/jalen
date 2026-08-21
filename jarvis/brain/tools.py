@@ -423,6 +423,25 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {"max_chats": ("integer", "how many chats to pull from; defaults to 6", False),
          "per_chat": ("integer", "messages per chat; defaults to 12", False)},
     ),
+    "list_browser_tabs": (
+        "Every browser window and the page it is showing. Read-only. Call "
+        "this BEFORE closing anything so he can choose. Only the ACTIVE tab "
+        "of each window is visible — background tabs are not published by "
+        "Chrome, and saying so is better than guessing.",
+        {},
+    ),
+    "focus_browser_tab": (
+        "Bring the browser window showing a page to the front. 'switch to "
+        "the YouTube window'.",
+        {"page": ("string", "part of the page title, as he'd say it", True)},
+    ),
+    "close_browser_tab": (
+        "Close the browser window showing a page — 'close the YouTube "
+        "window'. Refuses when several windows match rather than picking "
+        "one, and verifies the window actually went; a page showing a "
+        "'leave site?' prompt stays open and it says so.",
+        {"page": ("string", "part of the page title, as he'd say it", True)},
+    ),
     "ask_user": (
         "Ask him something and WAIT for the answer. Blocks for up to three "
         "minutes — use it whenever you need a fact only he has: a phone "

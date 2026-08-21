@@ -397,6 +397,30 @@ def _rules() -> list[Rule]:
          "open_windows_security", lambda m: {}, None),
         (R(r"^(?:open |show )?startup (?:apps|programs|settings)\??$", re.I),
          "open_startup_settings", lambda m: {}, None),
+
+        # ---- browser windows -----------------------------------------------
+        # "Close the YouTube window" used to match close_app, which takes the
+        # FIRST window whose title contains the word — a coin toss on a
+        # machine with six Chrome windows open, and the one it picks might be
+        # an hour of research.
+        (R(r"^(?:what|which) (?:browser )?(?:tabs?|windows?|pages?) "
+           r"(?:are |do i have )?open\??$"
+           r"|^(?:list|show) (?:my )?(?:browser )?(?:tabs?|windows?)\??$", re.I),
+         "list_browser_tabs", lambda m: {}, None),
+        # The excluded words are why this sits here rather than anywhere
+        # convenient. "close the window" means Alt+F4 on whatever is focused
+        # and "switch to the last window" means Alt+Tab — both already exist,
+        # and without this guard the page-name capture swallowed them as
+        # page="the" and page="last", so the two commands stopped working
+        # entirely. A page name that is a pronoun is not a page name.
+        (R(r"^close (?:the |my )?"
+           r"(?!(?:the|this|that|current|active|last|previous|next|other)\b)"
+           r"(.+?) (?:tab|window|page)$", re.I),
+         "close_browser_tab", lambda m: {"page": m.group(1).strip()}, None),
+        (R(r"^(?:switch|go) to (?:the |my )?"
+           r"(?!(?:the|this|that|current|active|last|previous|next|other)\b)"
+           r"(.+?) (?:tab|window|page)$", re.I),
+         "focus_browser_tab", lambda m: {"page": m.group(1).strip()}, None),
         # "Read it all." The spoken-length cap is a default for answers he
         # did not ask to hear, not a ceiling on what he is allowed to hear.
         (R(r"^(?:read (?:it |that |the )?(?:all|whole thing|rest|everything)"
