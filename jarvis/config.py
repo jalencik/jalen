@@ -119,7 +119,7 @@ def load_config() -> Cfg:
         {
             "user_name": identity.get("user_name", "there"),
             "address_user_as": identity.get("address_user_as", ""),
-            "name": identity.get("name", "Jarvis"),
+            "name": identity.get("name", "Jalen"),
         },
     )
     DATA_DIR.mkdir(exist_ok=True)

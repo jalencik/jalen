@@ -24,13 +24,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.app import Jarvis  # noqa: E402
+from jarvis.app import Jalen  # noqa: E402
 from jarvis.brain.router import Intent  # noqa: E402
 
 
 @pytest.fixture
 def jarvis():
-    j = Jarvis()
+    j = Jalen()
     j.muted = True
     try:
         yield j
@@ -48,7 +48,7 @@ def test_end_phrase_as_a_substring_does_not_end_the_conversation(jarvis, monkeyp
         reached_brain["text"] = text
         return "handled"
 
-    monkeypatch.setattr(Jarvis, "handle_with_brain", fake_handle_with_brain)
+    monkeypatch.setattr(Jalen, "handle_with_brain", fake_handle_with_brain)
     jarvis.say = lambda t, force=False: None
 
     jarvis.process("What is 47 times 89? Answer with just the number, nothing else.")
@@ -75,7 +75,7 @@ def test_amber_tier_router_tool_is_announced_before_executing(jarvis, monkeypatc
     async def fake_announce(self, text):
         announced["text"] = text
 
-    monkeypatch.setattr(Jarvis, "announce", fake_announce)
+    monkeypatch.setattr(Jalen, "announce", fake_announce)
 
     # A synthetic, never-implemented tool name: unclassified in safety.yaml
     # (defaults to AMBER) and absent from every REGISTRY, so this exercises
@@ -97,7 +97,7 @@ def test_amber_tier_stop_cancels_before_executing(jarvis, monkeypatch):
     async def instantly_stopped_announce(self, text):
         raise RuntimeError("cancelled by user")
 
-    monkeypatch.setattr(Jarvis, "announce", instantly_stopped_announce)
+    monkeypatch.setattr(Jalen, "announce", instantly_stopped_announce)
 
     reply = jarvis.handle_local(Intent(tool="some_undefined_amber_tool_xyz", args={"name": "notepad"}))
 
@@ -111,7 +111,7 @@ def test_green_tier_router_tool_still_executes_without_announcing(jarvis, monkey
     async def fake_announce(self, text):
         announced["called"] = True
 
-    monkeypatch.setattr(Jarvis, "announce", fake_announce)
+    monkeypatch.setattr(Jalen, "announce", fake_announce)
 
     reply = jarvis.handle_local(Intent(tool="get_time", args={}))
 

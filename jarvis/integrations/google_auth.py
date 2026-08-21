@@ -179,7 +179,7 @@ def connect(*, port: int = 0):
             "If it doesn't open, visit this URL yourself:\n\n    {url}\n"
         ),
         success_message=(
-            "Jarvis is connected to Google. You can close this tab."
+            "Jalen is connected to Google. You can close this tab."
         ),
     )
     _save(creds)

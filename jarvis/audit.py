@@ -165,7 +165,7 @@ class AuditLog:
         turns = len([r for r in rows if r["kind"] == "utterance"])
 
         lines = [
-            "Jarvis — last 24 hours",
+            "Jalen — last 24 hours",
             "",
             f"{turns} things you said, {len(executed)} actions taken, "
             f"{len(blocked)} stopped, {len(errors)} errors.",

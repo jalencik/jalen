@@ -1,7 +1,7 @@
 # ============================================================================
-#  JARVIS — master configuration
-#  Everything you can change about how Jarvis behaves lives in THIS file.
-#  Edit it, then say "Jarvis, reload config" (or restart). No code changes.
+#  JALEN — master configuration
+#  Everything you can change about how Jalen behaves lives in THIS file.
+#  Edit it, then say "Jalen, reload config" (or restart). No code changes.
 #
 #  Built to O'ktam's 72-answer spec, August 2026.
 # ============================================================================
@@ -10,8 +10,16 @@
 # IDENTITY  (spec A1-A8)
 # ---------------------------------------------------------------------------
 identity:
-  wake_word: "hey jarvis"          # matches the pretrained openWakeWord model
-  name: "Jarvis"
+  # THE WAKE PHRASE AND THE NAME ARE TWO DIFFERENT THINGS, and right now they
+  # disagree on purpose. `name` is what he calls himself and answers to in
+  # every typed or spoken command — that is Jalen, everywhere. `wake_word`
+  # has to match an acoustic model file, and no pretrained model exists for
+  # "hey jalen"; one is being trained (scripts/train_wake_word.py). Until it
+  # passes its false-accept test, the trigger sound stays "hey jarvis"
+  # because a wake model that fires on the television is worse than an old
+  # wake word. Swap both this line and wake.model when the new one ships.
+  wake_word: "hey jarvis"          # acoustic trigger only — see note above
+  name: "Jalen"
   address_user_as: "Boss"          # A5
   user_name: "O'ktam"
 
@@ -19,7 +27,7 @@ persona:
   # A3 friendly peer/colleague · A6 jokes welcome · A7 disagree openly
   # A4 full explanations when useful · A8 announce only the final result
   style: |
-    You are Jarvis, {user_name}'s voice assistant on his Windows 10 laptop.
+    You are Jalen, {user_name}'s voice assistant on his Windows 10 laptop.
 
     VOICE. You are speaking out loud. Everything you say gets read by a TTS
     engine, so: no markdown, no bullet characters, no code blocks, no emoji,
@@ -40,6 +48,14 @@ persona:
     genuinely complex, explain it properly — he asked for full explanations
     when they're useful. Long content goes on screen, not into his ears:
     summarise aloud in a sentence or two and say "full text is on screen".
+
+    LENGTH, THE EXCEPTION THAT KEEPS BITING. Questions ABOUT YOU — your
+    limits, your model, your configuration, whether something is possible —
+    get two sentences and a full stop. Never a paragraph, never two. This is
+    the one topic where you reliably over-explain, and out loud it is the
+    worst possible topic to do it on: he asked a quick question and gets a
+    forty-second lecture with no way to skip it. If the honest answer is "I
+    can't see that from here", that IS the answer. Say it and stop.
 
     WORKING. Don't narrate your steps while you work. He wants the result,
     not a running commentary. One line at the start if a task will take a
@@ -69,7 +85,20 @@ tts:
   volume: "+0%"
   pitch: "+0Hz"
   sentence_streaming: true         # speak sentence 1 while sentence 2 is still generating
-  max_spoken_chars: 700            # longer than this -> summarise aloud, full text to screen (B15)
+  # Longer than this -> summarise aloud, full text to screen (B15).
+  #
+  # Was 700, which is about FORTY SECONDS of continuous speech at rate +18%.
+  # Measured in the audit log: a single self-referential question on 21 Aug
+  # produced a two-paragraph answer and a 43-second gap between his utterance
+  # and the next one. Almost none of that was thinking time — SpeechStream
+  # .close() blocks until playback ends — it was Jalen talking. "Why is it so
+  # slow" and "why does it talk for so long" are the same complaint from the
+  # listener's chair, and this is the dial for the second one.
+  #
+  # 320 characters is roughly 18 seconds: long enough for a real explanation,
+  # short enough that he can interrupt without having waited out a monologue.
+  # The remainder is not lost — it goes to the transcript window.
+  max_spoken_chars: 320
   retry_attempts: 3                # edge-tts occasionally returns no audio
 
 # ---------------------------------------------------------------------------
@@ -143,7 +172,7 @@ conversation:
   # this many seconds it is re-attached to what it continues. Beyond it, a
   # sentence starting with "and" is treated as a new thought.
   stitch_window_s: 8
-  end_phrases: ["that's all", "thats all", "that is all", "thank you jarvis", "we're done", "nothing else"]
+  end_phrases: ["that's all", "thats all", "that is all", "thank you jalen", "thank you jarvis", "we're done", "nothing else"]
   barge_in: true                   # C20 you can talk over it
   barge_in_threshold: 0.6          # how confident it must be that you're speaking, before it shuts up
 
@@ -212,10 +241,19 @@ safety:
                                    # to turn when confirmations get annoying.
   undo_window_s: 2                 # AMBER actions announce, then wait this long for "stop"
   confirm_timeout_s: 20            # RED actions cancel if you don't answer in time
-  # [NOT IMPLEMENTED] no global hotkey listener exists. The SPOKEN kill
-  # phrases below DO work, as does `run.py --stop`.
-  kill_switch_hotkey: "ctrl+alt+space"   # F47 "both" - hotkey and voice
-  kill_phrases: ["stop", "stop stop", "cancel", "abort", "jarvis stop"]
+  # F47 "both" — hotkey and voice. The listener is scripts/hotkeys.py, a
+  # separate process installed by scripts/install_autostart.py.
+  #
+  # This says ctrl+alt+K, not the ctrl+alt+SPACE this file promised for
+  # months. Ctrl+Alt+Space is already owned by another application on this
+  # machine: RegisterHotKey refused it, and because the listener runs under
+  # pythonw there was no console for the refusal to appear in, so the kill
+  # switch silently did nothing and looked like a bug in Jalen. If you'd
+  # rather have Space back, put it here — the listener tries this first and
+  # falls back to the next free candidate, writing which one it took to
+  # data/hotkeys.log. It will never again fail silently.
+  kill_switch_hotkey: "ctrl+alt+k"
+  kill_phrases: ["stop", "stop stop", "cancel", "abort", "jalen stop", "jarvis stop"]
 
 # ---------------------------------------------------------------------------
 # MEMORY  (spec G53-G58)
@@ -271,6 +309,18 @@ projects:
 startup:
   autostart: true                  # C23
   start_muted: true                # C23 "yes but start muted"
+
+  # The key that means "listen to me", from anywhere, in any application.
+  # One key with one meaning: whatever is in the way of being heard — he
+  # isn't running, he's muted, he's paused, he's mid-sentence — the press
+  # removes it. You never have to remember which state you left him in.
+  #
+  # Pressing this starts him UNMUTED, unlike autostart above, because
+  # pressing it IS asking for his attention; logging in is not.
+  #
+  # Install with: python scripts\install_autostart.py
+  wake_hotkey: "ctrl+alt+j"
+
   # [NOT IMPLEMENTED] no tray icon exists.
   minimise_to_tray: true
 

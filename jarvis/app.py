@@ -111,8 +111,13 @@ def is_continuation(text: str) -> bool:
 # spoken "still on the last one" instead of silently joining a backlog.
 MAX_IN_FLIGHT_TURNS = 2
 
+# Mic frames between checks for a hotkey signal. At audio.frame_ms = 32 this
+# is roughly a third of a second — below the threshold where a key press
+# feels unacknowledged, and 10x cheaper than checking on every frame.
+SIGNAL_POLL_FRAMES = 10
 
-class Jarvis:
+
+class Jalen:
     def __init__(self, cfg=CONFIG, secrets=SECRETS) -> None:
         self.cfg = cfg
         self.secrets = secrets
@@ -191,7 +196,7 @@ class Jarvis:
         turns, confirmations, announces) should run — never asyncio.run().
         """
         if self._loop is None:
-            raise RuntimeError("Jarvis's event loop isn't running")
+            raise RuntimeError("Jalen's event loop isn't running")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result()
 
@@ -331,6 +336,47 @@ class Jarvis:
         return None
 
     # ---------------------------------------------------------------- handling
+    # ------------------------------------------------------------- hotkey
+    def _apply_signal(self, signal: str) -> bool:
+        """
+        Act on a press of the global hotkey. Returns True when the press
+        means "start listening now", which the mic loop turns into the same
+        state transition the wake word causes.
+
+        "toggle" is what Ctrl+Alt+J actually sends, and it is deliberately
+        NOT a plain mute toggle. What he wants from one key is "pay attention
+        to me", and the obstacle to that differs by state: muted, the
+        obstacle is the mute; paused, it's the pause; idle, it's that nothing
+        is listening yet. One key resolves whichever one is in the way.
+        """
+        if signal == "mute":
+            self.muted = True
+            self.orb.set_state("muted")
+            return False
+        if signal == "unmute":
+            self.muted = False
+            self.paused = False
+            self.orb.set_state("idle")
+            return False
+        if signal == "wake":
+            self.muted = False
+            self.paused = False
+            return True
+        if signal == "toggle":
+            # Speaking? The press means "stop talking" — the same thing
+            # barge-in does, for someone who would rather hit a key than
+            # talk over it.
+            if self.speaker.speaking:
+                self.speaker.stop()
+                return False
+            if self.muted or self.paused:
+                self.muted = False
+                self.paused = False
+                return True
+            # Awake and idle: the press is a wake word.
+            return True
+        return False
+
     def handle_local(self, intent) -> Optional[str]:
         """Router hit — execute without ever touching an LLM."""
         tool = intent.tool
@@ -681,7 +727,7 @@ class Jarvis:
         barge_in = bool(self.cfg.get_path("conversation.barge_in", True))
         barge_threshold = float(self.cfg.get_path("conversation.barge_in_threshold", 0.6))
 
-        self.audit.write("system", summary=f"Jarvis started (session {self.session_id})")
+        self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
 
         def dispatch_turn(text: str, turn_id: int) -> None:
             """
@@ -713,6 +759,7 @@ class Jarvis:
 
         self.prewarm()
 
+        frames_seen = 0
         with self.mic:
             for frame in self.mic.frames():
                 # `python run.py --stop` (and the spoken "quit") set this. We
@@ -721,6 +768,24 @@ class Jarvis:
                 # from outside leaves the mic held.
                 if self._quit.is_set() or runtime.stop_requested():
                     break
+
+                # The global hotkey (scripts/hotkeys.py) is a separate
+                # process and talks to us through a sentinel file. Polled
+                # every ~10 frames rather than every frame: at 32ms a frame
+                # that is a stat() call 31 times a second forever, and a
+                # third of a second is imperceptible for a key press.
+                frames_seen += 1
+                if frames_seen % SIGNAL_POLL_FRAMES == 0:
+                    signal = runtime.take_signal()
+                    if signal is not None and self._apply_signal(signal):
+                        # Same state transition the wake word performs, and
+                        # for the same reason — the hotkey IS a wake word you
+                        # press instead of say.
+                        listening = True
+                        wake_initiated = True
+                        self.orb.set_state("listening")
+                        self.collector._reset()
+                        continue
 
                 if self.paused:
                     # Paused means "stop reacting", not "go deaf" — the wake
@@ -888,7 +953,7 @@ class Jarvis:
         self.speaker.stop()
         self.orb.stop()
         self.mic.stop()
-        self.audit.write("system", summary="Jarvis stopped")
+        self.audit.write("system", summary="Jalen stopped")
         self.audit.close()
         if self.brain is not None and self._loop is not None:
             try:

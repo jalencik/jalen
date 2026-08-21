@@ -613,9 +613,9 @@ def _rules() -> list[Rule]:
         # ---- conversation control ------------------------------------------
         (R(r"^(never ?mind|forget it|cancel that|nothing)$", re.I),
          "cancel", n, "Sure."),
-        (R(r"^(thanks|thank you|cheers|nice one)( jarvis)?$", re.I),
+        (R(r"^(thanks|thank you|cheers|nice one)( " + _NAME + r")?$", re.I),
          "acknowledge", n, "Any time."),
-        (R(r"^(hello|hi|hey|good morning|good evening)( jarvis)?$", re.I),
+        (R(r"^(hello|hi|hey|good morning|good evening)( " + _NAME + r")?$", re.I),
          "greet", n, None),
     ]
 

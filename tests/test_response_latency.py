@@ -283,9 +283,9 @@ def test_jarvis_stays_quiet_when_a_noise_opened_the_window():
     """
     import inspect
 
-    from jarvis.app import Jarvis
+    from jarvis.app import Jalen
 
-    source = inspect.getsource(Jarvis.run)
+    source = inspect.getsource(Jalen.run)
     marker = 'if wake_initiated:\n                        self.say("I didn\'t catch that.")'
     assert marker in source, (
         "the empty-utterance branch must be gated on wake_initiated, or a "

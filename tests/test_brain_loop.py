@@ -32,7 +32,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.app import Jarvis  # noqa: E402
+from jarvis.app import Jalen  # noqa: E402
 
 
 class _LoopBoundFakeBrain:
@@ -73,7 +73,7 @@ class _LoopBoundFakeBrain:
 @pytest.fixture
 def jarvis(monkeypatch):
     monkeypatch.setattr("jarvis.brain.agent.Brain", _LoopBoundFakeBrain)
-    return Jarvis()
+    return Jalen()
 
 
 def test_two_consecutive_brain_turns_both_succeed(jarvis):

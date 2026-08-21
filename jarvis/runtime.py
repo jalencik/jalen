@@ -112,7 +112,7 @@ def release() -> None:
     info = _read_lock()
     if info is not None and info.pid != os.getpid():
         return
-    for path in (LOCK_PATH, STOP_PATH):
+    for path in (LOCK_PATH, STOP_PATH, SIGNAL_PATH):
         try:
             path.unlink()
         except OSError:
@@ -136,6 +136,50 @@ def clear_stop_request() -> None:
         pass
 
 
+# ------------------------------------------------------------------ signals
+#
+# One more sentinel, generalising the stop one above. The global hotkey lives
+# in a SEPARATE process — deliberately, because a hotkey that dies with the
+# thing it is supposed to launch cannot launch it — so it needs a way to say
+# "wake up" to an instance already running.
+#
+# Same mechanism as request_stop() rather than a new one: a file the running
+# loop polls. A socket or a named pipe would be more elegant and would bring
+# a listener thread, a port or pipe name to collide on, and a failure mode
+# where the hotkey silently stops working because something else took the
+# port. This cannot fail in a way that leaves no trace on disk.
+#
+# take_signal() reads AND deletes, so a signal is consumed exactly once. It
+# is written by one process and read by one process; the unlink is what makes
+# that safe without a lock.
+SIGNAL_PATH = RUNTIME_DIR / "jalen.signal"
+
+VALID_SIGNALS = frozenset({"wake", "mute", "unmute", "toggle"})
+
+
+def send_signal(name: str) -> None:
+    """Ask the running instance to do something. No-op if nothing is running."""
+    if name not in VALID_SIGNALS:
+        raise ValueError(f"unknown signal {name!r} (expected one of {sorted(VALID_SIGNALS)})")
+    if running_instance() is None:
+        return
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    SIGNAL_PATH.write_text(name, encoding="utf-8")
+
+
+def take_signal() -> str | None:
+    """Consume the pending signal, if any. Returns None when there isn't one."""
+    try:
+        name = SIGNAL_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    try:
+        SIGNAL_PATH.unlink()
+    except OSError:
+        pass
+    return name if name in VALID_SIGNALS else None
+
+
 def stop_running_instance(timeout: float = STOP_GRACE_S) -> str:
     """
     Stop the running instance, cooperatively if it will cooperate. Returns a
@@ -144,19 +188,19 @@ def stop_running_instance(timeout: float = STOP_GRACE_S) -> str:
     """
     info = running_instance()
     if info is None:
-        return "Jarvis isn't running."
+        return "Jalen isn't running."
 
     proc = info.process
     if proc is None:
         release()
-        return "Jarvis isn't running (cleared a stale lock)."
+        return "Jalen isn't running (cleared a stale lock)."
 
     request_stop()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not proc.is_running():
             clear_stop_request()
-            return f"Stopped Jarvis (pid {info.pid}) cleanly."
+            return f"Stopped Jalen (pid {info.pid}) cleanly."
         time.sleep(STOP_POLL_S)
 
     # It didn't take the hint. Terminate the tree — the venv launcher stub
@@ -180,15 +224,15 @@ def stop_running_instance(timeout: float = STOP_GRACE_S) -> str:
             pass
     clear_stop_request()
     release()
-    return f"Force-stopped Jarvis (pid {info.pid}) — it didn't shut down on request."
+    return f"Force-stopped Jalen (pid {info.pid}) — it didn't shut down on request."
 
 
 def status() -> str:
     info = running_instance()
     if info is None:
-        return "Jarvis is not running."
+        return "Jalen is not running."
     age = time.time() - info.started_at
     hours, rem = divmod(int(age), 3600)
     mins = rem // 60
     uptime = f"{hours}h {mins}m" if hours else f"{mins}m"
-    return f"Jarvis is running — pid {info.pid}, mode {info.mode}, up {uptime}."
+    return f"Jalen is running — pid {info.pid}, mode {info.mode}, up {uptime}."

@@ -1,4 +1,4 @@
-"""Jarvis entrypoint.  Run:  python run.py"""
+"""Jalen entrypoint.  Run:  python run.py"""
 from __future__ import annotations
 
 import argparse
@@ -7,14 +7,14 @@ import threading
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Jarvis voice assistant")
+    parser = argparse.ArgumentParser(description="Jalen voice assistant")
     parser.add_argument("--text", action="store_true", help="type instead of talk (no mic needed)")
     parser.add_argument("--check", action="store_true", help="run diagnostics and exit")
     parser.add_argument("--unmuted", action="store_true", help="start with voice on")
-    parser.add_argument("--telegram", action="store_true", help="control Jarvis from the Telegram bot instead of voice/text")
-    parser.add_argument("--stop", action="store_true", help="stop the running Jarvis and exit")
-    parser.add_argument("--status", action="store_true", help="say whether Jarvis is running, and exit")
-    parser.add_argument("--restart", action="store_true", help="stop the running Jarvis, then start fresh")
+    parser.add_argument("--telegram", action="store_true", help="control Jalen from the Telegram bot instead of voice/text")
+    parser.add_argument("--stop", action="store_true", help="stop the running Jalen and exit")
+    parser.add_argument("--status", action="store_true", help="say whether Jalen is running, and exit")
+    parser.add_argument("--restart", action="store_true", help="stop the running Jalen, then start fresh")
     args = parser.parse_args()
 
     if args.check:
@@ -41,7 +41,7 @@ def main() -> int:
     mode = "telegram" if args.telegram else "text" if args.text else "voice"
     already = runtime.acquire(mode)
     if already is not None:
-        print(f"Jarvis is already running (pid {already.pid}, mode {already.mode}).")
+        print(f"Jalen is already running (pid {already.pid}, mode {already.mode}).")
         print("  stop it:     python run.py --stop")
         print("  restart it:  python run.py --restart")
         return 1
@@ -55,10 +55,11 @@ def main() -> int:
 
 
 def _serve(args) -> int:
-    from jarvis.app import Jarvis
+    from jarvis.app import Jalen
+    from jarvis.config import CONFIG
     from jarvis import tools as jarvis_tools
 
-    jarvis = Jarvis()
+    jarvis = Jalen()
     if args.unmuted:
         jarvis.muted = False
 
@@ -76,7 +77,7 @@ def _serve(args) -> int:
                 stream.reconfigure(encoding="utf-8", errors="replace")
             except (AttributeError, ValueError):
                 pass  # not a real console (piped, redirected); nothing to fix
-        print("Jarvis — text mode. Ctrl+C to quit.\n")
+        print("Jalen — text mode. Ctrl+C to quit.\n")
         jarvis.muted = True
         jarvis.orb.start()
         try:
@@ -137,7 +138,7 @@ def _serve(args) -> int:
 
         from jarvis.integrations.telegram_bot import run_bot
 
-        print("Jarvis — Telegram mode. Ctrl+C to quit.\n")
+        print("Jalen — Telegram mode. Ctrl+C to quit.\n")
         jarvis.muted = True
         jarvis.orb.start()
         try:
@@ -148,9 +149,16 @@ def _serve(args) -> int:
             jarvis.shutdown()
         return 0
 
-    print("Jarvis — listening for \"Hey Jarvis\".")
-    print("  stop:     say \"Jarvis, quit\"  ·  Ctrl+C  ·  python run.py --stop")
-    print("  pause:    say \"Jarvis, pause\" (stops listening, stays running)")
+    # The wake phrase printed here comes from config, not from a literal,
+    # because the two genuinely differ today: he is Jalen, but the acoustic
+    # trigger is still "hey jarvis" until the new wake model is trained. A
+    # hardcoded line here would tell him to say a phrase that does not wake
+    # anything — or keep saying the old one after the swap.
+    wake = CONFIG.get_path("identity.wake_word", "hey jarvis").title()
+    name = CONFIG.get_path("identity.name", "Jalen")
+    print(f"{name} — listening for \"{wake}\".")
+    print(f"  stop:     say \"{name}, quit\"  ·  Ctrl+C  ·  python run.py --stop")
+    print(f"  pause:    say \"{name}, pause\" (stops listening, stays running)")
     print("  status:   python run.py --status\n")
     try:
         jarvis.run()

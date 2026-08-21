@@ -412,7 +412,7 @@ def test_a_connected_brief_actually_contains_the_email(monkeypatch):
     That is a worse failure than admitting it isn't wired, because it is
     indistinguishable from a true answer.
     """
-    from jarvis.app import Jarvis
+    from jarvis.app import Jalen
     from jarvis.tools import gcalendar, gmail
 
     monkeypatch.setattr(gmail, "unread_email_headline", lambda max_results=5: (
@@ -422,7 +422,7 @@ def test_a_connected_brief_actually_contains_the_email(monkeypatch):
         "1 event(s) on Friday 21 August:\n- 14:00  Dentist"
     ))
 
-    jarvis = Jarvis()
+    jarvis = Jalen()
     try:
         spoken = _brief(jarvis)
     finally:
@@ -440,7 +440,7 @@ def test_an_unreachable_google_degrades_to_one_clause(monkeypatch):
     still deliver the date, time and battery. Losing the whole brief
     because the inbox was unreachable would be the tail wagging the dog.
     """
-    from jarvis.app import Jarvis
+    from jarvis.app import Jalen
     from jarvis.tools import gcalendar, gmail
 
     def _boom(*a, **k):
@@ -449,7 +449,7 @@ def test_an_unreachable_google_degrades_to_one_clause(monkeypatch):
     monkeypatch.setattr(gmail, "unread_email_headline", _boom)
     monkeypatch.setattr(gcalendar, "read_calendar", _boom)
 
-    jarvis = Jarvis()
+    jarvis = Jalen()
     try:
         spoken = _brief(jarvis)
     finally:
@@ -461,7 +461,7 @@ def test_an_unreachable_google_degrades_to_one_clause(monkeypatch):
 
 
 def test_an_empty_inbox_says_so_rather_than_staying_quiet(monkeypatch):
-    from jarvis.app import Jarvis
+    from jarvis.app import Jalen
     from jarvis.tools import gcalendar, gmail
 
     monkeypatch.setattr(gmail, "unread_email_headline",
@@ -469,7 +469,7 @@ def test_an_empty_inbox_says_so_rather_than_staying_quiet(monkeypatch):
     monkeypatch.setattr(gcalendar, "read_calendar",
                         lambda days_ahead=0: "Nothing on the calendar for Friday 21 August.")
 
-    jarvis = Jarvis()
+    jarvis = Jalen()
     try:
         spoken = _brief(jarvis)
     finally:
@@ -495,7 +495,7 @@ def test_the_brief_and_the_router_speak_the_same_sentence(monkeypatch):
     that thinks it has stubbed a tool out.
     """
     from jarvis import tools as jarvis_tools
-    from jarvis.app import Jarvis
+    from jarvis.app import Jalen
     from jarvis.brain.router import IntentRouter
     from jarvis.tools import gcalendar, gmail
 
@@ -511,7 +511,7 @@ def test_the_brief_and_the_router_speak_the_same_sentence(monkeypatch):
     intent = router.route("any new emails")
     assert intent.tool == "unread_email_headline"
 
-    jarvis = Jarvis()
+    jarvis = Jalen()
     try:
         from_router = jarvis.handle_local(intent)
         from_brief = _brief(jarvis)
