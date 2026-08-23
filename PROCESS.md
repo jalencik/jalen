@@ -27,32 +27,46 @@ that does it and the reason it exists. Timings are measured from your own
    [5] THE ADDRESS GATE                jarvis/app.py :: should_act_on
        |  is this even for Jalen?  if not -> silently dropped
        |
-   [6] normalise + stitch              jarvis/brain/router.py :: _normalise
+   [6] TAINT CLEARED                   jarvis/taint.py
+       |  he spoke, so everything read before now stops being in play
+       |
+   [7] REFERENCES EXPANDED             jarvis/conversation.py
+       |  "send it there" -> "send the draft to Saved Messages"
+       |
+   [8] THE CONTRACT                    jarvis/plan.py
+       |  ACTION + DESTINATION extracted and kept for the turn
+       |
+   [9] normalise + stitch              jarvis/brain/router.py :: _normalise
        |  strip politeness, re-attach a cut-off fragment
        |
-   [7] kill phrases -> pending question -> pending rating -> router
+  [10] kill phrases -> "go on" -> pending question -> pending rating -> router
        |
-   [8a] ROUTER HIT                     jarvis/brain/router.py
+  [11a] ROUTER HIT                     jarvis/brain/router.py
        |   a regex matched. No model, no network, no cost.
        |   p50 3.29 s to first word
        |
-   [8b] NO MATCH -> a habit?           jarvis/habits.py
+  [11b] NO MATCH -> a habit?           jarvis/habits.py
        |   same sentence, same decision, 3 times -> skip the model
        |
-   [8c] STILL NOTHING -> THE BRAIN     jarvis/brain/agent.py
-       |   Claude, with 137 tools. p50 4.49 s to first word
+  [11c] STILL NOTHING -> THE BRAIN     jarvis/brain/agent.py
+       |   Claude, with 145 tools. p50 4.49 s to first word
        |
-   [9] SAFETY GATE, before every tool  jarvis/safety.py
+  [12] SAFETY GATE, before every tool  jarvis/safety.py
+       |   origin comes from taint.origin_now(), NOT a hardcoded "user"
        |   GREEN runs / AMBER announces / RED asks / BLACK refuses
        |
-  [10] speech out, sentence by sentence  jarvis/audio/tts.py
+  [13] speech out, sentence by sentence  jarvis/audio/tts.py
        |   edge-tts. Sentence 1 plays while sentence 3 is still being written
+       |   no cap at all when he said "read it"
        |
-  [11] on screen if long              jarvis/ui/orb.py :: TranscriptWindow
+  [14] on screen if long              jarvis/ui/orb.py :: TranscriptWindow
        |
-  [12] rating, if it was real work    jarvis/tools/feedback.py
+  [15] DID IT DO WHAT HE ASKED?        jarvis/plan.py :: betrayed_by
+       |   he said send and it drafted -> he is TOLD, not silently corrected
        |
-  [13] learn, if one tool did it      jarvis/habits.py
+  [16] rating, if it was real work    jarvis/tools/feedback.py
+       |
+  [17] learn, if one tool did it      jarvis/habits.py
 ```
 
 ---
@@ -89,7 +103,7 @@ transcription would save ~1.6s on everything.
 | interface | tkinter, chroma-keyed, Win32 `WS_EX_LAYERED`/`TRANSPARENT` | no framework, no packaging weight, and click-through is one API call |
 | accounts | Gmail/Calendar OAuth, Telegram (Telethon + bot) | your own accounts, your own tokens, on your machine |
 | storage | JSON + SQLite on disk | nothing about you is in anybody's cloud |
-| tests | pytest — **2,888** | |
+| tests | pytest — **2,982** | |
 
 ---
 
@@ -131,6 +145,99 @@ that, an email saying "post this to your channel" becomes a publishing API for
 anyone who can email you.
 
 ---
+
+## The taint: how "it read that" is remembered
+
+The single most important control in the project, and for months it was
+unreachable code.
+
+`SafetyEngine.classify(origin="content")` refuses RED and AMBER outright.
+Correct, tested, and cited in three modules as "the hard protection". But the
+only line that could set it read `input_data.get("_from_content")`, and
+**nothing ever set that key** except a test which injected it by hand. So the
+test proved the classifier works *when told*, and could not prove anything
+ever told it. Nothing did.
+
+```
+  an email body       |
+  a Telegram message  |
+  a web page          |---->  _fence()  ---->  taint.mark(source)
+  another AI's answer |                              |
+                                                     v
+                              every later tool call this turn
+                                                     |
+                              classify(origin="content") -> RED/AMBER refused
+                                                     |
+                              he speaks again -> taint cleared, from ONE
+                                                 call site only
+```
+
+Process-wide rather than thread-local, deliberately: the brain runs each tool
+on whichever pool thread is free, so a thread-local set inside `read_email`
+would be invisible to the `send_email` that follows it. Two overlapping turns
+can therefore taint each other — that is over-blocking, and the failure in
+the other direction is an email talking Jalen into sending mail.
+
+## The present tense: what "it" and "yes" mean
+
+`jarvis/conversation.py`. Long-term memory (`jarvis/tools/memory.py`,
+fastembed + sqlite-vec, local) was never the gap; the gap was the last few
+minutes.
+
+| holds | for |
+|---|---|
+| the last **proposal** | what "yes, go ahead" agrees to |
+| the current **subject** | what "it", "there", "them" point at |
+| the live **tasks** | what "continue" and "cancel that" mean |
+
+Twelve task states: `IDLE THINKING EXECUTING WAITING_FOR_USER
+WAITING_FOR_CONFIRMATION WAITING_FOR_EXTERNAL_AI WAITING_FOR_BROWSER
+RUNNING_BACKGROUND_JOB COMPLETED FAILED CANCELLED`. Every turn opens one and
+closes it — including on an exception, which previously vanished with the
+thread.
+
+Nothing credential-shaped may become the subject: `"it"` must never expand
+into a password.
+
+## The contract: action and destination
+
+`jarvis/plan.py`. He said *"send them in my saved messages"* and got a draft
+somewhere else.
+
+```
+  his sentence
+      |
+  ACTION = send        DESTINATION = Saved Messages
+      |
+  ... the turn runs ...
+      |
+  compare against what actually ran
+      |
+  save_telegram_draft is forbidden for "send"  ->  he is told
+```
+
+Reported, never silently re-run: correcting it automatically would be a
+second guess on top of the first. Half a request is not a contract — "send
+this" with no destination is him trusting Jalen to choose.
+
+## Filling in forms
+
+`jarvis/tools/webforms.py`, on the page open in Jalen's own browser.
+
+`autofill.py` refuses to pick a field, and that refusal is correct *there*:
+it drives the desktop with keystrokes, where finding a field is Tab-and-hope.
+Inside Playwright it is not a guess — `input[type="password"]` IS the password
+box. The invariant is not relaxed; it is satisfied by a mechanism that can
+satisfy it.
+
+| tool | tier | |
+|---|---|---|
+| `inspect_form` | GREEN | every field, label, type, required, filled |
+| `fill_form_field` | AMBER | refuses password fields outright |
+| `upload_to_form` | AMBER | through the page's real file input, never the OS dialog |
+| `form_errors` | GREEN | what the page is complaining about |
+| `submit_form` | **RED** | reports what the page pushed back |
+| `fill_login_field` | **RED** | one password box, exact host approval, value never returned |
 
 ## What is written to disk, and what never is
 
