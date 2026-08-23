@@ -502,6 +502,20 @@ def open_target(name: str) -> str:
     if not raw:
         return "Open what?"
 
+    # Strip a leading possessive. From his log: "open my telegram please"
+    # searched the disk for a file called "my telegram" and answered "I
+    # couldn't find an app, file or folder called my telegram". The
+    # normaliser already removes trailing courtesy; this is the front half.
+    raw = re.sub(r"^(?:my|the|a|an)\s+", "", raw, flags=re.I).strip() or raw
+
+    # A whole sentence is not a filename. Eighteen times in his log, the tail
+    # of a multi-clause request arrived here as a name and produced "I
+    # couldn't find an app, file or folder called <sentence>". Asking is a
+    # better answer than searching the disk for prose.
+    if len(raw.split()) > 5 or " and then " in raw.lower():
+        return (f"I'm not sure what to open from \"{raw[:70]}\". "
+                f"What's it called?")
+
     expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
     if expanded.exists():
         try:

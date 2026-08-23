@@ -878,7 +878,29 @@ class Jalen:
         # cap is a default about length, not a rule about what he may hear.
         read_it_all = wants_it_all(user_text)
         max_spoken = float("inf") if read_it_all else self.speaker.max_spoken
-        state = {"chars": 0, "overflowed": False}
+        state = {"chars": 0, "overflowed": False, "warned": False}
+
+        # SAY HOW LONG IT IS, ONCE, when he asked for the whole thing.
+        #
+        # His spec: "If the content is very long: announce the scope if
+        # needed, but still continue until the requested end unless the user
+        # interrupts." Both halves matter. Twenty turns in his log spoke for
+        # over forty seconds and several were cut off by him talking over
+        # them - not because the content was wrong, but because he had no
+        # idea he had asked for four minutes of speech.
+        #
+        # ~14 characters a second, measured against edge-tts at the default
+        # rate. Announced only once, and only past a minute: telling him
+        # "this is twenty seconds" is itself an interruption.
+        def maybe_warn_about_length(so_far: int) -> None:
+            if state["warned"] or not read_it_all:
+                return
+            seconds = so_far / 14.0
+            if seconds < 60:
+                return
+            state["warned"] = True
+            stream.push(f" This runs to about {round(seconds / 60)} minutes — "
+                        f"say stop whenever you've heard enough. ")
 
         def on_text(chunk: str) -> None:
             # Spec B15 still applies: long answers are summarised aloud and
@@ -902,6 +924,7 @@ class Jalen:
             state["chars"] += len(chunk)
             if state["chars"] <= max_spoken:
                 stream.push(chunk)
+                maybe_warn_about_length(state["chars"])
                 return
 
             state["overflowed"] = True
