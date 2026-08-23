@@ -325,7 +325,16 @@ safety:
   # falls back to the next free candidate, writing which one it took to
   # data/hotkeys.log. It will never again fail silently.
   kill_switch_hotkey: "ctrl+alt+k"
-  kill_phrases: ["stop", "stop stop", "cancel", "abort", "jalen stop"]
+  # Exempt from the address gate (see Jalen.should_act_on): the one command
+  # you need under pressure must not also require his name. Exact matches,
+  # lower-cased, with trailing .!? removed - so every natural phrasing has
+  # to be listed rather than inferred.
+  kill_phrases: ["stop", "stop stop", "cancel", "abort", "jalen stop",
+                 "stop it", "jalen stop it", "stop talking",
+                 "jalen stop talking", "stop please", "please stop",
+                 "okay stop", "ok stop", "that's enough", "thats enough",
+                 "that is enough", "enough", "jalen enough", "halt",
+                 "quit it", "stop now"]
 
 # ---------------------------------------------------------------------------
 # MEMORY  (spec G53-G58)

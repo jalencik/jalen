@@ -33,7 +33,7 @@ from .audio.tts import Speaker
 from .audio.vad import VAD, UtteranceCollector
 from .audio.wake import WakeWord
 from .audit import AuditLog
-from .brain.router import IntentRouter
+from .brain.router import IntentRouter, addressed_to_jalen
 from .config import CONFIG, SECRETS
 from . import crashlog
 from . import runtime
@@ -1316,19 +1316,14 @@ class Jalen:
                     self.orb.set_state("idle")
                     continue
 
-                # The primary engine failed and the fallback covered for it.
-                # Worth one audit line: the turn succeeded, so nothing else
-                # would ever mention it, and a silent demotion to the local
-                # model is exactly the kind of quiet degradation that gets
-                # reported months later as "it understands me less well now".
-                if self.stt.last_fallback_reason:
+                if not self.should_act_on(text, wake_initiated):
                     self.audit.write(
                         "system",
-                        summary=(
-                            f"stt fell back to {self.stt.last_engine} — "
-                            f"{self.stt.last_fallback_reason[:160]}"
-                        ),
+                        summary="ignored - not addressed to Jalen",
+                        detail={"heard": text[:200]},
                     )
+                    self._refresh_orb()
+                    continue
 
                 # The utterance closed on the FAST threshold. If the words
                 # say he is mid-sentence ("...open chrome and"), put the
@@ -1411,6 +1406,62 @@ class Jalen:
     # "Working beats listening" is the whole fix: while it is thinking, a
     # noise in the room must not make it look like it is waiting for you.
     ORB_PRIORITY = ("muted", "speaking", "thinking", "listening", "idle")
+
+    # ---------------------------------------------------------- who counts
+    #
+    # "It should not respond to its own voice, or any other noise that is
+    # happening or disrupting the flow of AI... it should only respond to
+    # messages starting with either Jalen or Hey Jalen."
+    #
+    # Everything upstream of here is acoustic, and acoustics cannot answer
+    # the question. The microphone genuinely cannot separate his voice from
+    # the television, from a podcast, or from Jalen's own reply arriving
+    # back through the speakers. Voice activity detection only ever knew
+    # "that was speech" — and all three of those are speech. That is how a
+    # 20-second answer could end with "I didn't catch that" said to a person
+    # who had not spoken at all.
+    #
+    # By this point the audio is a SENTENCE, so the test can be about words
+    # rather than volume: a sentence that does not begin with his name was
+    # not addressed to him. No model, no threshold, and nothing a loud room
+    # can defeat.
+    def should_act_on(self, text: str, wake_initiated: bool) -> bool:
+        """
+        Three ways through, and the middle one is the one he chose when asked.
+
+        wake word fired     he said "hey Jalen" out loud, so the name is in
+                            the AUDIO and will not be in the transcript
+        Jalen just asked    "which file did you mean?" — requiring the name
+                            to answer a question he was this moment asked
+                            would be absurd, and it is the only reason the
+                            follow-up window still exists
+        starts with a name  everything else, in any pronunciation
+
+        Rejection is SILENT at the call site, deliberately. Announcing "I
+        didn't catch that" to a room that was not talking to him is the
+        exact self-inflicted interruption this exists to end — and the
+        announcement is itself speech, which the microphone hears, which can
+        trip the window open again.
+        """
+        if wake_initiated:
+            return True
+        if self._awaiting_confirmation or self._awaiting_stop or self._awaiting_reply:
+            return True
+        # THE EMERGENCY STOP IS EXEMPT, and it has to be.
+        #
+        # "stop", "cancel" and "abort" are safety.kill_phrases — the thing
+        # you say when Jalen is doing something you want stopped NOW. Making
+        # them wait for his name would mean the one command you need under
+        # pressure is the one with an extra hurdle in front of it.
+        #
+        # This does reopen a noise path: a television saying "stop" can stop
+        # him. That trade is not close. Stopping is instantly reversible and
+        # costs a sentence; an assistant that will not stop when told costs
+        # rather more, and barge-in already halts playback on any loud noise
+        # whatsoever.
+        if (text or "").lower().strip().rstrip(".!?") in self.kill_phrases:
+            return True
+        return addressed_to_jalen(text)
 
     def _refresh_orb(self, listening: bool = False) -> None:
         """Recompute what the orb should show from what is actually true."""

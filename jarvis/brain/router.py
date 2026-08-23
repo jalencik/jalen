@@ -126,6 +126,43 @@ NAME_ALIASES = (
     "jarvis", "jaros", "jarvers", "jervis", "jarvus",
 )
 
+# Was this sentence actually addressed to Jalen?
+#
+# "It should not respond to its own voice, or any other noise that is
+# happening or disrupting the flow... it should only respond to messages
+# starting with either Jalen or Hey Jalen."
+#
+# The microphone cannot tell his voice from the television from Jalen's own
+# speech coming back through the speakers, and there is no acoustic echo
+# cancellation here. Voice activity detection answers "is that speech",
+# which is the wrong question — the television is also speech.
+#
+# So the gate moved from the ACOUSTICS to the WORDS. After transcription we
+# already have the sentence; a sentence that does not begin with his name is
+# not for us. That is cheap, needs no model, and cannot be fooled by volume.
+#
+# Deliberately checked on the RAW transcript, before the politeness stripper
+# runs — that function exists to remove the name, so asking it afterwards
+# would always say no.
+_ADDRESSED = None
+
+
+def addressed_to_jalen(text: str) -> bool:
+    """
+    True if the sentence opens with his name, in any pronunciation.
+
+    "Jalen, what's the time" / "Hey Jalen open Chrome" / plain "Jalen?" all
+    count. "what's the time" does not, however clearly it was spoken.
+    """
+    global _ADDRESSED
+    if _ADDRESSED is None:
+        _ADDRESSED = re.compile(
+            r"^\s*(?:hey |hi |yo |ok |okay )?" + _NAME + r"(?:[.,!?;:\s]|$)",
+            re.I,
+        )
+    return bool(_ADDRESSED.match(text or ""))
+
+
 # What may follow the name and still count as "he was addressing me".
 #
 # This was [,\s]+ — comma or whitespace. Speech recognition punctuates with
@@ -394,9 +431,31 @@ def _rules() -> list[Rule]:
         # cannot match is invisible until someone enumerates the phrases.
         (R(r"^(unmute|speak|talk|you can talk|you can speak)( now)?$", re.I),
          "jalen_unmute", n, "Back."),
-        (R(r"^(go to sleep|sleep|stand by|stop listening)$", re.I),
+        # "not now" is deliberately absent. _normalise() strips a trailing
+        # "now" as filler — it is there so "open chrome now" reaches open_app
+        # — which turns "not now" into a bare "not". Matching "not" on its own
+        # would be worse than missing the phrase.
+        (R(r"^(go to sleep|sleep|stand by|stop listening|go away|leave me alone"
+           r"|later|maybe later)$", re.I),
          "jalen_sleep", n, "Sleeping. Say hey Jalen to wake me."),
-        (R(r"^(quit|exit|shut ?down|close|kill|turn off)( " + _NAME + r"| yourself)?$", re.I),
+        # QUIT MUST MATCH EVERY WAY A PERSON ENDS A CONVERSATION.
+        #
+        # Enumerated rather than guessed, because a quit word that does not
+        # match is the one failure with no workaround left: if "quit" fails,
+        # the remaining exit is killing the process by hand. "goodbye" and
+        # "see you" were missing until someone said them out loud.
+        #
+        # These are safe to be generous with precisely BECAUSE of the address
+        # gate — a bare "bye" now only reaches here if he said the name or
+        # the wake word, so it can no longer be triggered by a film.
+        (R(r"^(quit|exit|shut ?down|close|kill|turn off|log ?off|log ?out"
+           r"|good ?bye|bye|bye bye|see you|see ya|goodnight|good night"
+           r"|(?:that'?s|that is) all|that will be all"
+           r"|(?:we'?re|we are) done|(?:i'?m|i am) (?:done|finished))"
+           r"( " + _NAME + r"| yourself| for now| for today)?$", re.I),
+         "jalen_quit", n, "See you, Boss."),
+        (R(r"^turn yourself off$|^switch yourself off$|^power (yourself )?down$",
+           re.I),
          "jalen_quit", n, "See you, Boss."),
         (R(r"^(pause|hold on|take a break)( " + _NAME + r")?$", re.I),
          "jalen_pause", n, "Paused. Say hey Jalen when you want me back."),
