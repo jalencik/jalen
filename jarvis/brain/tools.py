@@ -564,6 +564,16 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "say YouTube - never make him add the word.",
         {"query": ("string", "what to play", True)},
     ),
+    "what_are_you_doing": (
+        "Everything Jalen is currently working on and how far along it is. "
+        "For 'what are you doing', 'how far are you', 'are you still going'.",
+        {"text": ("string", "what he said, to pick a task if several", False)},
+    ),
+    "cancel_task": (
+        "Stop a running task. Asks which one if several are live rather "
+        "than guessing.",
+        {"text": ("string", "what he said, to pick a task", False)},
+    ),
     "record_rating": (
         "File a rating he gave for work just finished, and email a short "
         "summary to him. Only when he has actually given a score - never "

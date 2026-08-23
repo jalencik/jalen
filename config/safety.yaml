@@ -67,6 +67,8 @@ green:
     # Reading a form. Changes nothing on the page and types nothing.
     - inspect_form         # lists the fields, so it can ASK for what is missing
     - form_errors          # what the page is complaining about
+    - what_are_you_doing   # reads its own task list
+    - cancel_task          # stops its own work, nothing else
     - what_i_have_learned  # reads its own habit file
     # GREEN despite sending an email, and the reason is that the destination
     # is not a choice: feedback.FEEDBACK_TO is a constant, the recipient is

@@ -570,6 +570,19 @@ def _rules() -> list[Rule]:
         # altogether, it should stay still in one place". The orb is now
         # fixed by ui.orb_position and ui.orb_size in config.
 
+        # "What are you doing?" - answerable at last. Routed locally: it
+        # reads process state, needs no network, and he asks it precisely
+        # when he suspects nothing is happening.
+        (R(r"^what (?:are|r) you (?:doing|working on|up to)\??$"
+           r"|^how (?:far|much longer|is it going)(?: are you)?\??$"
+           r"|^(?:are you|you) still (?:working|going|on it)\??$"
+           r"|^(?:any )?progress\??$|^status\??$"
+           r"|^(?:what.?s|what is) (?:happening|going on)\??$", re.I),
+         "what_are_you_doing", lambda m: {}, None),
+        (R(r"^cancel (?:that|it|the task|this)$"
+           r"|^stop (?:that|the task|what (?:you.?re|you are) doing)$"
+           r"|^forget (?:that|this) task$", re.I),
+         "cancel_task", lambda m: {}, None),
         # Signing in to the web chats. Routed locally because it is a state
         # question with a short factual answer, and because he asks it
         # exactly when a delegation has just failed - which is the worst

@@ -33,7 +33,7 @@ from .audio.tts import Speaker
 from .audio.vad import VAD, UtteranceCollector
 from .audio.wake import WakeWord
 from .audit import AuditLog
-from . import habits
+from . import conversation, habits, plan as planning
 from . import taint
 from .brain.router import Intent, IntentRouter, addressed_to_jalen
 from .config import CONFIG, SECRETS
@@ -233,6 +233,8 @@ class Jalen:
         # that routes into a queue a waiting coroutine sits on, and nothing
         # is waiting here - the question is asked after the turn is over.
         self._pending_rating: dict | None = None
+        # The action + destination he named this turn, if he named them.
+        self._plan = planning.Plan()
         # Last thing he said, for re-attaching a continuation fragment —
         # see the stitching block in process().
         self._last_user_text = ""
@@ -978,6 +980,21 @@ class Jalen:
         # instruction, not a web page's". Deliberately the single caller.
         taint.he_asked_again()
 
+        # WHAT "IT" MEANS. Expanded before anything routes, because "send it
+        # to Saved Messages" reaching the router as literally "it" is how a
+        # request becomes a guess. Conservative: only expands when there IS a
+        # remembered subject, never invents one.
+        expanded = conversation.expand_references(text)
+        if expanded != text:
+            self.audit.write("system",
+                             summary=f"read '{text[:60]}' as '{expanded[:80]}'")
+            text = expanded
+
+        # THE CONTRACT FOR THIS TURN. He said send, or draft, or save, and to
+        # where. Kept so that what actually runs can be compared against what
+        # he asked for - see _check_the_plan below.
+        self._plan = planning.read_plan(text)
+
         self.audit.utterance(text, who="user")
 
         low = text.lower().rstrip(".!?")
@@ -1001,6 +1018,24 @@ class Jalen:
             if time.time() - self._pending_rating.get("asked_at", 0) > self.RATING_EXPIRES_S:
                 self._pending_rating = None      # he moved on; so do we
             elif self._take_rating(text):
+                return
+
+        # "YES, GO ON."
+        #
+        # His complaint: "I said yes go on, but it has stopped man, it should
+        # have a consistent memory." It had none - "go on" matched no rule,
+        # meant nothing to the brain without context, and the turn ended.
+        #
+        # Checked AFTER the pending-question branches below would have caught
+        # a real answer, and before the router, because "go on" is neither a
+        # command nor a new request: it is a reference to something already
+        # under way.
+        if conversation.is_continuation_request(text) and not (
+            self._awaiting_reply or self._awaiting_confirmation
+        ):
+            resumed = self._resume_something()
+            if resumed is not None:
+                self.say(resumed)
                 return
 
         if self._awaiting_reply:
@@ -1164,14 +1199,21 @@ class Jalen:
             """
             nonlocal follow_up_until
             started_at = time.time()
+            task_id = conversation.start_task(text[:80], conversation.THINKING)
             try:
                 with systools.com_initialized():
                     self.process(text)
+                conversation.update_task(task_id, state=conversation.COMPLETED)
+            except BaseException as exc:      # noqa: BLE001
+                conversation.update_task(task_id, state=conversation.FAILED,
+                                         error=f"{type(exc).__name__}: {exc}")
+                raise
             finally:
                 self._await_playback()
                 self._finish_timing(timer)
                 with self._turn_lock:
                     self._active_turns.discard(turn_id)
+                self._check_the_plan(started_at)
                 self._maybe_ask_for_a_rating(text, started_at)
             # Only the newest turn owns the UI state and the follow-up window.
             # Without this, a slow turn finishing late would reopen the
@@ -1618,6 +1660,64 @@ class Jalen:
         if time.monotonic() - self._last_user_at > window:
             return False
         return is_continuation(text) or looks_unfinished(self._last_user_text)
+
+    # -------------------------------------------------------- what's going on
+    def _resume_something(self) -> "str | None":
+        """
+        "Go on" — carry on with what, exactly.
+
+        Returns what to say, or None to let the turn route normally. None
+        matters: "go on" with nothing pending is not a failure, it is just a
+        sentence, and swallowing it would be worse than passing it through.
+        """
+        proposal = conversation.last_proposal()
+        if proposal is not None:
+            conversation.clear_proposal()
+            return (f"Carrying on with {proposal.describe()}."
+                    if proposal.describe() else None)
+
+        chosen = conversation.which_task("")
+        if isinstance(chosen, conversation.Task):
+            if chosen.state in conversation.WAITING_STATES:
+                return (f"I'm still on {chosen.objective} — waiting for "
+                        f"{chosen.waiting_reason or 'the other side'}.")
+            return f"Still going on {chosen.objective}. {chosen.progress or ''}".strip()
+        # A string means either nothing running, or more than one and it
+        # wants to know which. Both are honest answers to "go on".
+        return chosen if "Which one" in chosen else None
+
+    def _say_progress(self, text: str = "") -> str:
+        """"What are you doing?" / "how far are you?" with a real answer."""
+        return conversation.describe_progress(text)
+
+    def _check_the_plan(self, started_at: float) -> None:
+        """
+        Did the turn do what he asked, or something adjacent?
+
+        From the log: he said "send them in my saved messages" and Jalen ran
+        save_telegram_draft. He had to ask twice. The failure is not that a
+        draft is a bad idea - it is that he said send.
+
+        Reported rather than corrected. Automatically re-running it as a
+        send would be a second guess on top of the first, and the one thing
+        worse than doing the wrong thing is doing it twice.
+        """
+        current = getattr(self, "_plan", None)
+        if current is None or not current.specific:
+            return
+        try:
+            used = systools.tools_since(started_at)
+            wrong = current.betrayed_by(used)
+            if not wrong:
+                return
+            self.audit.write(
+                "system",
+                summary=f"plan mismatch: asked to {current.describe()}, ran {wrong}",
+                detail={"asked": current.text[:200], "tools": used},
+            )
+            self.say(planning.complaint(current, wrong))
+        except Exception as exc:  # noqa: BLE001
+            self.audit.error("plan-check", exc)
 
     # ------------------------------------------------------------- feedback
     RATING_EXPIRES_S = 300.0

@@ -1,5 +1,5 @@
 
-# What Jalen can do  (161 things)
+# What Jalen can do  (163 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -225,6 +225,7 @@ _The vault, and typing into forms._
 
 ## Everything else
 
+- [ ] * **cancel_task** - Stop a running task
 - [ ]   **form_errors** - What the form is complaining about right now
 - [ ]   **inspect_form** - List every field on the form currently open in Jalen's browser: its label, type, whether it is required, and whether it is already filled
 - [ ]   **next_field** - Press Tab to move to the next field
@@ -232,11 +233,12 @@ _The vault, and typing into forms._
 - [ ] * **play_media** - Play something he named without saying where: a local media file if one matches, YouTube otherwise
 - [ ]   **submit_form** - Submit the form and report what the page said back, including any validation errors  [stops and waits for you to say yes]
 - [ ]   **upload_to_form** - Attach a real file to the form's file input - a CV, a PDF, an image  [tells you first, you can say stop]
+- [ ] * **what_are_you_doing** - Everything Jalen is currently working on and how far along it is
 
 ---
 
-143 tools: 18 amber, 112 green, 13 red
-86 of them also answer to a spoken phrase, for free.
+145 tools: 18 amber, 114 green, 13 red
+88 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
   - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S

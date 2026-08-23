@@ -22,6 +22,7 @@ from . import (
     webagent,
     feedback,
     webforms,
+    tasks,
     attachments, autofill, browsertabs, bulkmail, coding, desktop,
     devwork,
     drafting,
@@ -71,7 +72,7 @@ for _module in (
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
     technician, repairs, vault, interaction, browsertabs, attachments,
     bulkmail, autofill, drafting, devwork, selfcontrol, agents,
-    webagent, feedback, webforms,
+    webagent, feedback, webforms, tasks,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:

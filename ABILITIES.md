@@ -1,6 +1,6 @@
 # What Jalen can do
 
-**143 tools.** Generated from the running code by
+**145 tools.** Generated from the running code by
 `scripts/abilities.py`, so it cannot promise something that no longer
 exists. Every quoted phrase is one the test suite already asserts.
 
@@ -928,6 +928,10 @@ Needs: `question`
 
 ## Everything else
 
+### `cancel_task` — GREEN
+
+Stop a running task. Asks which one if several are live rather than guessing.
+
 ### `form_errors` — GREEN
 
 What the form is complaining about right now. Call after submit_form, and whenever he says it didn't work.
@@ -947,6 +951,10 @@ Submit the form and report what the page said back, including any validation err
 ### `upload_to_form` — AMBER
 
 Attach a real file to the form's file input - a CV, a PDF, an image. Give the full path. If the page has several upload boxes, also give the field label.
+
+### `what_are_you_doing` — GREEN
+
+Everything Jalen is currently working on and how far along it is. For 'what are you doing', 'how far are you', 'are you still going'.
 
 ---
 
@@ -970,4 +978,4 @@ Attach a real file to the form's file input - a CV, a PDF, an image. Give the fu
 - Reach Gemini or ChatGPT over their APIs on this machine - the Gemini key is 403'd and there is no OpenAI key. The browser route works instead.
 - Undo a sent email or a deleted file. That is why those ask first.
 
-**143 tools** — 18 amber, 112 green, 13 red
+**145 tools** — 18 amber, 114 green, 13 red
