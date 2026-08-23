@@ -623,6 +623,23 @@ def _rules() -> list[Rule]:
            r"|^(?:is|are) (?:the |my )?(?:agent|coding job)s? (?:done|finished)\??$"
            r"|^what(?:'s| is) claude (?:code )?(?:doing|working on)\??$", re.I),
          "list_coding_jobs", lambda m: {}, None),
+        # What it has learned. Routed locally: it reads one small file, and
+        # he asks it precisely when he wants to check whether a shortcut is
+        # wrong - which must not need the network.
+        (R(r"^what have you learn(?:ed|t)(?: (?:about me|so far))?\??$"
+           r"|^(?:what are|show me) your habits\??$"
+           r"|^are you getting (?:faster|better)\??$"
+           r"|^what do you know about me\??$", re.I),
+         "what_i_have_learned", lambda m: {}, None),
+        (R(r"^forget (?:that|your habits"
+           r"|everything (?:you'?ve|you have) learn(?:ed|t)"
+           r"|what (?:you'?ve|you have) learn(?:ed|t))$"
+           r"|^stop doing that automatically$", re.I),
+         "forget_habit", lambda m: {}, None),
+        (R(r"^(?:what|how) (?:have i |did i )?rated?(?: you)?\??$"
+           r"|^(?:my|show my|what are my) ratings\??$"
+           r"|^how am i rating you\??$", re.I),
+         "rating_history", lambda m: {}, None),
         # Signing in to the web chats. Routed locally because it is a state
         # question with a short factual answer, and because he asks it
         # exactly when a delegation has just failed - which is the worst

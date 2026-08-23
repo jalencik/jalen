@@ -547,6 +547,17 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "not meet it.",
         {},
     ),
+    "what_i_have_learned": (
+        "The requests Jalen has learned to answer without asking the model, "
+        "and how much time that has saved. For 'what have you learned', "
+        "'what do you know about me', 'are you getting faster'.",
+        {"limit": ("integer", "how many to list", False)},
+    ),
+    "forget_habit": (
+        "Forget a learned shortcut. Pass the request to forget, or nothing "
+        "to forget all of them. Use when he says a habit is wrong.",
+        {"text": ("string", "the request to forget; empty means all", False)},
+    ),
     "record_rating": (
         "File a rating he gave for work just finished, and email a short "
         "summary to him. Only when he has actually given a score - never "

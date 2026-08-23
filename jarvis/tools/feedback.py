@@ -291,9 +291,25 @@ def rating_history(limit: int = 10) -> str:
     return "\n".join(out)
 
 
+def what_i_have_learned(limit: int = 12) -> str:
+    """The habits Jalen has picked up. Lives in jarvis/habits.py."""
+    from .. import habits
+
+    return habits.what_i_have_learned(limit)
+
+
+def forget_habit(text: str = "") -> str:
+    """Drop one habit, or all of them."""
+    from .. import habits
+
+    return habits.forget(text)
+
+
 REGISTRY: dict[str, Any] = {
     "record_rating": record_rating,
     "rating_history": rating_history,
+    "what_i_have_learned": what_i_have_learned,
+    "forget_habit": forget_habit,
 }
 
 

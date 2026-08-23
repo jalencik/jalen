@@ -263,11 +263,52 @@ def _ask_chatgpt(messages: list[dict]) -> tuple[str, str | None]:
         return "", f"{type(exc).__name__}: {exc}"
 
 
+# Hermes, as a fourth opinion.
+#
+# He asked what I thought about it, and the honest answer had two halves.
+# The half he was really after - "it should get faster at repetitive work" -
+# is a MEMORY design, not a model choice, and no backend delivers it; that
+# is jarvis/habits.py. But a genuinely different model is worth having on a
+# hard problem, so here it is.
+#
+# OpenAI-compatible endpoint, so it works with Nous Research directly or
+# through OpenRouter without new code. Both variables are optional and it
+# says so plainly when they are absent rather than failing obscurely.
+HERMES_MODEL = os.getenv("HERMES_MODEL", "NousResearch/Hermes-4-405B")
+HERMES_BASE_URL = os.getenv("HERMES_BASE_URL", "https://openrouter.ai/api/v1")
+
+
+def _ask_hermes(messages: list[dict]) -> tuple[str, str | None]:
+    """(answer, error). A fourth model, when a key exists."""
+    key = os.getenv("HERMES_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", "")
+    if not key:
+        return "", (
+            "There's no HERMES_API_KEY or OPENROUTER_API_KEY in your .env, so "
+            "I can't reach Hermes. Add one from openrouter.ai/keys and set "
+            "HERMES_BASE_URL if you'd rather go direct to Nous."
+        )
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=key, base_url=HERMES_BASE_URL)
+        result = client.chat.completions.create(
+            model=HERMES_MODEL, messages=messages,
+        )
+        return (result.choices[0].message.content or "").strip(), None
+    except ImportError:
+        return "", ("The openai package isn't installed. Run: "
+                    r".venv\Scripts\python.exe -m pip install openai")
+    except Exception as exc:  # noqa: BLE001
+        return "", f"{type(exc).__name__}: {exc}"
+
+
 AGENTS = {
     "gemini": _ask_gemini,
     "chatgpt": _ask_chatgpt,
     "gpt": _ask_chatgpt,
     "openai": _ask_chatgpt,
+    "hermes": _ask_hermes,
+    "nous": _ask_hermes,
 }
 
 

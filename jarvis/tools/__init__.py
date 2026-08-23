@@ -91,12 +91,21 @@ for _module in (
 #
 # Bounded, because this runs forever. 400 entries is a few hours of heavy
 # use and costs a few kilobytes.
-_RECENT: "deque[tuple[float, str]]" = deque(maxlen=400)
+_RECENT: "deque[tuple[float, str, dict]]" = deque(maxlen=400)
 
 
 def tools_since(when: float) -> list[str]:
     """Names of the tools that ran after `when` (time.time()), in order."""
-    return [name for at, name in list(_RECENT) if at >= when]
+    return [name for at, name, _args in list(_RECENT) if at >= when]
+
+
+def calls_since(when: float) -> list[tuple[str, dict]]:
+    """(tool, args) for everything that ran after `when`, in order.
+
+    The args are needed by jarvis.habits, which can only learn a decision it
+    can replay exactly — a tool name on its own is half a decision.
+    """
+    return [(name, args) for at, name, args in list(_RECENT) if at >= when]
 
 
 def call(tool: str, args: dict) -> str:
@@ -106,5 +115,5 @@ def call(tool: str, args: dict) -> str:
     # Recorded BEFORE the call, not after: a tool that raises still did
     # something, and a turn whose only action failed is exactly the turn
     # worth asking him about.
-    _RECENT.append((time.time(), tool))
+    _RECENT.append((time.time(), tool, dict(args or {})))
     return fn(**(args or {}))

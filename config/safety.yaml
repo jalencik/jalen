@@ -60,6 +60,8 @@ green:
     - list_web_chats       # reads a local json file
     - read_web_result      # reads what already came back
     - rating_history       # reads a local file of his own scores
+    - what_i_have_learned  # reads its own habit file
+    - forget_habit         # deletes only its own learned shortcuts
     - jalen_read_all       # speaks text already on his screen
     - private_mode
     - set_posture
