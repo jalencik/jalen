@@ -20,6 +20,7 @@ import io
 import queue
 import re
 import threading
+import time
 
 import numpy as np
 
@@ -66,6 +67,9 @@ class Speaker:
         self.sentence_streaming = bool(cfg.get_path("tts.sentence_streaming", True))
         self._interrupt = threading.Event()
         self._speaking = threading.Event()
+        # When playback started, for speaking_for(). Set beside every
+        # _speaking.set() so the two can never disagree.
+        self._speaking_since = 0.0
         self._say_lock = threading.Lock()
         self._cache_lock = threading.Lock()
         self._audio_cache: dict[str, tuple[np.ndarray, int]] = {}
@@ -85,9 +89,51 @@ class Speaker:
     def speaking(self) -> bool:
         return self._speaking.is_set()
 
+    def speaking_for(self) -> float:
+        """
+        Seconds since playback started, or 0.0 when silent.
+
+        Used by the barge-in check in app.py to ignore the opening of a
+        reply. Without it, Jalen's own voice arriving back through the
+        microphone stopped him mid-sentence: measured at 747-764ms into
+        playback, over and over, in data/audit.jsonl.
+        """
+        started = self._speaking_since
+        if not self._speaking.is_set() or not started:
+            return 0.0
+        return max(0.0, time.monotonic() - started)
+
     def stop(self) -> None:
-        """Barge-in. Cuts playback within about one chunk."""
+        """
+        Barge-in. Cuts playback within about one chunk.
+
+        THE FLAG IS NOT ENOUGH ON ITS OWN, and the gap cost three minutes a
+        time. A streamed reply spends most of its life blocked in
+        `self._q.get()` waiting for the model to write the next sentence —
+        a get() with no timeout. Setting `_interrupt` there changes nothing:
+        the loop that would check it is asleep, so `_speaking` stays set,
+        `speaking_for()` keeps climbing, and every consumer that waits for
+        playback to end waits for the whole limit.
+
+        Measured in data/audit.jsonl on 23 August: turns reporting
+        `spoke=197970ms` and `spoke=191657ms` — almost exactly
+        _await_playback's 180-second ceiling, not real speech. Those turns
+        held a dispatch slot for three minutes each, which is why he heard
+        "I'm still on the last one" three times while nothing was playing.
+
+        So: set the flag AND wake the sleeper. The sentinel already exists
+        for the urgent lane; this reuses it. The queue put is what makes the
+        blocked get() return so the loop can see the flag it was set.
+        """
         self._interrupt.set()
+        stream = self._active_stream
+        if stream is not None:
+            try:
+                stream._q.put_nowait(_WAKE)
+            except Exception:
+                # A full or closed queue means the stream is already
+                # finishing, which is the outcome we wanted anyway.
+                pass
 
     # ----------------------------------------------------------------- synth
     async def _synthesise(self, text: str) -> bytes:
@@ -258,6 +304,7 @@ class Speaker:
 
         with self._say_lock:
             self._interrupt.clear()
+            self._speaking_since = time.monotonic()
             self._speaking.set()
             self.on_state("speaking")
             try:
@@ -267,6 +314,7 @@ class Speaker:
                 return self._say_sequential(sentences)
             finally:
                 self._speaking.clear()
+                self._speaking_since = 0.0
                 self._interrupt.clear()
                 self.on_state("idle")
 
@@ -556,6 +604,7 @@ class SpeechStream:
         sp = self._speaker
         with sp._say_lock:
             sp._interrupt.clear()
+            sp._speaking_since = time.monotonic()
             sp._speaking.set()
             sp.on_state("speaking")
             producer_finished = False
@@ -623,6 +672,7 @@ class SpeechStream:
                     except queue.Empty:
                         break
                 sp._speaking.clear()
+                sp._speaking_since = 0.0
                 sp._interrupt.clear()
                 sp.on_state("idle")
                 self._done.set()

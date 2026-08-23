@@ -56,7 +56,26 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 # strip a real person out of a sentence ("tell Alan I'm late" -> "tell I'm
 # late"). It also bounds the vowel runs, so it cannot wander into unrelated
 # words.
-_JALEN = r"jh?[aeiouy]{1,3}l{1,2}[aeiouy]{0,3}n{1,2}(?:e|'s|s)?"
+#
+# THE STRESS PROBLEM, in his words: "many people give udareniya not to a in
+# jalen, but they give it to e". English speakers say JA-len; he and most
+# Russian and Uzbek speakers say ja-LEN. Under second-syllable stress the
+# FIRST vowel reduces to a schwa, and Whisper writes a reduced vowel as
+# almost anything — jalen, jelen, julen, jilen, jolen — while the stressed
+# second vowel gets written long: jaleen, jalene, jaline, jaleyn.
+#
+# The opening consonant moves too. Ж and Дж transliterate as zh/dzh/dz, and
+# an aspirated J is heard as jh. All of those are covered below and every one
+# is exercised in tests/test_name_pronunciations.py.
+#
+# `(?:zh|dzh|dz|jh|j)` rather than a bare j, `[aeiouy]{1,3}` for the reduced
+# first vowel, `[aeiouy]{0,3}` for the lengthened second, and a final
+# consonant that may be heard as n, m or ng — "Jalem" and "Jaleng" are what
+# a nasal at the end of an unstressed syllable becomes.
+#
+# The `h?` after the first vowel is for "Jahlen" — an aspirated first
+# syllable, which is how the reduced vowel is often written out.
+_JALEN = r"(?:dzh|dz|zh|jh|j)[aeiouy]{1,3}h?l{1,2}[aeiouy]{0,3}(?:n{1,2}g?|m)(?:e|'s|s)?"
 
 # JARVIS WORKS EVERYWHERE, at his explicit request: "alongside it jarvis
 # should work as well, Jarvis should work everywhere as well."
@@ -68,7 +87,13 @@ _JALEN = r"jh?[aeiouy]{1,3}l{1,2}[aeiouy]{0,3}n{1,2}(?:e|'s|s)?"
 # from everything Jalen SAYS and stays understood in everything he HEARS.
 # "Jaros" and "Jarvers" are in scope because Whisper produced them, from
 # him, in that same session.
-_JARVIS = r"jh?[aeiou]{1,2}r+[vw]?[aeiou]{0,2}r?[sz](?:'s)?|jh?[aeiou]{1,2}r+[oae]s"
+_JARVIS = (
+    r"(?:dzh|dz|zh|jh|j)[aeiou]{1,2}r+[vw]?[aeiouy]{0,2}r?[sz]e?(?:'s)?"
+    r"|(?:dzh|dz|zh|jh|j)[aeiou]{1,2}r+[oae]s"
+    # "jarvice" — the -vis ending heard as -vice. Seen from Whisper, and the
+    # [sz] branch above cannot reach it because of the intervening c.
+    r"|(?:dzh|dz|zh|jh|j)[aeiou]{1,2}r+v[aeiouy]{0,2}ce"
+)
 
 # Real names the shape would otherwise swallow. A deny-list is the honest
 # tool here: "Julian" and "Jolene" genuinely ARE j-vowel-l-vowel-n, so no
@@ -109,6 +134,19 @@ NAME_ALIASES = (
 # boundary after someone's name is the most natural thing in the world and
 # it made every name-prefixed command fail.
 _AFTER_NAME = r"[.,!?;:\s]+"
+
+# Commands that END in a word the dangling-preposition guard watches for, but
+# which are complete as they stand — the trailing word is a phrasal-verb
+# particle, not a preposition that lost its object. Kept as an explicit,
+# short list rather than a cleverer rule: telling a particle from a
+# preposition properly needs a parser, and these are the only ones the router
+# actually routes.
+_COMPLETE_PHRASAL_COMMANDS = frozenset({
+    "hold on",      # pause
+    "carry on",     # resume
+    "go on",        # resume
+    "move on",
+})
 
 # ----------------------------------------------------------------------------
 # "CLAUDE CODE", AS SPEECH RECOGNITION ACTUALLY WRITES IT.
@@ -345,7 +383,16 @@ def _rules() -> list[Rule]:
         # work, the only remaining exit is killing the process by hand.
         (R(r"^(mute|be quiet|shut up|silence)( yourself)?$", re.I),
          "jalen_mute", n, "Muted."),
-        (R(r"^(unmute|speak|you can talk)( now)?$", re.I),
+        # "talk" is here because "you can talk" NEVER REACHED THIS RULE. The
+        # politeness stripper above removes a leading "you can", so the rule's
+        # own "you can talk" alternative was dead on arrival — normalisation
+        # had already turned it into "talk", which matched nothing. The
+        # alternative is kept anyway (it costs nothing and documents the
+        # intent) but "talk" is what actually fires.
+        #
+        # Found by the new-user sweep, not by anyone using it: a rule that
+        # cannot match is invisible until someone enumerates the phrases.
+        (R(r"^(unmute|speak|talk|you can talk|you can speak)( now)?$", re.I),
          "jalen_unmute", n, "Back."),
         (R(r"^(go to sleep|sleep|stand by|stop listening)$", re.I),
          "jalen_sleep", n, "Sleeping. Say hey Jalen to wake me."),
@@ -403,9 +450,23 @@ def _rules() -> list[Rule]:
         # FIRST window whose title contains the word — a coin toss on a
         # machine with six Chrome windows open, and the one it picks might be
         # an hour of research.
-        (R(r"^(?:what|which) (?:browser )?(?:tabs?|windows?|pages?) "
-           r"(?:are |do i have )?open\??$"
-           r"|^(?:list|show) (?:my )?(?:browser )?(?:tabs?|windows?)\??$", re.I),
+        # A BARE "window" IS AN OS WINDOW, NOT A BROWSER WINDOW.
+        #
+        # This rule used to match `windows?` unqualified, and it sits ABOVE
+        # get_window_list — so "what windows are open", which is plainly a
+        # question about the desktop, was answered with a list of Chrome
+        # tabs. Found by tests/benchmark_phrasing.py, which is excluded from
+        # the normal run and had been failing quietly.
+        #
+        # "windows" now only reaches here when something says it is a
+        # browser: "browser windows", "chrome windows". Tabs and pages are
+        # unambiguous and stay unqualified.
+        (R(r"^(?:what|which) (?:tabs?|pages?) (?:are |do i have )?open\??$"
+           r"|^(?:what|which) (?:browser|chrome|edge|firefox) "
+           r"(?:tabs?|windows?|pages?) (?:are |do i have )?open\??$"
+           r"|^(?:list|show) (?:my )?(?:tabs?|pages?)\??$"
+           r"|^(?:list|show) (?:my )?(?:browser|chrome|edge|firefox) "
+           r"(?:tabs?|windows?|pages?)\??$", re.I),
          "list_browser_tabs", lambda m: {}, None),
         # The excluded words are why this sits here rather than anywhere
         # convenient. "close the window" means Alt+F4 on whatever is focused
@@ -431,20 +492,70 @@ def _rules() -> list[Rule]:
         # Resizing the orb by voice, because the mouse cannot reach it. It is
         # click-through while idle — deliberately, since a 420-pixel circle in
         # the middle of the screen that ate clicks would be intolerable — and
-        # a click-through window receives no scroll events either. Voice is
-        # the only control surface that still works.
+        # a click-through window receives no scroll events, so the mouse
+        # wheel only works while the orb is idle. Voice and Ctrl+Alt+B /
+        # Ctrl+Alt+S work in every state.
         # "orb" is required, not optional. A bare "smaller" would match this
         # and hijack a follow-up meant for something else — and the follow-up
         # window is open for twelve seconds after every reply.
-        (R(r"^(?:make (?:the |your )?orb (bigger|larger|smaller|tinier)"
+        # "orb" or "yourself" is REQUIRED, never a bare "bigger". The
+        # follow-up window is open for twelve seconds after every reply, and
+        # a bare "smaller" would hijack an answer meant for something else.
+        (R(r"^(?:make |set )?(?:the |your ?)?(?:orb|yourself|you)\s+"
+           r"(bigger|larger|smaller|tinier|huge|big|small|tiny|normal|medium)"
+           r"(?: size)?$"
+           r"|^(?:make (?:the |your )?orb (bigger|larger|smaller|tinier)"
            r"|(bigger|larger|smaller|tinier) orb"
-           r"|orb (bigger|larger|smaller|tinier))$", re.I),
+           r"|orb (bigger|larger|smaller|tinier))$"
+           r"|^(?:orb|yourself) (?:back to )?normal(?: size)?$"
+           r"|^normal (?:orb )?size$", re.I),
          "jalen_orb_size",
-         lambda m: {
-             "delta": 90 if (m.group(1) or m.group(2) or m.group(3)).lower()
-             in ("bigger", "larger") else -90
-         },
+         lambda m: {"change": next((g for g in m.groups() if g), "normal")},
          None),
+        # Moving it. Named corners only — "top left" means the same thing on
+        # a laptop panel and a 4K monitor, which pixel coordinates do not.
+        (R(r"^(?:move|put|place|send) (?:the |your ?)?(?:orb|yourself|you) "
+           r"(?:to |in |into |at )?(?:the )?"
+           r"(top ?left|top ?right|bottom ?left|bottom ?right|upper ?left"
+           r"|upper ?right|lower ?left|lower ?right|middle|cent[er]{2})"
+           r"(?: corner)?$"
+           r"|^orb (?:to (?:the )?)?(top ?left|top ?right|bottom ?left"
+           r"|bottom ?right|middle|cent[er]{2})$", re.I),
+         "jalen_orb_move",
+         lambda m: {"position": next((g for g in m.groups() if g), "")},
+         None),
+        # Jalen checking Jalen. Routed locally because the answer is a
+        # subprocess and a summary, not a conversation - and because he asks
+        # it precisely when something feels wrong, which is the worst moment
+        # for it to need the network.
+        (R(r"^(?:run|do) (?:your|the) (?:own )?tests?$"
+           r"|^test yourself$"
+           r"|^(?:are|is) (?:your|the) tests? passing\??$"
+           r"|^check yourself$", re.I),
+         "run_own_tests", lambda m: {}, None),
+        (R(r"^(?:are you (?:ok|okay|alright|healthy|well))\??$"
+           r"|^how are you (?:doing|feeling)\??$"
+           r"|^(?:your|self) health$", re.I),
+         "own_health", n, None),
+        (R(r"^(?:run |do )?(?:your |a )?(?:self.?)?diagnos(?:e|tics?)(?: yourself)?$"
+           r"|^diagnose yourself$"
+           r"|^what.?s wrong with you\??$", re.I),
+         "self_diagnose", n, None),
+        (R(r"^open (?:your|the) (?:own )?(?:code|source|project)(?: in vs ?code)?$"
+           r"|^open yourself in vs ?code$", re.I),
+         "open_own_project", n, None),
+        # Background coding jobs. Only the STATUS is routed locally: it is a
+        # short factual list and he will ask it while waiting, possibly with
+        # the network down.
+        #
+        # "review the coding job" is deliberately NOT here. That tool returns
+        # the agent's full output plus a git diff and ends by asking for a
+        # judgement - routed locally, all of it would simply be read aloud.
+        # Judging it is the brain's job, and the brain has the tool.
+        (R(r"^(?:list|show|what) (?:are )?(?:the |my )?coding jobs?\??$"
+           r"|^(?:is|are) (?:the |my )?(?:agent|coding job)s? (?:done|finished)\??$"
+           r"|^what(?:'s| is) claude (?:code )?(?:doing|working on)\??$", re.I),
+         "list_coding_jobs", lambda m: {}, None),
         # "Why are you so slow" was unanswerable for months because nothing
         # measured a turn. Now it is a question with a number for an answer.
         (R(r"^(?:how (?:fast|quick|slow) (?:was that|were you|are you)|"
@@ -740,6 +851,19 @@ def _rules() -> list[Rule]:
          "unread_email_headline", lambda m: {"max_results": 5}, None),
         (R(r"^how many (?:unread )?(?:e-?mails?|mail)(?: do i have)?\??$", re.I),
          "unread_email_headline", lambda m: {"max_results": 5}, None),
+        # "Summarise my emails" — the phrase config/safety.yaml has claimed
+        # reaches unread_email_summary since that tool was written, and which
+        # in fact reached nothing at all. Found while testing the email
+        # judgement fix, by trying the phrase the comment advertised.
+        #
+        # Separate from the headline rule above on purpose: "any new emails"
+        # wants a count in one sentence, "summarise my emails" wants the
+        # list. Answering the second with a count is the shape of ignoring
+        # somebody.
+        (R(r"^summar(?:ise|ize) (?:my |the )?(?:unread )?(?:e-?mails?|mail|inbox)\??$"
+           r"|^(?:what|who)(?:'?s| is| are)? (?:in )?my inbox\??$"
+           r"|^go through my (?:e-?mails?|inbox)\??$", re.I),
+         "unread_email_summary", lambda m: {"max_results": 10}, None),
 
         (R(r"^(?:my )?(?:recent )?telegram chats?$", re.I),
          "list_telegram_chats", lambda m: {"limit": 15}, None),
@@ -1021,7 +1145,19 @@ class IntentRouter:
         # "quit", "mute" and "restart" are complete commands by themselves,
         # so "quit jalen" must still strip to "quit"; that is the whole
         # point of the trailing strip and is tested.
-        if not re.search(
+        # ...UNLESS what remains is a complete command in its own right.
+        #
+        # "hold on" and "carry on" end in "on", but that "on" is a phrasal-verb
+        # PARTICLE, not a preposition missing its object — the phrase is
+        # already whole. The guard above could not tell the difference, so
+        # "hold on, Jalen" and "carry on, Jalen" kept their trailing address,
+        # matched no rule, and went to the LLM: a pause and a resume, the two
+        # commands most likely to be said in a hurry, both silently failing.
+        #
+        # Found by the cross-product sweep in
+        # tests/test_name_pronunciations.py rather than by anyone using it,
+        # which is the point of running every command against every form.
+        if stripped.strip().lower() in _COMPLETE_PHRASAL_COMMANDS or not re.search(
             r"\b(?:for|about|on|with|to|of"
             r"|google|search|find|look up|open|launch|start|play|call"
             r"|message|text|email|tell|remind|ask)$",

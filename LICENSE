@@ -1,0 +1,41 @@
+Copyright (c) 2026 O'ktam. All rights reserved.
+
+This software and its source code are proprietary and confidential.
+
+No permission is granted to copy, modify, merge, publish, distribute,
+sublicense, or sell copies of this software, in whole or in part, without
+the prior written permission of the copyright holder.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+-----------------------------------------------------------------------------
+WHY THIS ONE, AND HOW TO CHANGE IT
+
+This is deliberately the most restrictive sensible default, chosen because
+selling this was named as a possible goal and because the choice is
+asymmetric:
+
+    all rights reserved -> MIT      you can do this whenever you like
+    MIT -> all rights reserved      you cannot; every copy already out
+                                    stays MIT forever
+
+So this preserves every option, including the ones you have not decided on.
+It is not a recommendation to keep it closed. If you would rather people
+could use and build on it, replace this file with the MIT licence text and
+say so in the README — that is a two-minute change and it is yours to make.
+
+THIRD-PARTY COMPONENTS. This licence covers the code in this repository.
+It does not cover the dependencies in requirements.txt, which carry their
+own licences (mostly MIT, Apache-2.0 and BSD) and remain the property of
+their authors. The models under models/ come from openWakeWord and Silero
+and carry their own terms. Anyone intending to SELL this should read those
+before shipping, in particular the terms of the wake-word and VAD models
+and of the Claude, Groq and edge-tts services this depends on at runtime —
+each of those has its own rules about redistribution and about commercial
+use on someone else's behalf.

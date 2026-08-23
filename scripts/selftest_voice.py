@@ -73,6 +73,55 @@ def synth_16k(text: str) -> np.ndarray:
     return resample(pcm, rate, SAMPLE_RATE)
 
 
+# openWakeWord scores a ~1.96s window: a 0.76s embedding plus 15 hops of
+# 0.08s. Feed it less than that and the feature buffer never fills, so the
+# score sits at zero however good the audio is.
+#
+# A live microphone always satisfies this — it keeps delivering frames after
+# he stops speaking, so the window always closes. A SYNTHESISED clip does
+# not: edge-tts returns "Hey Jalen" with 1.4s of trailing silence most of the
+# time and with almost none occasionally. The SPEECH is identical in both —
+# 0.36s, measured — only the tail differs, and the short one scores 0.001
+# while the long one scores 1.000.
+#
+# Measured, four consecutive runs:
+#     28416 samples (1.78s) -> 1.000, fires
+#     13824 samples (0.86s) -> 0.001, does not fire
+#     28416 samples (1.78s) -> 1.000, fires
+#     28416 samples (1.78s) -> 1.000, fires
+#
+# That is the whole of the "flaky wake word test" that has been re-run and
+# excused as a network problem for days. It is neither the network nor the
+# model — it is a test feeding the model less audio than it needs.
+WAKE_WINDOW_S = 2.2
+
+
+def pad_for_wake(pcm: np.ndarray) -> np.ndarray:
+    """
+    Give the wake model a full window, the way a live microphone does.
+
+    SILENCE GOES AT THE END, and that is not a detail — measured, on the
+    same truncated clip:
+
+        truncated to 0.57s          -> 0.000
+        + 1.4s of LEADING silence   -> 0.000
+        + 1.4s of TRAILING silence  -> 1.000
+
+    The model scores a window that has to CLOSE after the phrase. Priming
+    the buffer beforehand does nothing, because the window containing the
+    phrase never completes — the audio runs out first. My own first attempt
+    at this fix padded the front and changed nothing, which is why the
+    measurement is written down here rather than the reasoning.
+
+    A live microphone never hits this: it keeps delivering frames after he
+    stops speaking, so the window always closes.
+    """
+    needed = int(SAMPLE_RATE * WAKE_WINDOW_S)
+    if len(pcm) >= needed:
+        return pcm
+    return np.concatenate([pcm, np.zeros(needed - len(pcm), dtype=np.float32)])
+
+
 def to_frames(pcm: np.ndarray, frame_size: int = FRAME) -> Iterator[np.ndarray]:
     """Chunk audio into VAD/wake-word-sized frames, zero-padding the tail."""
     for start in range(0, len(pcm), frame_size):
@@ -169,8 +218,13 @@ def check_wake_word() -> dict:
     synthesising a phrase the assistant had deliberately stopped answering
     to.
     """
-    positive_audio = synth_16k(CONFIG.get_path("identity.wake_word", "hey jalen"))
-    negative_audio = synth_16k("what's the weather like")
+    positive_audio = pad_for_wake(
+        synth_16k(CONFIG.get_path("identity.wake_word", "hey jalen"))
+    )
+    # Padded identically, so the true-negative is judged on the same terms.
+    # Giving the positive a full window and the negative a short one would
+    # make the test pass for the wrong reason.
+    negative_audio = pad_for_wake(synth_16k("what's the weather like"))
 
     wake_pos = WakeWord(CONFIG)
     wake_pos.load()
@@ -197,6 +251,19 @@ def check_wake_word() -> dict:
         "true_negative_fired": false_fired,
         "true_negative_best_score": best_negative_score,
         "threshold": wake_pos.threshold,
+        # HOW LOUD THE TEST AUDIO ACTUALLY WAS.
+        #
+        # Reported because without it a synthesis failure and a model failure
+        # are indistinguishable: edge-tts occasionally returns empty or
+        # near-silent audio, and feeding silence to the wake model scores
+        # ~0.00 — which the assertion then reports as "the wake word never
+        # fired", blaming the one component that was working.
+        #
+        # This is the project's signature bug in a test rather than in the
+        # product: a message that sounds like a diagnosis and names the wrong
+        # thing. With the peak in hand the two are one glance apart.
+        "positive_audio_peak": float(np.abs(positive_audio).max()) if len(positive_audio) else 0.0,
+        "positive_audio_samples": int(len(positive_audio)),
     }
 
 

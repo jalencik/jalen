@@ -186,6 +186,118 @@ def unlock_vault(passphrase: str) -> str:
     return f"Vault unlocked for {int(UNLOCK_TTL_S // 60)} minutes — {len(secrets)} entries."
 
 
+def unlock_vault_prompt(timeout_s: float = 120.0) -> str:
+    """
+    Unlock by TYPING the passphrase into a box on screen — AMBER.
+
+    THIS IS THE ONE THAT SHOULD BE USED. unlock_vault() takes the passphrase
+    as a string, which means it came from somewhere, and by voice that
+    somewhere is a microphone. Trace what a spoken passphrase actually does:
+
+      1. it is recorded, and the audio is sent to GROQ to be transcribed, so
+         the master passphrase leaves the machine and enters someone else's
+         logs before a single line of this project's code runs;
+      2. it arrives as an ordinary transcript line and is written to
+         data/audit.jsonl — a plain-text file, next to the vault it opens;
+      3. it is passed to a tool, whose arguments are also written down;
+      4. and it was said OUT LOUD, in a room, possibly with other people or
+         an open call in it.
+
+    Redaction fixes (2) and (3) — see AuditLog._SECRET_SHAPES and
+    SafetyEngine._SENSITIVE_ARG_MARKERS, both of which were missing it. It
+    cannot fix (1) or (4). The only real answer is that the passphrase must
+    never become audio.
+
+    So this opens a local password box instead. The value goes straight from
+    the keyboard into the key-derivation function: no transcription, no
+    model, no tool argument, no log line. Jalen is told only whether it
+    worked.
+
+    AMBER rather than GREEN, deliberately. It is harmless in itself, but a
+    password box that anything can summon is a phishing primitive — and the
+    injection guard refuses AMBER tools to anything Jalen merely READ, so a
+    web page or an email cannot make one appear.
+    """
+    if _load_blob() is None:
+        return (
+            "There's no vault yet. Run scripts\\vault_setup.py once to create "
+            "one — it asks for a passphrase and never stores it."
+        )
+    if _SESSION.live:
+        return "The vault is already unlocked."
+
+    try:
+        passphrase = _ask_passphrase_on_screen(timeout_s)
+    except Exception as exc:  # noqa: BLE001 - a UI failure must not be fatal
+        return (
+            f"I couldn't open the passphrase box ({type(exc).__name__}). "
+            "Nothing was unlocked."
+        )
+    if passphrase is None:
+        return "Cancelled — nothing was unlocked."
+    # Straight into unlock_vault, and the local name goes out of scope with
+    # this frame. It is never returned, logged, or spoken.
+    result = unlock_vault(passphrase)
+    del passphrase
+    return result
+
+
+def _ask_passphrase_on_screen(timeout_s: float) -> str | None:
+    """
+    A small always-on-top password box. Returns the text, or None if
+    cancelled or timed out.
+
+    Its own Tk root on its own thread: the orb already owns a Tk mainloop on
+    another thread, and two roots in one interpreter cannot share one.
+    """
+    import queue
+    import threading
+    import tkinter as tk
+
+    answer: queue.Queue[str | None] = queue.Queue(maxsize=1)
+
+    def run() -> None:
+        root = tk.Tk()
+        root.title("Jalen - unlock vault")
+        root.attributes("-topmost", True)
+        root.configure(bg="#14181d")
+        root.geometry("380x150")
+        tk.Label(
+            root, text="Vault passphrase", bg="#14181d", fg="#e8edf2",
+            font=("Segoe UI", 11),
+        ).pack(pady=(18, 6))
+        entry = tk.Entry(root, show="•", width=34, font=("Segoe UI", 11))
+        entry.pack()
+        entry.focus_force()
+        tk.Label(
+            root, text="Typed here it is never transcribed, sent or logged.",
+            bg="#14181d", fg="#8b97a5", font=("Segoe UI", 8),
+        ).pack(pady=(8, 0))
+
+        def submit(_event=None) -> None:
+            answer.put(entry.get() or None)
+            root.destroy()
+
+        def cancel(_event=None) -> None:
+            answer.put(None)
+            root.destroy()
+
+        entry.bind("<Return>", submit)
+        root.bind("<Escape>", cancel)
+        root.protocol("WM_DELETE_WINDOW", cancel)
+        tk.Button(root, text="Unlock", command=submit).pack(pady=8)
+        # Never leave a password box open forever on an unattended machine.
+        root.after(int(timeout_s * 1000), cancel)
+        root.mainloop()
+
+    thread = threading.Thread(target=run, name="jalen-vault-prompt", daemon=True)
+    thread.start()
+    try:
+        return answer.get(timeout=timeout_s + 5)
+    except queue.Empty:
+        return None
+
+
 def lock_vault() -> str:
     """Forget the unlocked secrets immediately — GREEN."""
     _SESSION.secrets = {}
@@ -321,6 +433,7 @@ def list_site_decisions() -> str:
 REGISTRY: dict[str, Any] = {
     "vault_status": vault_status,
     "unlock_vault": unlock_vault,
+    "unlock_vault_prompt": unlock_vault_prompt,
     "lock_vault": lock_vault,
     "list_secrets": list_secrets,
     "site_permission": site_permission,

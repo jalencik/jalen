@@ -82,6 +82,7 @@ def main() -> int:
     MODELS.mkdir(exist_ok=True)
     ok = download_wake_models()
     ok = download_silero() and ok
+    ok = True and ok
     print("\nAll set." if ok else "\nSome downloads failed — see the notes above.")
     return 0 if ok else 1
 

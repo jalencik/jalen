@@ -16,14 +16,16 @@ import contextlib
 from typing import Any
 
 from . import (
+    agents,
     attachments, autofill, browsertabs, bulkmail, coding, desktop,
+    devwork,
     drafting,
     documents,
     filesystem,
     gcalendar, gmail,
     handoff,
     interaction,
-    launcher, memory, messaging, repairs, research, selfeval, sysinfo,
+    launcher, memory, messaging, repairs, research, selfcontrol, selfeval, sysinfo,
     system, technician, vault, voice, web,
 )
 
@@ -63,7 +65,7 @@ for _module in (
     system, desktop, filesystem, documents, memory, launcher, sysinfo, web,
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
     technician, repairs, vault, interaction, browsertabs, attachments,
-    bulkmail, autofill, drafting,
+    bulkmail, autofill, drafting, devwork, selfcontrol, agents,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:

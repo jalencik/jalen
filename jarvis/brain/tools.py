@@ -523,11 +523,133 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "a secret.",
         {},
     ),
+    "unlock_vault_prompt": (
+        "Unlock the vault. USE THIS ONE. It opens a box on his screen where "
+        "he TYPES the passphrase, so it is never recorded, never transcribed, "
+        "never sent anywhere and never written to a log. Use it whenever he "
+        "asks to unlock the vault, even if he starts to say the passphrase "
+        "out loud.",
+        {},
+    ),
     "unlock_vault": (
-        "Unlock the vault for this session with his passphrase. Ask him for "
-        "it out loud; never guess it, never read it from a file, and never "
-        "repeat it back. It expires by itself after an hour.",
-        {"passphrase": ("string", "the passphrase he says", True)},
+        "Unlock the vault with a passphrase you already have as text. "
+        "DO NOT ASK HIM TO SAY IT OUT LOUD — a spoken passphrase is recorded, "
+        "sent to a speech-to-text service, and written to the transcript "
+        "before you ever see it. Use unlock_vault_prompt instead so he can "
+        "type it. This exists for the text and Telegram paths only. Never "
+        "guess it, never read it from a file, never repeat it back.",
+        {"passphrase": ("string", "a passphrase he has already typed", True)},
+    ),
+    # --- handing work to ANOTHER AI ---------------------------------------
+    "master_prompt_guide": (
+        "The house standard for briefing another AI. READ THIS BEFORE "
+        "delegate_task, every time - delegate_task refuses a brief that does "
+        "not meet it.",
+        {},
+    ),
+    "delegate_task": (
+        "Hand a task to another AI: gemini, or chatgpt (needs an API key). "
+        "The `brief` must be a FULL engineered brief - context, objective, "
+        "what success looks like, constraints, what to do if something is "
+        "unclear, and the output format. A thin brief is REFUSED and you "
+        "will be told which part is missing. Always pass `expectation`: what "
+        "HE actually wants, in his words, so the answer can be judged later "
+        "against his request rather than against its own summary.",
+        {
+            "agent": ("string", "gemini or chatgpt", True),
+            "brief": ("string", "the full engineered brief", True),
+            "expectation": ("string", "what he asked for, in his words", False),
+        },
+    ),
+    "follow_up_task": (
+        "Reply into an existing delegated conversation - the other AI keeps "
+        "its own context, so name only what needs fixing rather than "
+        "restating the whole task. Use this after review_delegation finds "
+        "gaps, and keep going until it is actually done.",
+        {
+            "chat_id": ("string", "the conversation id; empty for the latest", False),
+            "message": ("string", "what to send back", True),
+        },
+    ),
+    "list_delegations": (
+        "Conversations with other AIs, and how many rounds each has had.",
+        {"limit": ("integer", "how many to show", False)},
+    ),
+    "review_delegation": (
+        "Read back a delegated conversation so you can judge it. Gives you "
+        "what he wanted, what was asked, and what came back. Go through his "
+        "wants POINT BY POINT and say DONE / PARTLY / MISSING for each, give "
+        "a proportion and say what it is based on, name anything the answer "
+        "claims but has not shown, and then WRITE the follow-up prompt and "
+        "send it with follow_up_task.",
+        {"chat_id": ("string", "the conversation id; empty for the latest", False)},
+    ),
+    # --- Jalen working on Jalen -------------------------------------------
+    "run_own_tests": (
+        "Run Jalen's OWN test suite and report what passed and failed. The "
+        "full run takes about two minutes; pass `subset` (a test file name) "
+        "to check one thing quickly. Use this after any change to Jalen's "
+        "own code, and whenever he asks whether you are working properly.",
+        {"subset": ("string", "a test file, e.g. test_safety.py; empty for all", False)},
+    ),
+    "self_diagnose": (
+        "Jalen's own diagnostics: packages, models, microphone, credentials, "
+        "disk space, and what setup is still outstanding. Long — summarise "
+        "aloud and put the detail on screen.",
+        {},
+    ),
+    "own_health": (
+        "A two-sentence answer to 'are you alright' - disk, last shutdown, "
+        "tools loaded. Use this for a spoken answer; self_diagnose is the "
+        "full version for the screen.",
+        {},
+    ),
+    "open_own_project": ("Open Jalen's own source code in VS Code.", {}),
+    # --- handing real work to a coding agent, and being there at the end ---
+    "start_coding_job": (
+        "Start Claude Code on a real job in a folder, in the BACKGROUND. CALL "
+        "master_prompt_guide FIRST and write a full brief - a thin one is "
+        "REFUSED, because an agent that may run for an hour on a guess is "
+        "the most expensive way to get the wrong answer. Use "
+        "this for anything that will take more than a few seconds - it may "
+        "run for an hour and he will be told the moment it finishes. Always "
+        "pass `expectation`: what HE actually wants, in his words, so it can "
+        "be judged later against the request rather than against the agent's "
+        "own summary.",
+        {
+            "prompt": ("string", "the full brief for the coding agent", True),
+            "folder": ("string", "the project folder to work in", True),
+            "expectation": ("string", "what he asked for, in his words", False),
+        },
+    ),
+    "list_coding_jobs": (
+        "What coding agents are running and what they finished.",
+        {"limit": ("integer", "how many to show", False)},
+    ),
+    "review_coding_job": (
+        "Read back a finished coding job so you can judge it. Gives you three "
+        "things separately: what he asked for, what the agent CLAIMED, and "
+        "what actually changed on disk. Judge against the DIFF, not the "
+        "claim - an agent's summary is not evidence. Say roughly what "
+        "proportion of the request is genuinely done, what is missing, and "
+        "say so plainly if the agent claimed something the diff does not "
+        "support. Omit the id for the most recent job.",
+        {"job_id": ("string", "the job id, or empty for the latest", False)},
+    ),
+    "project_status": (
+        "Git branch, last commit and working-tree state of a project folder.",
+        {"folder": ("string", "the project folder", True)},
+    ),
+    "init_git_repo": (
+        "Start version control in a folder and commit a baseline. Do this "
+        "BEFORE handing work to an agent - without a baseline there is no "
+        "before-and-after, and 'what did it actually change' cannot be "
+        "answered.",
+        {"folder": ("string", "the project folder", True)},
+    ),
+    "open_in_vscode": (
+        "Open a folder in VS Code.",
+        {"folder": ("string", "the folder to open", True)},
     ),
     "lock_vault": ("Forget the unlocked secrets immediately.", {}),
     "list_secrets": (
@@ -556,16 +678,25 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "Every site he has approved or blocked, so he can audit it.", {},
     ),
     "scan_inbox": (
-        "Go through a LOT of mail in one call — up to 300 — and sort it into "
-        "worth-a-look, ordinary, and automated. Use this instead of repeated "
-        "search_email whenever he says 'all my emails', 'read 100 emails', "
-        "or 'anything since the 10th'. search_email caps at 25 and grinding "
-        "through 100 that way burns the turn limit.\n"
-        "`query` is Gmail syntax: after:2026/08/10, from:edu, is:unread. "
-        "The sorting is a GUESS from sender and subject — read anything "
-        "close with read_email before calling it an opportunity.",
+        "Go through a LOT of mail in one call — up to 300 — and sort it. Use "
+        "this instead of repeated search_email whenever he says 'all my "
+        "emails', 'read 100 emails', or 'anything since the 10th'. "
+        "search_email caps at 25 and grinding through 100 that way burns the "
+        "turn limit.\n"
+        "`query` is Gmail syntax: after:2026/08/10, from:edu, is:unread.\n"
+        "ALWAYS PASS `about` WHEN HE ASKED ABOUT SOMETHING SPECIFIC — his "
+        "words, not yours: 'my machine learning community', 'the research "
+        "lab replies'. With it, the buckets are 'matches what he asked for' "
+        "versus everything else. WITHOUT it the sort is GENERIC: it answers "
+        "'is there an opportunity in here' and nothing else, and presenting "
+        "that as the answer to a specific question has already gone wrong "
+        "once — a generic sort surfaced his research outreach when he had "
+        "asked about his ML community, and he was rightly angry.\n"
+        "The sorting is a keyword GUESS from sender and subject. Open "
+        "anything close with read_email before telling him what it says.",
         {"query": ("string", "Gmail search syntax; empty means the inbox", False),
-         "max_emails": ("integer", "how many to scan; defaults to 100, max 300", False)},
+         "max_emails": ("integer", "how many to scan; defaults to 100, max 300", False),
+         "about": ("string", "what he actually asked about, in his words", False)},
     ),
     "diagnose": (
         "Find out what is actually wrong with this machine. Read-only. Pass "
@@ -608,6 +739,8 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "open_storage_settings": ("Show where the disk space went.", {}),
     "hand_off_to_cowork": (
         "Open the Claude desktop app with a fully written brief on the "
+        "clipboard. CALL master_prompt_guide FIRST and follow it - a thin "
+        "brief is REFUSED and you will be told which part is missing. "
         "clipboard, pasted in, ready for him to review and send. This is what "
         "\"hand this task to cowork\" means. YOU write the prompt — it is "
         "whatever you were both just discussing, turned into a brief a "
@@ -616,6 +749,7 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     ),
     "hand_off_to_code": (
         "Start Claude Code on a fully written brief, in a project folder. "
+        "CALL master_prompt_guide FIRST - a thin brief is REFUSED. "
         "This is what \"hand this off to code\" means. Use it for work on "
         "files and repositories; use hand_off_to_cowork for everything else.",
         {"prompt": ("string", "the complete, self-contained brief", True),

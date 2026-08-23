@@ -65,11 +65,12 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python scripts\download_models.py
-claude setup-token
-copy .env.example .env      # add your Groq key
-python run.py --check
-python scripts\install_autostart.py    # login start + Ctrl+Alt+J
+python scripts\onboard.py     # keys, Google, Telegram, your name - one guided pass
 ```
+
+`onboard.py` walks the whole thing and is resumable: run it again and it
+detects what is already done rather than asking twice. If you would rather do
+it by hand, the long form is in [SETUP.md](SETUP.md).
 
 Then just press **Ctrl+Alt+J**, or say **"Hey Jalen"**.
 
@@ -81,17 +82,36 @@ Then just press **Ctrl+Alt+J**, or say **"Hey Jalen"**.
 | *"read it all"* | speak a long answer in full, uncapped |
 | *"what can't you do yet"* | his own log of gaps he's hit |
 | *"how fast was that"* | real per-turn timings |
+| *"watch my hands"* | size the orb by pinching, if the camera extra is installed |
 
 No microphone handy? `python run.py --text`.
+
+Not sure what to do next? **`.\jalen.ps1 todo`** reads your machine and
+prints only what is actually outstanding, with what each thing does and how
+long it takes.
+
+When something is wrong:
+
+| | |
+|---|---|
+| `.\jalen.ps1 todo` | what still needs you, in the order to do it |
+| `.\jalen.ps1 check` | what is missing, what is set up, how much disk is left |
+| `python run.py --why` | why it stopped last time, and any crash |
+| `data/audit.jsonl` | everything said and done, both directions |
 
 Full walkthrough in **[SETUP.md](SETUP.md)**. Design reasoning in
 **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
-## Everything you can change lives in two files
+## Everything you can change lives in three files
 
 - **`config/jarvis.yaml`** — voice, personality, speed, wake sensitivity,
   orb size and position, which integrations are on, which Telegram chats he
-  may send to without asking. No code.
+  may send to without asking. No code. Every value is commented with WHY it
+  is that value; those comments are the design record, so this is the file to
+  read rather than the file to personalise.
+- **`config/user.yaml`** — yours. Overlays the above, key by key, and is
+  never committed. Your name, your folders, your channels. Written by
+  `onboard.py`; absent, nothing changes.
 - **`config/safety.yaml`** — which actions run freely, which announce
   themselves, which stop and ask, and which are refused outright.
 

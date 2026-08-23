@@ -86,9 +86,12 @@ def test_every_state_has_a_colour():
 
 def test_his_three_colours_are_what_he_asked_for():
     """
-    "black when stopped, blue while listening, yellow while executing."
-    Executing is the `thinking` state — that is what app.py sets while a tool
-    call or brain turn is in flight.
+    "blue while listening, yellow while executing" — still true.
+
+    The third one, "black when stopped", is NOT. He reversed it: the orb was
+    invisible and he asked for it to be visible at all times, in every
+    window. Idle is now asserted the other way round, in
+    tests/test_orb.py::test_idle_colour_is_visible.
     """
     orb = Orb(CONFIG)
 
@@ -96,7 +99,7 @@ def test_his_three_colours_are_what_he_asked_for():
         return tuple(int(hex_colour[i:i + 2], 16) for i in (1, 3, 5))
 
     r, g, b = channels(orb.colours["idle"])
-    assert r + g + b < 150, f"idle is {orb.colours['idle']} — not dark"
+    assert r + g + b >= 200, f"idle is {orb.colours['idle']} — too dark to see"
 
     r, g, b = channels(orb.colours["listening"])
     assert b > r and b > g, f"listening is {orb.colours['listening']} — not blue"
@@ -115,9 +118,9 @@ def test_the_wave_headroom_leaves_room_for_the_rings():
 
 def test_resize_is_reachable_by_voice():
     """
-    The orb is click-through while idle, so it receives no mouse events at
-    all — including scroll. Voice is the only control surface that works on
-    the state it spends most of its time in.
+    The orb is click-through while BUSY, so it receives no mouse events at
+    all in those states — including scroll. Voice and Ctrl+Alt+B /
+    Ctrl+Alt+S are the control surfaces that work in every state.
     """
     from jarvis.brain.router import IntentRouter
 
@@ -125,8 +128,8 @@ def test_resize_is_reachable_by_voice():
     bigger = router.route("make the orb bigger")
     smaller = router.route("make the orb smaller")
     assert bigger is not None and bigger.tool == "jalen_orb_size"
-    assert bigger.args["delta"] > 0
-    assert smaller is not None and smaller.args["delta"] < 0
+    assert bigger.args["change"] == "bigger"
+    assert smaller is not None and smaller.args["change"] == "smaller"
 
 
 @pytest.mark.parametrize("phrase", ["smaller", "bigger", "make it bigger"])
@@ -140,3 +143,122 @@ def test_resize_does_not_hijack_a_bare_adjective(phrase):
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is None or hit.tool != "jalen_orb_size"
+
+
+# ---------------------------------------------------------------------------
+# WHY THE ORB WAS INVISIBLE.
+#
+# He reported it twice: "that orb is still not visible on my screen, no matter
+# whichever windows I will be". It was never a Z-order problem — the window
+# was mapped, on screen, and WS_EX_TOPMOST was set. It was painting nothing.
+#
+# Measured, on a solid backdrop with the production config:
+#     before   0 orb pixels while idle
+#     after   ~1,270 orb pixels while idle, click-through still on
+# ---------------------------------------------------------------------------
+def test_the_window_handle_used_for_styling_is_the_top_level():
+    """
+    Tk's winfo_id() returns a CHILD window on Windows, not the top-level.
+    WS_EX_LAYERED on that child stops the canvas compositing against the
+    parent's colour key, so the orb renders nothing at all.
+    """
+    import inspect
+
+    from jarvis.ui import orb as orbmod
+
+    source = inspect.getsource(orbmod)
+    # The two ctypes calls that style the window must never be handed
+    # winfo_id() directly.
+    assert "set_click_through(root.winfo_id()" not in source
+    assert "raise_to_top(root.winfo_id()" not in source
+    assert "GetAncestor" in source, "no top-level lookup at all"
+
+
+def test_an_unrealized_window_reports_no_handle_rather_than_the_wrong_one():
+    """
+    THE actual failure. tick() runs once directly before mainloop(), when Tk's
+    window hierarchy does not exist yet — and GetAncestor on an unrealized
+    window returns the handle it was given, which is indistinguishable from
+    "this IS the top level".
+
+    So the first tick styled the canvas child, the orb went blank, and because
+    _click_through_applied was then True it was never reconsidered for the
+    rest of the session. Returning 0 makes the caller wait instead.
+    """
+    from jarvis.ui.orb import toplevel_hwnd
+
+    class Unrealized:
+        def winfo_id(self):
+            return 0
+
+    assert toplevel_hwnd(Unrealized()) == 0
+
+    class Exploding:
+        def winfo_id(self):
+            raise RuntimeError("window does not exist")
+
+    assert toplevel_hwnd(Exploding()) == 0
+
+
+def test_styling_is_skipped_until_the_handle_resolves():
+    """
+    No styling is far better than styling the wrong window: one costs a few
+    frames of a non-click-through orb, the other costs the whole orb.
+    """
+    import inspect
+
+    from jarvis.ui import orb as orbmod
+
+    source = inspect.getsource(orbmod.Orb._run)
+    assert "if not self._hwnd:" in source
+    assert "self.click_through_when_busy and self._hwnd" in source
+    assert "self.always_on_top and self._hwnd" in source
+
+
+def test_topmost_is_re_asserted_rather_than_set_once():
+    """
+    Windows silently demotes a topmost window when another topmost window, a
+    full-screen app or a UAC prompt appears, and there is no event to listen
+    for. Setting it once at startup is not "always on top".
+    """
+    import inspect
+
+    from jarvis.ui import orb as orbmod
+
+    assert orbmod.TOPMOST_REASSERT_TICKS > 0
+    source = inspect.getsource(orbmod.raise_to_top)
+    assert "SWP_NOACTIVATE" in source, (
+        "re-asserting topmost would steal focus from whatever he is typing into"
+    )
+
+
+def test_the_win32_calls_have_prototypes():
+    """
+    ctypes defaults to a 32-bit signed int return. Window handles on 64-bit
+    Windows do not reliably fit, so an unprototyped GetAncestor can return a
+    truncated handle that still looks plausible — and every later call then
+    styles nothing, or something else.
+    """
+    from jarvis.ui.orb import _user32
+
+    lib = _user32()
+    if lib is None:
+        return                       # not Windows; nothing to check
+    import ctypes.wintypes as wt
+    assert lib.GetAncestor.restype == wt.HWND
+    assert lib.SetWindowPos.restype == wt.BOOL
+
+
+def test_the_orb_carries_its_name_under_it():
+    """He asked for the name written below, as in the reference image."""
+    orb = Orb(CONFIG)
+    assert orb.label
+    assert orb.label.lower() == str(CONFIG.get_path("identity.name")).lower()
+
+
+def test_the_name_follows_a_renamed_assistant():
+    """A second user must not stare at somebody else's name on their desktop."""
+    from jarvis.config import Cfg
+
+    cfg = Cfg({"identity": {"name": "Ada"}, "ui": {"orb": True}})
+    assert Orb(cfg).label == "Ada"

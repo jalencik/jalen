@@ -1,0 +1,75 @@
+# ============================================================================
+#  Packaging. (HANDOFF item 6, "no packaging — it runs from a venv and a git
+#  checkout.")
+#
+#  WHAT THIS DOES AND DOES NOT DO
+#
+#  It makes the project installable and gives it console commands, so that
+#  "jalen" works from any directory instead of only from a shell sitting in
+#  the checkout with the right interpreter. That is the honest scope.
+#
+#  It is NOT a one-click installer, and pretending otherwise would be the
+#  usual failure here. A voice assistant that drives this machine cannot be
+#  reduced to `pip install`: it needs a Groq key, an authenticated Claude
+#  CLI, microphone permission, optionally Google OAuth and a Telegram login,
+#  and a wake-word model downloaded separately. scripts/onboard.py walks
+#  those; this file just stops the interpreter being a thing you have to get
+#  right by hand every time.
+#
+#  Deliberately NOT a wheel-first layout. The project reads config/*.yaml,
+#  data/ and models/ by path relative to the repository root, and a proper
+#  packaged install would need every one of those turned into package data
+#  or a user-directory lookup. That is a real refactor with a real chance of
+#  breaking a working machine, and it buys nothing until there is a second
+#  user. Installed with `pip install -e .`, the paths keep working exactly
+#  as they do today.
+# ============================================================================
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jalen"
+version = "0.4.0"
+description = "A voice assistant that runs the machine it lives on"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+
+# Kept in step with requirements.txt by tests/test_packaging.py rather than
+# by hope. Two dependency lists that drift produce an install that imports
+# and then fails at the first real call, which is the hardest kind of
+# breakage to attribute.
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+# (The "gestures" extra went with hand-gesture orb resizing: ~250 MB and
+# a live webcam for a feature that never worked for the person who asked
+# for it. Ctrl+Alt+B / Ctrl+Alt+S replaced it.)
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+# `jalen` from anywhere, instead of remembering which Python has the packages.
+# jalen.ps1 stays as the Windows-native path and does slightly more (it
+# checks the venv exists and says how to create it).
+jalen = "run:main"
+jalen-setup = "scripts.onboard:main"
+jalen-check = "scripts.check_env:main"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools]
+# Modules rather than packages: run.py sits at the root and is the entry
+# point, and py-modules is how a root-level module gets included.
+py-modules = ["run"]
+
+[tool.setuptools.packages.find]
+include = ["jarvis*", "scripts*"]
+exclude = ["tests*", "data*", "models*", "docs*"]
+
+[tool.pytest.ini_options]
+# pytest.ini already carries the real configuration; this block exists so
+# that a tool reading pyproject.toml alone still finds the test paths.
+testpaths = ["tests"]

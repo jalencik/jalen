@@ -107,9 +107,58 @@ def _expand(node: Any, values: dict[str, str]) -> Any:
     return node
 
 
+def _merge(base: dict, overlay: dict) -> dict:
+    """
+    Deep-merge `overlay` onto `base`, returning a new dict.
+
+    Dicts merge key by key; everything else REPLACES. Lists replace rather
+    than concatenate, and that is the right call for this file: the lists
+    here are allowlists — safe folders, pre-approved send destinations,
+    protected paths. A user who writes their own `roots:` means "these are my
+    folders", not "add mine to his", and a merge that appended would silently
+    leave a second person's Desktop on the list. Replacing is also the only
+    behaviour you can reason about from reading user.yaml alone.
+    """
+    out = dict(base)
+    for key, value in (overlay or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+# Where a second person's settings go.
+#
+# jarvis.yaml is the DEFAULTS and the design record — every value in it is
+# commented with why it is that value, and those comments are the most useful
+# documentation this project has. Editing it per-machine destroys that, and
+# makes every `git pull` a merge conflict against someone else's name.
+#
+# user.yaml overlays it, is gitignored, and only needs the handful of keys
+# that differ. Absent, behaviour is exactly as it was before this existed.
+USER_CONFIG = CONFIG_DIR / "user.yaml"
+
+
 def load_config() -> Cfg:
     with open(CONFIG_DIR / "jarvis.yaml", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
+
+    # The personal overlay, if there is one. A malformed user.yaml is
+    # reported and ignored rather than fatal: locking someone out of their
+    # own assistant over a YAML typo, with no voice available to say so, is
+    # the worst possible failure mode for an optional file.
+    if USER_CONFIG.exists():
+        try:
+            with open(USER_CONFIG, encoding="utf-8") as fh:
+                overlay = yaml.safe_load(fh) or {}
+            if isinstance(overlay, dict):
+                raw = _merge(raw, overlay)
+            else:
+                print(f"[config] {USER_CONFIG.name} is not a mapping; ignoring it.")
+        except (OSError, yaml.YAMLError) as exc:
+            print(f"[config] couldn't read {USER_CONFIG.name} ({exc}); using defaults.")
+
     with open(CONFIG_DIR / "safety.yaml", encoding="utf-8") as fh:
         raw["safety_tiers"] = yaml.safe_load(fh) or {}
 
@@ -120,6 +169,13 @@ def load_config() -> Cfg:
             "user_name": identity.get("user_name", "there"),
             "address_user_as": identity.get("address_user_as", ""),
             "name": identity.get("name", "Jalen"),
+            # Machine-specific, so that a config file can say {home}/Desktop
+            # instead of C:/Users/user/Desktop and be portable to the next
+            # person without editing. Windows paths are written with forward
+            # slashes throughout this project, and as_posix() keeps that
+            # consistent rather than mixing separators inside one string.
+            "home": Path.home().as_posix(),
+            "username": os.environ.get("USERNAME") or os.environ.get("USER") or "user",
         },
     )
     DATA_DIR.mkdir(exist_ok=True)

@@ -19,6 +19,26 @@ green:
   reason: "Read-only, or trivially reversible."
   tools:
     - read_file
+    # Reading only: what agents are running, what a repo looks like, and
+    # what a finished job actually changed. Free on purpose - if asking
+    # "did it work" costs a confirmation, he stops asking.
+    - list_coding_jobs
+    # Reading what another AI said, and the briefing standard itself.
+    # Free: judging whether a delegated task actually worked must not cost a
+    # confirmation, or he stops checking.
+    - list_delegations
+    - review_delegation
+    - master_prompt_guide
+    # Jalen looking at Jalen. Read-only with respect to its own code: it
+    # runs tests and reads diagnostics, and there is a test asserting it
+    # never edits jarvis/**.py. Free, for the same reason the technician's
+    # diagnosis is free - a self-check that costs a confirmation is one
+    # nobody runs.
+    - run_own_tests
+    - self_diagnose
+    - own_health
+    - review_coding_job
+    - project_status
     - search_files
     - list_directory
     - list_aliases         # read-only: what nicknames are known
@@ -36,6 +56,7 @@ green:
     - jalen_ack            # answering to his own name
     - jalen_timing         # reads its own stopwatch; touches nothing
     - jalen_orb_size       # resizes its own overlay
+    - jalen_orb_move       # moves its own overlay to a corner
     - jalen_read_all       # speaks text already on his screen
     - private_mode
     - set_posture
@@ -187,6 +208,34 @@ amber:
     - edit_file
     - create_github_issue
     - write_notion_page
+    # Opens a password box on screen. Harmless in itself — the passphrase
+    # goes straight from the keyboard into the key derivation, never through
+    # a transcript, a model or a log — but a password prompt that ANYTHING
+    # can summon is a phishing primitive. AMBER rather than GREEN because the
+    # injection guard refuses AMBER tools to anything Jalen merely READ, so a
+    # web page or an email cannot make one appear. That guard is the whole
+    # reason for the tier; the announcement is a bonus.
+    - unlock_vault_prompt
+    # Starts an autonomous coding agent with its own tool access, in a real
+    # folder, possibly for an hour. GREEN would be too casual. RED - a spoken
+    # confirmation every time he asks Claude to look at something - is the
+    # friction that made the earlier build unusable, and Claude Code runs its
+    # own permission prompts for anything destructive. He hears the folder
+    # and the brief, and has two seconds to say stop.
+    - start_coding_job
+    # Sends his words to a THIRD PARTY - Google or OpenAI - and spends
+    # money doing it. GREEN would be too casual for something that leaves
+    # the machine. RED would make a five-round refinement loop unusable, and
+    # the loop is the whole point. He hears which agent and what it is being
+    # asked, with a moment to say stop.
+    - delegate_task
+    - follow_up_task
+    # Writes a .git directory and one commit. Reversible, but it is a change
+    # to a folder he did not necessarily expect to be touched.
+    - init_git_repo
+    # Opens an application. Harmless, but he should know a window appeared.
+    - open_in_vscode
+    - open_own_project
     # Starts an autonomous coding agent, with its own tool access, on his
     # machine. GREEN would be too casual for that. But RED — a spoken
     # "confirm?" every time he asks Claude to look at something — is exactly
@@ -301,12 +350,16 @@ never_touch:
     - "C:/Windows"
     - "C:/Program Files/WindowsApps"
     - "C:/ProgramData/Microsoft/Windows Defender"
-    - "C:/Users/user/Desktop/credentials"          # seen on your desktop
-    - "C:/Users/user/Desktop/Mother credentials"   # seen on your desktop
-    - "C:/Users/user/.ssh"
-    - "C:/Users/user/.aws"
-    - "C:/Users/user/.gnupg"
-    - "C:/Users/user/AppData/Roaming/ProtonVPN"
+    # {home} expands to this account's home directory at load time. These
+    # are protections, so getting them wrong is not a cosmetic bug: hardcoded
+    # to one username, they silently protect NOTHING on anyone else's
+    # machine while still reading as a full list.
+    - "{home}/Desktop/credentials"          # seen on your desktop
+    - "{home}/Desktop/Mother credentials"   # seen on your desktop
+    - "{home}/.ssh"
+    - "{home}/.aws"
+    - "{home}/.gnupg"
+    - "{home}/AppData/Roaming/ProtonVPN"
   patterns:
     - "*.pem"
     - "*.key"

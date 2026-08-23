@@ -14,6 +14,7 @@ def main() -> int:
     parser.add_argument("--telegram", action="store_true", help="control Jalen from the Telegram bot instead of voice/text")
     parser.add_argument("--stop", action="store_true", help="stop the running Jalen and exit")
     parser.add_argument("--status", action="store_true", help="say whether Jalen is running, and exit")
+    parser.add_argument("--why", action="store_true", help="why did Jalen stop last time? prints the exit record and recent crashes")
     parser.add_argument("--restart", action="store_true", help="stop the running Jalen, then start fresh")
     args = parser.parse_args()
 
@@ -21,11 +22,23 @@ def main() -> int:
         from scripts.check_env import main as check
         return check()
 
+    # Before anything that can fail. Autostart runs this file under
+    # pythonw.exe with a hidden window (start_jalen.vbs), where sys.stderr is
+    # None and the interpreter throws tracebacks away rather than printing
+    # them somewhere nobody looks. Installing the crash log first is what
+    # makes the difference between a process that vanishes and one that
+    # leaves a traceback in data/crash.log. See jarvis/crashlog.py.
+    from jarvis import crashlog
+    crashlog.install()
+
     from jarvis import runtime
 
     if args.status:
         print(runtime.status())
         return 0
+
+    if args.why:
+        return _why()
 
     if args.stop:
         print(runtime.stop_running_instance())
@@ -48,10 +61,62 @@ def main() -> int:
 
     try:
         return _serve(args)
+    except BaseException as exc:
+        # Recorded here rather than left to the excepthook, because the
+        # excepthook does not fire for everything that ends a process and
+        # this is the one place that sees every failure _serve() can produce.
+        # Re-raised afterwards so behaviour is unchanged — the only new thing
+        # is that the reason now exists on disk.
+        if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            crashlog.record_exception("run.py", exc)
+            crashlog.note_exit(
+                "unhandled-exception", error=f"{type(exc).__name__}: {exc}"[:400]
+            )
+        raise
     finally:
         # Every exit path — clean quit, Ctrl+C, or an unhandled error — must
         # drop the lock, or the next launch refuses to start.
         runtime.release()
+
+
+def _why() -> int:
+    """
+    `python run.py --why` — the answer to "it stopped on its own again".
+
+    Two things, in the order you want them: how the last run ended, then the
+    tail of the crash log. Before this the honest answer to that question was
+    "nothing was recorded", which is how the 21 August exit stayed a mystery.
+    """
+    from jarvis import crashlog
+
+    record = crashlog.previous_exit()
+    if record is None:
+        print("No exit record yet. It is written from the next start onward.")
+    elif record.get("state") == "running":
+        print("The last run ended WITHOUT shutting down.")
+        print(f"  session   {record.get('session_id', '?')}")
+        print(f"  pid       {record.get('pid', '?')}")
+        print(f"  mode      {record.get('mode', '?')}")
+        print(f"  started   {record.get('started_iso', '?')}")
+        print("\nThat means it was killed, or it died somewhere it could not report.")
+    else:
+        print(f"The last run stopped cleanly: {record.get('reason', '?')}")
+        print(f"  session   {record.get('session_id', '?')}")
+        print(f"  ended     {record.get('ended_iso', '?')}")
+        if record.get("uptime_s") is not None:
+            print(f"  ran for   {record['uptime_s']}s")
+        if record.get("error"):
+            print(f"  error     {record['error']}")
+
+    if crashlog.CRASH_LOG.exists():
+        lines = crashlog.CRASH_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail = lines[-40:]
+        print(f"\n--- {crashlog.CRASH_LOG} (last {len(tail)} of {len(lines)} lines) ---")
+        for line in tail:
+            print(line)
+    else:
+        print(f"\nNo crash log at {crashlog.CRASH_LOG}: nothing has crashed since this was added.")
+    return 0
 
 
 def _serve(args) -> int:
@@ -59,7 +124,8 @@ def _serve(args) -> int:
     from jarvis.config import CONFIG
     from jarvis import tools as jalen_tools
 
-    jalen = Jalen()
+    mode = "telegram" if args.telegram else "text" if args.text else "voice"
+    jalen = Jalen(mode=mode)
     if args.unmuted:
         jalen.muted = False
 
@@ -116,22 +182,22 @@ def _serve(args) -> int:
 
                 threading.Thread(target=_run_turn, daemon=True).start()
         except KeyboardInterrupt:
-            pass
+            jalen._exit_reason = "keyboard-interrupt"
         finally:
-            jalen.shutdown()
+            jalen.shutdown("text-mode-ended")
         return 0
 
     if args.telegram:
         if not jalen.secrets.telegram_bot_token:
             print("TELEGRAM_BOT_TOKEN isn't set in .env — see CREDENTIALS.md.")
-            jalen.shutdown()
+            jalen.shutdown("missing-telegram-token")
             return 1
         if not jalen.secrets.telegram_allowed_user_ids:
             print(
                 "TELEGRAM_ALLOWED_USER_IDS is empty — the bot would refuse everyone. "
                 "Add your numeric Telegram ID (from @userinfobot) to .env first."
             )
-            jalen.shutdown()
+            jalen.shutdown("no-allowed-telegram-users")
             return 1
 
         import asyncio
@@ -144,9 +210,9 @@ def _serve(args) -> int:
         try:
             asyncio.run(run_bot(jalen, jalen.secrets.telegram_bot_token, jalen.secrets.telegram_allowed_user_ids))
         except KeyboardInterrupt:
-            pass
+            jalen._exit_reason = "keyboard-interrupt"
         finally:
-            jalen.shutdown()
+            jalen.shutdown("telegram-mode-ended")
         return 0
 
     # The wake phrase printed here comes from config, not from a literal,
@@ -163,8 +229,12 @@ def _serve(args) -> int:
     try:
         jalen.run()
     except KeyboardInterrupt:
+        jalen._exit_reason = "keyboard-interrupt"
         print("\nStopping…")
     finally:
+        # No reason passed: shutdown() falls back to the one run() recorded
+        # when its loop ended, which is more specific than anything this
+        # caller knows.
         jalen.shutdown()
     return 0
 

@@ -240,12 +240,24 @@ def test_a_missing_voice_skill_says_so_rather_than_guessing(tmp_path, monkeypatc
     """
     from jarvis.tools import voice
 
+    from jarvis.config import CONFIG
+
     monkeypatch.setattr(voice, "_SEARCH_PATHS", [tmp_path / "absent.md"])
     monkeypatch.delenv("JARVIS_VOICE_SKILL", raising=False)
+    # The lookup gained a config source (personal.voice_guide), so "not
+    # found" now means all three are empty, not just the search paths.
+    monkeypatch.setitem(CONFIG, "personal", {"voice_guide": ""})
     voice._cache.clear()
 
     out = voice.voice_guide()
-    assert "couldn't find your my-voice skill" in out
+    # Asserted as a PROPERTY rather than a literal sentence: the wording
+    # changed once already, when the message was rewritten to name the fix
+    # instead of listing three paths that only mean something to one person.
+    # What must never change is that it admits it is guessing and does not
+    # return a guide.
+    assert "guessing" in out.lower()
+    assert "This is how HE writes" not in out, "it returned a guide it does not have"
+    assert "personal.voice_guide" in out, "it does not say how to fix it"
 
 
 def test_the_guide_is_read_once_not_per_draft(tmp_path, monkeypatch):

@@ -43,6 +43,7 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     scratch = tmp_path_factory.mktemp("jarvis-test-data")
 
     from jarvis import audit as audit_module
+    from jarvis import crashlog as crashlog_module
     from jarvis.brain import router as router_module
     from jarvis.config import CONFIG
 
@@ -75,9 +76,33 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     if saved_audit_root is not None:
         audit_module.DATA_DIR = scratch
 
+    # --- crash log and exit state -----------------------------------------
+    # Same reasoning as the audit log, and with a sharper edge. Three tests
+    # construct a real Jalen, and Jalen.__init__ calls crashlog.mark_running()
+    # — which writes data/last_exit.json saying a run is IN PROGRESS. Those
+    # test instances are never shut down, so the file would still say
+    # "running" when the suite ends, and the next real start would report
+    # "previous run ended WITHOUT shutting down" about a pytest process. The
+    # one line that exists to flag a genuine silent exit would be a false
+    # alarm after every test run, which is exactly how a useful signal gets
+    # trained out of someone.
+    saved_crash = (
+        crashlog_module.DATA_DIR,
+        crashlog_module.CRASH_LOG,
+        crashlog_module.EXIT_STATE,
+    )
+    crashlog_module.DATA_DIR = scratch
+    crashlog_module.CRASH_LOG = scratch / "crash.log"
+    crashlog_module.EXIT_STATE = scratch / "last_exit.json"
+
     try:
         yield scratch
     finally:
+        (
+            crashlog_module.DATA_DIR,
+            crashlog_module.CRASH_LOG,
+            crashlog_module.EXIT_STATE,
+        ) = saved_crash
         audit_cfg.clear()
         audit_cfg.update(saved_audit)
         memory_cfg.clear()

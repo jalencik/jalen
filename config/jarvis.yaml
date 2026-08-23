@@ -142,7 +142,24 @@ wake:
   # ONE HONEST CAVEAT: every positive was synthesised speech across 45
   # voices, not his own voice. The miss rate on him specifically could be
   # higher than 2.9%, and only using it will show that.
-  threshold: 0.7
+  #
+  # LOWERED FROM 0.7 TO 0.5, on his report that it misses him.
+  #
+  # The table above is the whole argument: ordinary speech and room noise sit
+  # at 0.00% false accepts at EVERY threshold, so lowering does not buy a
+  # single spurious wake from a conversation or a television. The only thing
+  # it trades against is someone nearby saying a deliberate soundalike —
+  # "Hey Galen", "Hey Kalen" — and that requires a person in his room saying
+  # a name one phoneme from his assistant's.
+  #
+  # It also addresses something the table cannot show. He says it "ja-LEN",
+  # stressing the second syllable; all 45 synthetic training voices say
+  # "JA-len". Those are different sounds, the model has never heard his, and
+  # a lower threshold is the only mitigation available WITHOUT retraining.
+  # The real fix is scripts/record_wake_samples.py, which now asks for both
+  # stress patterns explicitly. Raise this back toward 0.7 once the model has
+  # heard him.
+  threshold: 0.5
   cooldown_s: 1.5                  # ignore re-triggers for this long after a hit
 
 vad:
@@ -204,7 +221,23 @@ conversation:
   stitch_window_s: 8
   end_phrases: ["that's all", "thats all", "that is all", "thank you jalen", "we're done", "nothing else"]
   barge_in: true                   # C20 you can talk over it
-  barge_in_threshold: 0.6          # how confident it must be that you're speaking, before it shuts up
+  # HE WAS INTERRUPTING HIMSELF. Measured in data/audit.jsonl: 17 replies
+  # ended far earlier than their text needed, and six of them stopped at
+  # 747-764ms — the same instant every time. Nothing random clusters like
+  # that. What happens ~750ms into playback is Jalen's own voice arriving
+  # back through the microphone, the VAD crossing this threshold, and
+  # playback being killed on the FIRST frame over it.
+  #
+  # There is no acoustic echo cancellation here, so the microphone genuinely
+  # cannot tell his voice from the speakers. Three dials instead:
+  barge_in_threshold: 0.75         # was 0.6. Higher while speaking than while listening.
+  # Ignore the opening of a reply entirely. The echo takes a moment to build,
+  # and nobody interrupts before the first word anyway.
+  barge_in_grace_s: 1.2
+  # Require this many CONSECUTIVE frames over the threshold. At 32ms a frame
+  # that is ~200ms of continuous speech. One blip must not kill a
+  # sixty-second answer, which is exactly what it was doing.
+  barge_in_frames: 6
 
 # ---------------------------------------------------------------------------
 # INTENT ROUTER  — the thing that keeps you inside your Claude Pro limits.
@@ -314,10 +347,14 @@ memory:
 index:
   use_everything: true             # voidtools Everything for instant filename search
   everything_cli: "C:/Program Files/Everything/es.exe"
+  # {home} expands to this account's home directory at load time (see
+  # jarvis/config.py). Written this way so the file is portable to the next
+  # machine without editing, and so a second user's config does not silently
+  # index the first user's Desktop.
   content_index_paths:
-    - "C:/Users/user/Documents"
-    - "C:/Users/user/Downloads"
-    - "C:/Users/user/Desktop"
+    - "{home}/Documents"
+    - "{home}/Downloads"
+    - "{home}/Desktop"
   # [NOT IMPLEMENTED] search_files matches FILENAMES only; file contents
   # are never indexed, so these two keys have no effect.
   content_index_extensions: [".txt", ".md", ".pdf", ".docx", ".pptx", ".xlsx", ".py", ".js", ".ts", ".json", ".csv"]
@@ -377,21 +414,58 @@ ui:
   orb_position: "center"           # center | bottom-right | bottom-left | top-right | top-left
   orb_margin: 28
   always_on_top: true
-  # Implemented via ctypes (WS_EX_LAYERED | WS_EX_TRANSPARENT on the orb's
-  # own window) so it never blocks a click meant for whatever's underneath.
-  # The style is removed again the instant the orb isn't idle, so it stays
-  # draggable the rest of the time. Windows only; a no-op elsewhere.
-  click_through_when_idle: true
+  # Ghost while BUSY, solid while IDLE. WS_EX_LAYERED | WS_EX_TRANSPARENT via
+  # ctypes on the orb's own top-level window.
+  #   idle       -> solid, so you can drag it where you want it
+  #   listening/thinking/speaking/muted -> clicks pass straight through
+  # This was the other way round until it was measured, which is why his
+  # cursor stopped working whenever Jalen was doing anything at all.
+  # Windows only; a no-op elsewhere.
+  click_through_when_busy: true
+  # Resizing the orb from anywhere, without the camera that used to do it.
+  # Each falls back to the next free combination if another application
+  # already owns it — see scripts/hotkeys.py.
+  orb_bigger_hotkey: ctrl+alt+b
+  orb_smaller_hotkey: ctrl+alt+s
   transcript_window: true          # C15 long content appears here instead of being read out
   show_transcript: true            # small caption under the orb showing the last thing
                                     # Jalen heard (the STT transcript); auto-hides after ~8s
   theme:
-    idle:      "#161c24"           # deliberately dark/near-off — "silent when idle"
+    # idle WAS "#161c24" — near-black, from an earlier "black when stopped"
+    # instruction. He then reported the orb as simply not appearing, "no
+    # matter whichever window I will be", and at RGB (22,28,36) on a dark
+    # desktop that is an accurate description of what it was doing rather
+    # than a misunderstanding.
+    #
+    # So: a calm teal that is genuinely visible, matching the sphere in his
+    # reference image. Still the quietest of the five — it is a resting
+    # colour, not an alerting one — but present. If you ever want it dark
+    # again, that is a request to make the orb invisible; read this comment
+    # first and ask him.
+    idle:      "#2bb3c9"           # teal — resting, but VISIBLE
     listening: "#2f8fff"           # BLUE — listening
     thinking:  "#ffd60a"           # YELLOW — thinking / executing
     speaking:  "#3ddc84"
     blocked:   "#ff4d4f"
 
+  # -------------------------------------------------------------------------
+  # SIZING THE ORB WITH YOUR HANDS
+  # -------------------------------------------------------------------------
+  # The thing in the reference photo: pinch with both hands and move them
+  # apart. See jarvis/ui/gestures.py.
+  #
+  # OFF BY DEFAULT, and it stays that way. This opens a WEBCAM, and a camera
+  # that switches itself on because a config file shipped with it enabled is
+  # not a feature anyone asked for. Turn it on for a session by saying
+  # "watch my hands"; set enabled: true here only if you want it armed at
+  # every start.
+  #
+  # It also needs a ~250 MB optional dependency that is not installed by
+  # default — see requirements-gestures.txt. Without it, asking for hand
+  # control gets you a sentence saying so and nothing else happens.
+  #
+  # Frames never leave the process: not to disk, not to the audit log, not
+  # over the network. The only thing this feature produces is a pixel size.
 # ---------------------------------------------------------------------------
 # PROACTIVITY  (spec H59-H64)
 # ---------------------------------------------------------------------------
@@ -504,3 +578,25 @@ audit:
   daily_review: true               # F48
   daily_review_time: "21:00"
   daily_review_to: "telegram"
+
+# ---------------------------------------------------------------------------
+# PERSONAL  (per-user; override these in config/user.yaml)
+# ---------------------------------------------------------------------------
+# The two things that are unavoidably about ONE person. Everything else in
+# this file is a behaviour that generalises; these are somebody's writing and
+# somebody's Telegram handle, and shipping them as defaults means a second
+# user's assistant writes in the first user's voice and signs his name.
+#
+# Set them in config/user.yaml, not here.
+personal:
+  # A file that is genuinely YOUR writing, for "draft this in my voice".
+  # An essay, a few old emails pasted together, anything real. Empty means
+  # voice_guide says it is guessing rather than pretending it is not.
+  #
+  # His own is a 35 KB my-voice skill, found automatically in ~/.claude/skills
+  # — so this stays empty for him and the lookup below still finds it.
+  voice_guide: ""
+
+  # The handle the channel post format signs off with. Empty keeps the one
+  # written into the worked examples in docs/community_post_format.md.
+  channel_handle: ""

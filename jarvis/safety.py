@@ -260,11 +260,28 @@ class SafetyEngine:
         return False
 
     # ------------------------------------------------------------- formatting
+    # Argument names whose VALUE must never reach the audit log.
+    #
+    # "passphrase" was missing, and that was not a small gap: unlock_vault's
+    # only argument is called `passphrase`, so every unlock wrote the vault's
+    # master passphrase into data/audit.jsonl and audit.db in plain text —
+    # the one secret the whole vault exists to protect, written to disk
+    # beside it, in a file that is deliberately readable in Notepad.
+    #
+    # Matched as substrings, so "passphrase", "vault_passphrase" and
+    # "passphrase_confirm" are all covered. Deliberately NOT a bare "pass":
+    # it would redact "passenger", "passage" and "password_hint" alike, and a
+    # redaction list that fires on innocent arguments trains you to ignore it.
+    _SENSITIVE_ARG_MARKERS = (
+        "password", "passphrase", "passcode", "token", "secret", "key", "api",
+        "credential", "pin", "seed", "mnemonic", "otp", "2fa",
+    )
+
     @staticmethod
     def _redact(args: dict[str, Any]) -> dict[str, Any]:
         out = {}
         for k, v in (args or {}).items():
-            if any(s in k.lower() for s in ("password", "token", "secret", "key", "api")):
+            if any(s in k.lower() for s in SafetyEngine._SENSITIVE_ARG_MARKERS):
                 out[k] = "***redacted***"
             elif isinstance(v, str) and len(v) > 400:
                 out[k] = v[:400] + "…"

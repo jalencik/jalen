@@ -64,6 +64,18 @@ CAPABILITIES = [
     ("log_weakness", "green", "what it cannot do"),
     ("review_weaknesses", "green", "read the weakness log"),
     ("play_on_youtube", "green", "play a real video"),
+    # Handing real work to a coding agent and being there when it finishes.
+    ("start_coding_job", "amber", "give Claude Code an hour-long job"),
+    ("review_coding_job", "green", "judge what the agent actually changed"),
+    ("list_coding_jobs", "green", "what is the agent working on"),
+    ("init_git_repo", "amber", "a baseline so the diff is checkable"),
+    ("open_in_vscode", "amber", "open a project in VS Code"),
+    # Jalen working on Jalen.
+    ("run_own_tests", "green", "test yourself"),
+    ("self_diagnose", "green", "diagnose yourself"),
+    ("own_health", "green", "are you alright"),
+    # Typing the vault passphrase instead of saying it aloud.
+    ("unlock_vault_prompt", "amber", "unlock without speaking the passphrase"),
 ]
 
 
@@ -91,6 +103,24 @@ SPOKEN = [
     ("close the youtube window", "close_browser_tab"),
     ("what tabs are open", "list_browser_tabs"),
     ("make the orb bigger", "jalen_orb_size"),
+    ("make yourself bigger", "jalen_orb_size"),
+    ("make yourself smaller", "jalen_orb_size"),
+    ("normal size", "jalen_orb_size"),
+    ("move yourself to the top left", "jalen_orb_move"),
+    ("put yourself in the middle", "jalen_orb_move"),
+    # Sizing the orb with his hands, which he asked for twice with a photo.
+    # Both directions are listed: the OFF phrase contains the ON phrase, so a
+    # rule reordering would silently leave him with a camera he cannot switch
+    # off by voice, and that is a capability going missing, not a threshold
+    # changing.
+    # "It is still not working on me." The camera view is the answer, and it
+    # has to be askable out loud rather than found in a script name.
+    # Jalen testing itself, which is the whole point of the self-control
+    # tools: the loop that used to need a person and a terminal.
+    ("test yourself", "run_own_tests"),
+    ("are you ok", "own_health"),
+    ("diagnose yourself", "self_diagnose"),
+    ("list coding jobs", "list_coding_jobs"),
     ("how fast was that", "jalen_timing"),
     ("what can't you do", "review_weaknesses"),
     ("open chrome", "open_target"),
@@ -126,6 +156,34 @@ def test_both_wake_models_are_configured():
 
 def test_the_orb_is_big_enough_to_see():
     assert int(CONFIG.get_path("ui.orb_size", 84)) >= 300
+
+
+def test_bare_size_words_do_not_hijack_a_follow_up():
+    """
+    Replaces the camera on/off ledger row, which went with the gesture.
+
+    The risk moved rather than disappeared. The follow-up window is open for
+    twelve seconds after every reply, so a rule matching a bare "smaller"
+    would swallow an answer meant for something else entirely. "orb" or
+    "yourself" is required, and this is the row that notices if that ever
+    gets relaxed.
+    """
+    r = IntentRouter(CONFIG)
+    for bare in ("bigger", "smaller", "normal", "huge"):
+        hit = r.route(bare)
+        assert hit is None or hit.tool != "jalen_orb_size", (
+            f"a bare {bare!r} now resizes the orb - it will eat follow-ups"
+        )
+    assert r.route("make yourself bigger").tool == "jalen_orb_size"
+
+
+def test_the_camera_is_not_armed_by_default():
+    """
+    A webcam that switches itself on because a shipped config said so is not
+    a feature anyone asked for. If this ever flips to true, it was an
+    accident.
+    """
+    assert CONFIG.get_path("ui.hand_gestures.enabled", False) is False
 
 
 def test_the_handoff_jargon_is_in_the_prompt():

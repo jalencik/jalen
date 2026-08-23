@@ -39,9 +39,33 @@ _cache: dict[str, str] = {}
 
 
 def _find() -> Path | None:
+    """
+    Locate the writing-voice guide, in order of authority.
+
+    Three sources, and the config one is what makes this usable by anyone
+    other than its author. The default search paths are where HIS skill is
+    installed; a second user has no my-voice skill and no reason to keep
+    their writing sample in a Claude skills folder. `personal.voice_guide`
+    in config/user.yaml points at any file they like — an essay, a folder of
+    old emails pasted together, anything that is actually their writing.
+    """
     override = os.getenv("JARVIS_VOICE_SKILL")
     if override and Path(override).is_file():
         return Path(override)
+
+    try:
+        from ..config import CONFIG
+
+        configured = CONFIG.get_path("personal.voice_guide", "") or ""
+    except Exception:
+        configured = ""
+    if configured:
+        # Expanded so it can be written as ~/writing.md or {home}/writing.md
+        # without a user having to know which one this project uses.
+        path = Path(str(configured)).expanduser()
+        if path.is_file():
+            return path
+
     for path in _SEARCH_PATHS:
         if path.is_file():
             return path
@@ -57,11 +81,16 @@ def voice_guide() -> str:
     """
     path = _find()
     if path is None:
+        # Names the fix, not just the failure. The original message listed
+        # three paths and stopped, which is only actionable if you already
+        # know a my-voice skill is a thing that exists — true for exactly one
+        # person.
         return (
-            "I couldn't find your my-voice skill. I looked in "
-            + ", ".join(str(p.parent) for p in _SEARCH_PATHS)
-            + ". Without it I'd be guessing at your voice, so tell me if "
-            "you'd rather I just write it plainly."
+            "I don't have a sample of your writing, so I'd be guessing at "
+            "your voice. Point me at one: put the path in config/user.yaml "
+            "under personal.voice_guide — any file that is genuinely your "
+            "writing will do, an essay or a few old emails. Until then, say "
+            "the word and I'll write it plainly instead of pretending."
         )
     key = str(path)
     if key not in _cache:
@@ -81,6 +110,10 @@ def voice_guide() -> str:
 
 
 _POST_FORMAT = Path(__file__).resolve().parent.parent.parent / "docs" / "community_post_format.md"
+
+# The handle written into the worked examples in that file. Replaced with
+# personal.channel_handle when a second user sets one — see below.
+DEFAULT_HANDLE = "@Iht_student"
 
 
 def community_post_guide() -> str:
@@ -105,6 +138,19 @@ def community_post_guide() -> str:
             f"I couldn't read the post format guide at {_POST_FORMAT} ({exc}). "
             "Tell me the layout you want and I'll follow it."
         )
+    # The sign-off handle belongs to whoever owns the channel, and the guide
+    # has it written into four worked examples. Substituted here rather than
+    # in the file so the examples stay readable as examples — a guide full of
+    # {placeholders} teaches the model to emit placeholders.
+    try:
+        from ..config import CONFIG
+
+        handle = CONFIG.get_path("personal.channel_handle", "") or ""
+    except Exception:
+        handle = ""
+    if handle and handle != DEFAULT_HANDLE:
+        body = body.replace(DEFAULT_HANDLE, handle)
+
     return (
         "This is the format for his channel. Follow the STRUCTURE exactly and "
         "vary the words. Output Telegram HTML — only the tags listed below are "

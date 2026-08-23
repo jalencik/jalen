@@ -39,6 +39,17 @@ PACKAGES = [
 
 
 def main() -> int:
+    # This console defaults to a legacy code page (cp1251 on this machine)
+    # and print() RAISES on a character it cannot encode rather than
+    # degrading. The dashes below are enough to do it, and a diagnostics tool
+    # that dies partway through is worse than no diagnostics — you get half a
+    # report and a traceback about the report, not about the problem.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     problems = 0
     print("\n=== Jalen diagnostics ===\n")
 
@@ -156,6 +167,10 @@ def main() -> int:
         print(f"{BAD}Config problem: {exc}")
         problems += 1
 
+    problems += _check_disk()
+    _check_manual_steps()
+    _check_last_exit()
+
     # NOT "python run.py": that advice fails twice over on Windows.
     # PowerShell refuses to run a script from the current folder without a
     # ".\" prefix, and bare "python" is a different install with none of
@@ -163,6 +178,102 @@ def main() -> int:
     print("\n" + ("All good — start it with:  .\\jalen.ps1" if problems == 0
                   else f"{problems} blocking problem(s) above."))
     return 1 if problems else 0
+
+
+def _check_disk() -> int:
+    """
+    Free space, as a blocking check.
+
+    Not a nicety. Found at 100% on this machine (70 MB free of 147 GB), and
+    a full disk breaks Jalen in ways that look like anything but a full
+    disk: sqlite cannot write the audit log, edge-tts cannot spool its mp3,
+    Whisper cannot write its temp file, and each of those surfaces as its
+    own confusing error. It is also the kind of thing that makes a process
+    die somewhere with no room to write down why.
+    """
+    import shutil
+
+    print("\nDisk")
+    try:
+        total, _used, free = shutil.disk_usage(str(ROOT))
+    except OSError as exc:
+        print(f"{WARN}couldn't read disk usage ({exc})")
+        return 0
+
+    gb = free / 1e9
+    if gb < 1.0:
+        print(f"{BAD}{gb:.2f} GB free of {total / 1e9:.0f} GB — this WILL break things.")
+        print("      A full disk stops the audit log, speech synthesis and")
+        print("      transcription, each with its own misleading error.")
+        print("      Free some up:  say \"Jalen, what's eating my disk\"")
+        print("                     .venv\\Scripts\\python.exe -m pip cache purge")
+        return 1
+    if gb < 5.0:
+        print(f"{WARN}{gb:.2f} GB free of {total / 1e9:.0f} GB — getting tight.")
+        return 0
+    print(f"{OK}{gb:.1f} GB free of {total / 1e9:.0f} GB")
+    return 0
+
+
+def _check_manual_steps() -> None:
+    """
+    The things only HE can do, and the optional extras.
+
+    These are not failures — Jalen runs fine without every one of them — so
+    none of them counts toward `problems`. They are here because the
+    alternative is a handoff document, and a handoff document is read once.
+    """
+    print("\nSetup still outstanding")
+
+    from jarvis.tools import vault
+
+    if vault.VAULT_PATH.exists():
+        print(f"{OK}credentials vault created")
+    else:
+        print(f"{WARN}no vault yet — fill_credential cannot work without one.")
+        print("      YOU have to run this one; it asks for a passphrase that")
+        print("      must never be typed by anyone but you:")
+        print("      .venv\\Scripts\\python.exe scripts\\vault_setup.py")
+
+    real_takes = len(list((ROOT / "data" / "wake_training" / "positive").glob("real_*.wav")))
+    if real_takes >= 20:
+        print(f"{OK}wake word trained on {real_takes} recordings of your voice")
+    else:
+        print(f"{WARN}the wake model has never heard YOUR voice ({real_takes} real takes).")
+        print("      It was trained on synthetic speech, and accent is exactly")
+        print("      what these models are sensitive to. If it misses you:")
+        print("      .venv\\Scripts\\python.exe scripts\\record_wake_samples.py")
+
+    print(f'{OK}orb resizing: Ctrl+Alt+B / Ctrl+Alt+S, or "make yourself bigger"')
+
+    record = ROOT / "data" / "rehearsal.md"
+    if record.exists():
+        passed = record.read_text(encoding="utf-8").count("- [x]")
+        print(f"{OK}{passed} of 6 end-to-end flows rehearsed with you")
+    else:
+        print(f"{WARN}six flows have never been driven end to end with you present:")
+        print("      .venv\\Scripts\\python.exe scripts\\rehearse.py")
+
+
+def _check_last_exit() -> None:
+    """
+    Did the previous run stop for a reason, or just vanish?
+
+    A vanished run is the 21 August bug (jarvis/crashlog.py). Surfacing it
+    here means the answer is one command away instead of a forensic exercise.
+    """
+    from jarvis import crashlog
+
+    record = crashlog.previous_exit()
+    if record is None:
+        return
+    print("\nLast run")
+    if record.get("state") == "running":
+        print(f"{WARN}ended WITHOUT shutting down — pid {record.get('pid')}, "
+              f"started {record.get('started_iso')}.")
+        print("      Full detail:  python run.py --why")
+    else:
+        print(f"{OK}stopped cleanly: {record.get('reason')}")
 
 
 if __name__ == "__main__":

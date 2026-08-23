@@ -27,6 +27,28 @@ decline, marketing, or a LinkedIn notification. He had to sit through that
 being described. Sorting on the way past means the answer starts with the
 two that matter instead of the twenty-three that do not — and the
 uninteresting ones are still counted, never silently dropped.
+
+AND WHY THAT SORTING NEARLY RUINED IT — `about`
+------------------------------------------------
+23 August, in his words: "I said you to sort out my emails about machine
+learning committee, you fucking son of a bitch." He was right, and the
+cause was this file rather than the model.
+
+The buckets answer ONE question — "is there an opportunity in here" — and
+`_PROMISING` matches research|lab|collaborat|opportunit, which is exactly
+his Eco Pulse research outreach. So when he asked for emails about his
+machine-learning COMMUNITY, the tool handed back a list already sorted
+under a heading that said WORTH A LOOK, full of research mail, and the
+brain sorted what it had been given. Jalen's own account afterwards:
+"I sorted your Eco Pulse research outreach because that's what filled the
+inbox."
+
+A tool that pre-judges relevance is answering a question the caller did not
+ask, and its answer is the one that gets used. So `scan_inbox` now takes
+`about` — what he is ACTUALLY looking for — and buckets against that
+instead. With no `about`, the generic sort remains, and the reply says out
+loud that it is generic, so it cannot be mistaken for an answer to a
+specific question again.
 """
 from __future__ import annotations
 
@@ -91,12 +113,51 @@ def _classify(sender: str, subject: str, snippet: str) -> str:
     return "other"
 
 
-def scan_inbox(query: str = "", max_emails: int = PAGE_SIZE) -> str:
+# Words too common to carry meaning in a relevance test. Without this, "the"
+# and "about" in his request match every email ever sent.
+_STOPWORDS = frozenset("""
+a an the and or but of to in on at for with from about into over after
+my me i you your his her its our their this that these those is are was
+were be been am do does did have has had can could would should will
+all any some one two new please just want need get got go going
+email emails mail message messages sort sorted find look read
+""".split())
+
+
+def _terms(about: str) -> list[str]:
+    """The words worth matching on, from what he actually said."""
+    words = re.findall(r"[a-z0-9]{3,}", (about or "").lower())
+    return [w for w in words if w not in _STOPWORDS]
+
+
+def _relevance(terms: list[str], sender: str, subject: str, snippet: str) -> int:
+    """
+    How many of his words this message actually contains.
+
+    Deliberately a plain count, not a score with weights. A weighted
+    relevance function is a thing nobody can debug from a transcript, and
+    the honest answer here is "it mentioned three of the four words you
+    used", which a person can check.
+    """
+    haystack = f"{sender} {subject} {snippet}".lower()
+    return sum(1 for t in terms if t in haystack)
+
+
+def scan_inbox(query: str = "", max_emails: int = PAGE_SIZE,
+               about: str = "") -> str:
     """
     Go through a lot of mail in ONE call and sort it — GREEN, read-only.
 
     `query` takes Gmail's own syntax ("after:2026/08/10", "from:edu"). Empty
     scans the inbox.
+
+    `about` IS THE IMPORTANT ONE. Pass what he actually asked for, in his
+    words — "my machine learning community", "the research lab replies" —
+    and the buckets become "matches what he asked" versus "everything else".
+
+    Without it the sort is generic: it answers "is there an opportunity in
+    here", which is a different question and has already been mistaken for
+    an answer to a specific one. See the module docstring.
     """
     from .gmail import _enabled, _header, _readable, gmail_service
 
@@ -129,6 +190,7 @@ def scan_inbox(query: str = "", max_emails: int = PAGE_SIZE) -> str:
     if not ids:
         return f"No messages match {query or 'in:inbox'!r}."
 
+    terms = _terms(about)
     buckets: dict[str, list[str]] = {"promising": [], "other": [], "noise": []}
     failed = 0
     for entry in ids:
@@ -152,18 +214,37 @@ def scan_inbox(query: str = "", max_emails: int = PAGE_SIZE) -> str:
         subject = _readable(_header(payload, "Subject")) or "(no subject)"
         date = _readable(_header(payload, "Date"))[:16]
         snippet = _readable(msg.get("snippet") or "")[:SNIPPET_CHARS]
-        buckets[_classify(sender, subject, snippet)].append(
-            f"  [{date}] {sender} — {subject}\n      {snippet}  [id: {entry['id']}]"
-        )
+        row = f"  [{date}] {sender} — {subject}\n      {snippet}  [id: {entry['id']}]"
+        if terms:
+            # HIS question decides the buckets, not the tool's heuristic.
+            # Noise still wins: a LinkedIn digest that happens to contain
+            # his words is still a LinkedIn digest.
+            if _NOISE.search(f"{sender} {subject}"):
+                buckets["noise"].append(row)
+            elif _relevance(terms, sender, subject, snippet):
+                buckets["promising"].append(row)
+            else:
+                buckets["other"].append(row)
+        else:
+            buckets[_classify(sender, subject, snippet)].append(row)
 
     total = sum(len(v) for v in buckets.values())
+    # The heading has to say WHICH question the sort answers. "WORTH A LOOK"
+    # reads as an answer to whatever was just asked, and that is exactly how
+    # a generic opportunity sort got mistaken for a machine-learning-community
+    # sort.
+    hit_heading = (
+        f"MATCHES WHAT HE ASKED FOR ({about.strip()})" if terms
+        else "MIGHT BE AN OPPORTUNITY (generic sort - see the warning below)"
+    )
     lines = [
         f"Scanned {total} message(s) matching {query or 'in:inbox'!r}.",
-        f"{len(buckets['promising'])} worth a look, "
-        f"{len(buckets['other'])} ordinary, {len(buckets['noise'])} automated.",
+        (f"{len(buckets['promising'])} match {about.strip()!r}, " if terms
+         else f"{len(buckets['promising'])} might be an opportunity, ")
+        + f"{len(buckets['other'])} do not, {len(buckets['noise'])} automated.",
     ]
     if buckets["promising"]:
-        lines += ["", "WORTH A LOOK:"] + buckets["promising"]
+        lines += ["", hit_heading + ":"] + buckets["promising"]
     if buckets["other"]:
         lines += ["", "EVERYTHING ELSE:"] + buckets["other"]
     if buckets["noise"]:
@@ -176,10 +257,22 @@ def scan_inbox(query: str = "", max_emails: int = PAGE_SIZE) -> str:
         lines.append(
             f"\nCOULD NOT READ {failed} of them — so this is not the whole picture."
         )
-    lines.append(
-        "\nThe sorting is a guess from sender and subject. Read anything that "
-        "looks close with read_email before telling him it's an opportunity."
-    )
+    if terms:
+        lines.append(
+            f"\nThe sort is a keyword guess against {about.strip()!r}, from "
+            "sender and subject only. Open anything close with read_email "
+            "before telling him what it says."
+        )
+    else:
+        lines.append(
+            "\nWARNING: this sort is GENERIC. It answers 'is there an "
+            "opportunity in here' and NOTHING ELSE. If he asked about a "
+            "specific topic, do NOT present these buckets as the answer — "
+            "call scan_inbox again with `about` set to what he actually "
+            "said, or filter these rows yourself. Presenting this sort as an "
+            "answer to a specific question is a mistake that has already "
+            "been made once."
+        )
     return "\n".join(lines)
 
 

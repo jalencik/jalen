@@ -44,6 +44,24 @@ def test_the_prompt_survives_the_clipboard_exactly():
         user32.CloseClipboard()
 
 
+
+# A brief that passes the quality gate, for the tests below that are about
+# LAUNCH MECHANICS rather than brief quality. The gate itself is tested in
+# tests/test_agents.py; these need to get past it to reach the thing they
+# are actually checking.
+GOOD_BRIEF = """\
+CONTEXT: a small Python project on this machine that currently has no
+retry logic anywhere in it.
+OBJECTIVE: add a retry helper.
+WHAT SUCCESS LOOKS LIKE: a function retry(fn, times=3) that returns the
+result, re-raises after the last attempt, and never sleeps more than a
+second in total.
+CONSTRAINTS: standard library only, do not add a __main__ block, do not
+change any existing file.
+IF ANYTHING IS UNCLEAR: ask rather than guess.
+OUTPUT FORMAT: the function and nothing else.
+"""
+
 @pytest.mark.parametrize("empty", ["", "   ", None])
 def test_an_empty_brief_is_refused_not_launched(empty):
     """
@@ -67,7 +85,7 @@ def test_the_clipboard_is_loaded_before_the_app_is_launched(monkeypatch):
     monkeypatch.setattr(handoff, "_paste_into_foreground", lambda: order.append("paste") or True)
     monkeypatch.setattr(handoff.time, "sleep", lambda s: None)
 
-    handoff.hand_off_to_cowork("Objective: do the thing.")
+    handoff.hand_off_to_cowork(GOOD_BRIEF)
     assert order == ["clipboard", "launch", "paste"]
 
 
@@ -82,7 +100,7 @@ def test_a_failed_paste_still_tells_him_where_the_brief_is(monkeypatch):
     monkeypatch.setattr(handoff, "_paste_into_foreground", lambda: False)
     monkeypatch.setattr(handoff.time, "sleep", lambda s: None)
 
-    reply = handoff.hand_off_to_cowork("Objective: do the thing.")
+    reply = handoff.hand_off_to_cowork(GOOD_BRIEF)
     assert "clipboard" in reply.lower()
     assert "ctrl+v" in reply.lower()
 
@@ -92,7 +110,7 @@ def test_a_failed_launch_is_reported_as_a_failure(monkeypatch):
     monkeypatch.setattr(handoff, "_launch_desktop_app", lambda: False)
     monkeypatch.setattr(handoff.time, "sleep", lambda s: None)
 
-    reply = handoff.hand_off_to_cowork("Objective: do the thing.")
+    reply = handoff.hand_off_to_cowork(GOOD_BRIEF)
     assert "couldn't start" in reply.lower()
 
 
@@ -111,7 +129,7 @@ def test_cowork_never_presses_send(monkeypatch):
         return True
 
     monkeypatch.setattr(handoff, "_paste_into_foreground", record)
-    handoff.hand_off_to_cowork("Objective: do the thing.")
+    handoff.hand_off_to_cowork(GOOD_BRIEF)
     assert keys == ["ctrl+v"], "something other than a paste was sent"
 
 
@@ -131,9 +149,9 @@ def test_code_goes_through_the_argv_path_not_a_paste(monkeypatch):
         coding, "ask_claude_code",
         lambda prompt, folder="", agent="": seen.update(prompt=prompt, folder=folder) or "started",
     )
-    reply = handoff.hand_off_to_code("Objective: fix the failing tests.", folder="repo")
+    reply = handoff.hand_off_to_code(GOOD_BRIEF, folder="repo")
     assert reply == "started"
-    assert seen["prompt"] == "Objective: fix the failing tests."
+    assert seen["prompt"] == GOOD_BRIEF.strip()
     assert seen["folder"] == "repo"
 
 

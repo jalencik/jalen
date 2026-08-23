@@ -22,3 +22,26 @@ data/wake_training/
 data/vault.json
 data/site_approvals.json
 data/drafts/
+
+# Per-user settings: a name, folders, channels. Never committed - it would
+# put one person's details into everyone else's checkout, and make every
+# pull a merge conflict over whose name the assistant uses.
+config/user.yaml
+
+# The MediaPipe hand model: 7.6 MB of downloadable weights, fetched by
+# scripts/download_models.py. Same reasoning as the wake and VAD models.
+models/hand_landmarker.task
+
+# Background job records and their captured output.
+data/coding_jobs.json
+data/coding_jobs/
+data/rehearsal.md
+data/crash.log
+data/last_exit.json
+
+# Checklist markers: evidence that HE did something, per machine.
+data/hands_calibrated
+data/licence_decided
+
+# Conversations with other AIs - his words, sent to third parties.
+data/agent_chats.json

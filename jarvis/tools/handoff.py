@@ -122,6 +122,42 @@ def _paste_into_foreground() -> bool:
         return False
 
 
+def brief_or_problem(brief: str, destination: str) -> str | None:
+    """
+    None if this brief is good enough to send; otherwise the sentence to say.
+
+    THE SAME GATE THE OTHER-AI HANDOFF USES, deliberately. He complained
+    about both in the same breath:
+
+        "it still has major flaws handing tasks off, in opening tasks to
+         cowork and claude code desktop app as well man, what a shame man, it
+         should have given a master prompt like an prompt engineer with at
+         least 10 years of experience"
+
+    The tool descriptions already said "a complete, self-contained brief".
+    Descriptions are advice, and advice gets followed about a third of the
+    time. This is a refusal, and a refusal that names the missing part is the
+    only mechanism that reliably produces the quality he is asking for.
+
+    One standard for every destination — Gemini, ChatGPT, Claude Code, the
+    desktop app. A brief good enough for one is good enough for all of them,
+    and having two bars would just mean the lower one gets used.
+    """
+    from .agents import _brief_problems, MASTER_PROMPT_STANDARD  # noqa: F401
+
+    problems = _brief_problems(brief)
+    if not problems:
+        return None
+    return (
+        f"That brief isn't ready for {destination} — "
+        + "; ".join(problems)
+        + ". Call master_prompt_guide and write it properly: context, "
+        "objective, what success looks like, constraints, what to do if "
+        "something is unclear, and the output format. I'd rather ask you for "
+        "thirty more seconds than start an agent on a guess."
+    )
+
+
 def hand_off_to_cowork(prompt: str) -> str:
     """
     Open the Claude desktop app with a prepared prompt on the clipboard.
@@ -131,6 +167,8 @@ def hand_off_to_cowork(prompt: str) -> str:
     text = (prompt or "").strip()
     if not text:
         return "Tell me what the task is and I'll write it up for Cowork."
+    if problem := brief_or_problem(text, "the Claude desktop app"):
+        return problem
     if not IS_WINDOWS:
         return "The Claude desktop app handoff is Windows-only."
 
@@ -176,6 +214,11 @@ def hand_off_to_code(prompt: str, folder: str = "") -> str:
     text = (prompt or "").strip()
     if not text:
         return "Tell me what the task is and I'll write it up for Claude Code."
+    # After the empty check: "you said nothing" is a different and more basic
+    # problem than "what you said is too thin", and answering the wrong one
+    # is confusing.
+    if problem := brief_or_problem(text, "Claude Code"):
+        return problem
 
     set_clipboard(text)
     from .coding import ask_claude_code

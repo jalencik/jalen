@@ -18,9 +18,11 @@ from __future__ import annotations
 import asyncio
 import queue
 import re
+import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -33,6 +35,7 @@ from .audio.wake import WakeWord
 from .audit import AuditLog
 from .brain.router import IntentRouter
 from .config import CONFIG, SECRETS
+from . import crashlog
 from . import runtime
 from .safety import SafetyEngine, Tier
 from .timing import TimingLog, TurnTimer
@@ -117,14 +120,39 @@ MAX_IN_FLIGHT_TURNS = 2
 # feels unacknowledged, and 10x cheaper than checking on every frame.
 SIGNAL_POLL_FRAMES = 10
 
+# Mic frames between checks for a finished background coding job. At 32ms
+# that is about five seconds — fast enough that "it just finished" is true,
+# slow enough to be a stat() every 150 frames rather than every one.
+JOB_POLL_FRAMES = 150
+
 
 class Jalen:
-    def __init__(self, cfg=CONFIG, secrets=SECRETS) -> None:
+    def __init__(self, cfg=CONFIG, secrets=SECRETS, mode: str = "voice") -> None:
         self.cfg = cfg
         self.secrets = secrets
+        self.mode = mode
         self.session_id = uuid.uuid4().hex[:12]
 
         self.audit = AuditLog(cfg, self.session_id)
+
+        # Before anything overwrites it: how did the LAST run end?
+        #
+        # On 21 August one instance vanished 15 seconds in and left nothing
+        # in the audit log to say so — see jarvis/crashlog.py. The record is
+        # read here, reported into the audit if it says the previous process
+        # never shut down, and only then reclaimed for this run. A clean
+        # previous stop says nothing at all: a line on every single startup
+        # is noise, and noise is what stops anyone reading the file.
+        previous = crashlog.previous_exit()
+        note = crashlog.describe_previous_exit(previous)
+        if note:
+            self.audit.write("system", summary=note, outcome="failed",
+                             detail={"previous_exit": previous})
+        crashlog.mark_running(self.session_id, mode)
+        crashlog.install(
+            on_crash=lambda where, exc: self.audit.error(f"crash.{where}", exc)
+        )
+
         self.safety = SafetyEngine(cfg)
         self.router = IntentRouter(cfg)
 
@@ -136,7 +164,6 @@ class Jalen:
         self.speaker = Speaker(cfg)
         self.orb = Orb(cfg)
         self.transcript = TranscriptWindow(cfg)
-
         self.brain = None  # started by prewarm(), or lazily on first real question
         self._brain_lock = asyncio.Lock()
 
@@ -156,6 +183,10 @@ class Jalen:
         self.running = threading.Event()
         self.kill = threading.Event()
         self._quit = threading.Event()   # "quit jalen" / --stop: exit the loop
+        # Why the mic loop ended, set by run() the moment it knows. shutdown()
+        # falls back to it so the audit line names the actual cause rather
+        # than the generic "shutdown" its caller passes.
+        self._exit_reason: str | None = None
         self.paused = False              # "pause": stay alive, stop listening
         self._restart_requested = False  # run.py re-execs when this is set
         self._turn_lock = threading.Lock()
@@ -181,7 +212,10 @@ class Jalen:
         self.kill_phrases = [p.lower() for p in cfg.get_path("safety.kill_phrases", [])]
         self.address = cfg.get_path("identity.address_user_as", "")
 
-        self.speaker.on_state = self.orb.set_state
+        # Not orb.set_state directly: the speaker is one input among
+        # several. See _refresh_orb.
+        self._orb_listening = False
+        self.speaker.on_state = self._on_speaker_state
 
         # Let the brain ask him a question and wait for the answer. The
         # tool layer gets exactly this one capability rather than a
@@ -501,6 +535,16 @@ class Jalen:
         obstacle is the mute; paused, it's the pause; idle, it's that nothing
         is listening yet. One key resolves whichever one is in the way.
         """
+        # Resize keys. They return False: pressing Ctrl+Alt+B means "make
+        # the orb bigger", not "and now listen to me" — turning a resize
+        # into a listening window would have the orb pop open every time he
+        # adjusted its size.
+        if signal == "orb-bigger":
+            self._resize_orb("bigger")
+            return False
+        if signal == "orb-smaller":
+            self._resize_orb("smaller")
+            return False
         if signal == "mute":
             self.muted = True
             self.orb.set_state("muted")
@@ -579,9 +623,15 @@ class Jalen:
             ).start()
             return None
         if tool == "jalen_orb_size":
-            delta = int(intent.args.get("delta", 0))
-            self.orb.resize_by(delta)
-            return "Bigger." if delta > 0 else "Smaller."
+            # Local, not a REGISTRY tool: it needs the orb object this
+            # process owns, it must work with the network down, and the
+            # brain has no business round-tripping a window resize.
+            return self._resize_orb(
+                str(intent.args.get("change", "") or ""),
+                intent.args.get("delta"),
+            )
+        if tool == "jalen_orb_move":
+            return self._move_orb(str(intent.args.get("position", "") or ""))
         if tool == "jalen_timing":
             # Deliberately reports the PREVIOUS turn, not this one: this
             # turn has not finished, and its own first_audio mark is the
@@ -960,7 +1010,13 @@ class Jalen:
         follow_up_until = 0.0
         follow_up_s = float(self.cfg.get_path("conversation.follow_up_timeout_s", 12))
         barge_in = bool(self.cfg.get_path("conversation.barge_in", True))
-        barge_threshold = float(self.cfg.get_path("conversation.barge_in_threshold", 0.6))
+        barge_threshold = float(self.cfg.get_path("conversation.barge_in_threshold", 0.75))
+        barge_grace_s = float(self.cfg.get_path("conversation.barge_in_grace_s", 1.2))
+        barge_frames = int(self.cfg.get_path("conversation.barge_in_frames", 6))
+        barge_run = 0                    # consecutive frames over the threshold
+        # Barge-in has already fired for the CURRENT playback. Re-armed when
+        # the speaker actually falls silent - see the latch in the loop.
+        barge_fired = False
 
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
 
@@ -992,7 +1048,10 @@ class Jalen:
             if turn_id == self._turn_seq:
                 if self.cfg.get_path("conversation.follow_up", True):
                     follow_up_until = time.monotonic() + follow_up_s
-                self.orb.set_state("muted" if self.muted else "idle")
+                # Recomputed, not assumed: another turn may still be working,
+                # and telling him it is idle while it is not is the same lie
+                # in the other direction.
+                self._refresh_orb()
 
         self.prewarm()
 
@@ -1003,7 +1062,17 @@ class Jalen:
                 # check it here, in the loop that owns the microphone, so the
                 # device and the audit DB get released properly — a hard kill
                 # from outside leaves the mic held.
-                if self._quit.is_set() or runtime.stop_requested():
+                #
+                # The two conditions are recorded separately even though they
+                # do the same thing. "He said quit" and "something outside
+                # this process asked us to stop" are different events, and
+                # telling them apart afterwards is the whole point of
+                # _exit_reason — see jarvis/crashlog.py.
+                if self._quit.is_set():
+                    self._exit_reason = "quit-requested"
+                    break
+                if runtime.stop_requested():
+                    self._exit_reason = "stop-file"
                     break
 
                 # The global hotkey (scripts/hotkeys.py) is a separate
@@ -1012,6 +1081,19 @@ class Jalen:
                 # that is a stat() call 31 times a second forever, and a
                 # third of a second is imperceptible for a key press.
                 frames_seen += 1
+
+                # "The agent might think for an hour... as soon as it has
+                # finished, it should take the lead." Without this, a job
+                # that finished an hour ago is only noticed when he happens
+                # to ask — which is the whole thing he was complaining about.
+                #
+                # Polled on the mic loop rather than pushed from the worker
+                # thread on purpose: this loop already owns speech, so an
+                # announcement made from here cannot collide with a turn in
+                # flight. Every ~5s at 32ms a frame.
+                if frames_seen % JOB_POLL_FRAMES == 0:
+                    self._announce_finished_jobs()
+
                 if frames_seen % SIGNAL_POLL_FRAMES == 0:
                     signal = runtime.take_signal()
                     if signal is not None and self._apply_signal(signal):
@@ -1045,31 +1127,94 @@ class Jalen:
                     self.orb.set_state("idle")
                     continue
 
-                # barge-in: you talking beats Jalen talking
+                # barge-in: you talking beats Jalen talking.
+                #
+                # THIS IS WHERE JALEN WAS INTERRUPTING HIMSELF. Measured in
+                # data/audit.jsonl: 17 replies ended far earlier than their
+                # text needed, and six of them stopped at 747-764ms — the
+                # same instant every time. Nothing random clusters like that.
+                # What happens ~750ms into playback is Jalen's own voice
+                # arriving back through the microphone, the VAD crossing the
+                # threshold, and stop() firing on the first frame over it.
+                #
+                # There is no acoustic echo cancellation here, so the
+                # microphone genuinely cannot tell his voice from the
+                # speakers. Three cheap defences instead, and they compose:
+                #
+                #   GRACE      ignore the opening of playback entirely. The
+                #              echo takes a moment to build, and nobody
+                #              interrupts before the first word anyway.
+                #   SUSTAINED  require several CONSECUTIVE frames, not one.
+                #              A single 32ms blip must not kill a 60-second
+                #              answer, and that is exactly what it was doing.
+                #   THRESHOLD  higher while speaking than while listening.
+                #
+                # Real speech over the top clears all three in about a fifth
+                # of a second, which still feels immediate.
+                if not self.speaker.speaking:
+                    # Playback is over, so the latch below re-arms for the
+                    # next reply.
+                    barge_fired = False
+
                 if barge_in and self.speaker.speaking:
+                    if self.speaker.speaking_for() < barge_grace_s:
+                        barge_run = 0
+                        continue
                     if self.vad.probability(frame) >= barge_threshold:
-                        self.speaker.stop()
-                        listening = True
-                        # NOT wake_initiated. This used to be True, reasoning
-                        # that he had "talked over it on purpose" — but
-                        # barge-in fires on any SOUND above the threshold, not
-                        # on a decision to speak: a cough, the keyboard, the
-                        # television, or Jalen's own voice coming back through
-                        # the microphone. When nothing coherent followed, the
-                        # window closed and announced "I didn't catch that" at
-                        # a person who had said nothing.
-                        #
-                        # Seen in the log on 21 Aug: a 20-second reply
-                        # finished and "I didn't catch that" was logged in the
-                        # same second. He described it as being told mid-task
-                        # that it didn't catch the task.
-                        #
-                        # Stopping the speech on a noise is still right —
-                        # cheap and instantly reversible. Announcing a failure
-                        # to understand something nobody said is not.
-                        wake_initiated = False
-                        self.orb.set_state("listening")
-                        self.collector._reset()
+                        barge_run += 1
+                    else:
+                        barge_run = 0
+                    if barge_run < barge_frames:
+                        continue
+                    barge_run = 0
+
+                    # ONCE PER REPLY, not once per six frames.
+                    #
+                    # Seen live on 22 August: barge-in fired 22 times in
+                    # seven seconds, at exactly 192 ms intervals — which is
+                    # barge_frames x frame_ms, i.e. the moment the counter
+                    # refilled. `_speaking` stays set while the stream waits
+                    # for the model to produce the NEXT sentence, so between
+                    # sentences the microphone is open, nothing is playing,
+                    # and every continuous noise re-triggered the whole
+                    # branch: 22 calls to stop(), 22 audit lines, and the
+                    # collector reset out from under itself each time.
+                    #
+                    # The first firing already did everything that matters.
+                    # This latch makes the rest no-ops until playback
+                    # genuinely ends.
+                    if barge_fired:
+                        continue
+                    barge_fired = True
+                    self.audit.write(
+                        "system",
+                        summary=(
+                            f"barge-in stopped playback after "
+                            f"{self.speaker.speaking_for():.1f}s"
+                        ),
+                    )
+                    self.speaker.stop()
+                    listening = True
+                    # NOT wake_initiated. This used to be True, reasoning
+                    # that he had "talked over it on purpose" — but
+                    # barge-in fires on any SOUND above the threshold, not
+                    # on a decision to speak: a cough, the keyboard, the
+                    # television, or Jalen's own voice coming back through
+                    # the microphone. When nothing coherent followed, the
+                    # window closed and announced "I didn't catch that" at
+                    # a person who had said nothing.
+                    #
+                    # Seen in the log on 21 Aug: a 20-second reply
+                    # finished and "I didn't catch that" was logged in the
+                    # same second. He described it as being told mid-task
+                    # that it didn't catch the task.
+                    #
+                    # Stopping the speech on a noise is still right —
+                    # cheap and instantly reversible. Announcing a failure
+                    # to understand something nobody said is not.
+                    wake_initiated = False
+                    self.orb.set_state("listening")
+                    self.collector._reset()
                     continue
 
                 if not listening:
@@ -1085,7 +1230,11 @@ class Jalen:
                     if (in_follow_up or awaiting_reply) and self.vad.probability(frame) >= self.vad.threshold:
                         listening = True
                         wake_initiated = False   # a sound opened this, not him
-                        self.orb.set_state("listening")
+                        # _refresh_orb, NOT set_state("listening"). This is
+                        # the line he saw: a noise during the follow-up window
+                        # painted the orb blue while a turn was still working,
+                        # for as long as the turn took.
+                        self._refresh_orb(listening=True)
                     elif self.wake.feed(frame):
                         listening = True
                         wake_initiated = True
@@ -1207,7 +1356,7 @@ class Jalen:
                     with self._turn_lock:
                         self._active_turns.discard(turn_id)
                     self.say("I'm still on the last one — give me a second.")
-                    self.orb.set_state("thinking")
+                    self._refresh_orb()
                     continue
                 # The speaker's first-audio callback needs to find THIS
                 # turn's timer, so publish it before the thread starts.
@@ -1219,16 +1368,252 @@ class Jalen:
                     name=f"jalen-turn-{turn_id}",
                 ).start()
 
-    def shutdown(self) -> None:
+        # Falling out of the loop without a reason means the mic generator
+        # itself ended: Microphone.frames() stops yielding the moment
+        # _running is cleared, and does it by returning normally. Before this
+        # line that was indistinguishable from a clean quit — the loop simply
+        # ended and run() returned, with the same (empty) evidence either
+        # way. It is now a named cause, because "the audio device went away
+        # underneath us" and "he said quit" deserve different answers.
+        if self._exit_reason is None:
+            self._exit_reason = "mic-stream-ended"
+        self.audit.write(
+            "system",
+            summary=f"mic loop ended: {self._exit_reason}",
+            detail={"frames_seen": frames_seen, "dropped_frames": self.mic.dropped},
+        )
+
+    # ------------------------------------------------------------------ orb
+    #
+    # ONE PLACE DECIDES WHAT THE ORB SHOWS.
+    #
+    # He reported it plainly: "it is saying I'm on the last one, but the orb
+    # is orbiting like in blue... should not it have been green while it is
+    # working?" He was right, and the cause was that six different places
+    # called orb.set_state() and the last one to fire won.
+    #
+    # In the log: a turn is dispatched, the orb is set to `thinking`, and
+    # then ANY sound in the room takes the follow-up branch, sets
+    # `listening`, and the orb sits blue for the three minutes the brain
+    # spends working. The state he could see had nothing to do with what it
+    # was doing.
+    #
+    # So the states are now a PRIORITY ORDER, computed from what is actually
+    # true, and every caller asks for a refresh rather than asserting a
+    # colour. The order is the one he described:
+    #
+    #     muted/paused  it is switched off
+    #     speaking      it is talking to you           GREEN
+    #     working       a turn is in flight            YELLOW
+    #     listening     a window is open for you       BLUE
+    #     idle          nothing is happening           TEAL
+    #
+    # "Working beats listening" is the whole fix: while it is thinking, a
+    # noise in the room must not make it look like it is waiting for you.
+    ORB_PRIORITY = ("muted", "speaking", "thinking", "listening", "idle")
+
+    def _refresh_orb(self, listening: bool = False) -> None:
+        """Recompute what the orb should show from what is actually true."""
+        if self.muted or self.paused:
+            state = "muted"
+        elif self.speaker.speaking:
+            state = "speaking"
+        elif self._active_turns:
+            state = "thinking"
+        elif listening or self._awaiting_reply or self._awaiting_confirmation:
+            state = "listening"
+        else:
+            state = "idle"
+        self._orb_listening = listening
+        self.orb.set_state(state)
+
+    # --------------------------------------------------------- orb controls
+    #
+    # These replaced hand-gesture resizing, which was removed. The gesture
+    # needed a webcam held open for a feature used a few times a month, cost
+    # a ~200 MB dependency, and — the part that settled it — never once
+    # worked for the person who asked for it. A key combination and a spoken
+    # sentence do the same job, work with the camera unplugged, and cannot
+    # be triggered by accident while you gesture at somebody in a call.
+
+    # What each word means, in pixels of orb.
+    ORB_STEP = 40
+    ORB_PRESETS = {
+        "normal": 84, "default": 84, "small": 140, "medium": 260,
+        "big": 420, "large": 420, "huge": 640, "tiny": 120,
+    }
+
+    ORB_CORNERS = {
+        "top-left": ("top left", "upper left", "top-left"),
+        "top-right": ("top right", "upper right", "top-right"),
+        "bottom-left": ("bottom left", "lower left", "bottom-left"),
+        "bottom-right": ("bottom right", "lower right", "bottom-right"),
+        "center": ("center", "centre", "middle"),
+    }
+
+    def _resize_orb(self, change: str, delta: object = None) -> str:
+        """
+        "bigger" / "smaller" / "normal size" / an explicit delta.
+
+        Returns what it did, in the words he used, because a resize is the
+        one command whose result he can already see — a long confirmation
+        would be read out over a change he has watched happen.
+        """
+        word = (change or "").strip().lower()
+
+        if delta is not None and not word:
+            try:
+                step = int(delta)   # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                step = 0
+            if step:
+                self.orb.resize_by(step)
+                return "Bigger." if step > 0 else "Smaller."
+
+        for name, size in self.ORB_PRESETS.items():
+            if name in word:
+                self.orb.resize_to(size)
+                return f"{name.capitalize()} size."
+
+        if any(w in word for w in ("bigger", "larger", "grow", "up", "increase")):
+            self.orb.resize_by(self.ORB_STEP)
+            return "Bigger."
+        if any(w in word for w in ("smaller", "shrink", "down", "decrease", "less")):
+            self.orb.resize_by(-self.ORB_STEP)
+            return "Smaller."
+        return "Bigger or smaller? I can also do normal, big, or huge."
+
+    def _move_orb(self, position: str) -> str:
+        """Put the orb in a named corner."""
+        want = (position or "").strip().lower().replace("_", " ")
+        for canonical, spellings in self.ORB_CORNERS.items():
+            if any(spelling in want for spelling in spellings):
+                self.orb.move_to(canonical)
+                return f"Moved to the {canonical.replace('-', ' ')}."
+        return ("Where to? Top left, top right, bottom left, bottom right, "
+                "or the middle.")
+
+    def _on_speaker_state(self, state: str) -> None:
+        """
+        The speaker changing state is INPUT to the decision, not the decision.
+
+        Wired straight to orb.set_state before, which meant the end of a
+        sentence set the orb to `idle` while the turn behind it was still
+        working — the same bug from the other direction.
+        """
+        if state == "speaking":
+            self.orb.set_state("muted" if self.muted else "speaking")
+            return
+        self._refresh_orb(self._orb_listening)
+
+    def _announce_finished_jobs(self) -> None:
+        """
+        Speak up when a background coding agent finishes.
+
+        Says only that it finished and how to look at it — NOT whether it
+        went well. Judging that needs the diff read against what he asked
+        for, which is a brain turn (review_coding_job), and starting one
+        unprompted would mean an agent finishing at 3am wakes the machine up
+        talking. He asks, and then it takes the lead.
+
+        Never speaks over a turn in flight or a pending question: the
+        announcement waits for the next poll instead. An interruption is
+        exactly what he has been complaining about.
+        """
+        try:
+            from .tools import devwork
+
+            if (
+                self.muted
+                or self.paused
+                or self.speaker.speaking
+                or self._active_turns
+                or self._awaiting_confirmation
+                or self._awaiting_stop
+                or self._awaiting_reply
+            ):
+                return
+            done = devwork.finished_unreported_jobs()
+        except Exception as exc:  # noqa: BLE001 - a poll must never kill the loop
+            crashlog.write(f"job poll failed: {type(exc).__name__}: {exc}")
+            return
+
+        for job in done:
+            minutes = (job.get("ended_at", 0) - job.get("started_at", 0)) / 60
+            folder = Path(str(job.get("folder", ""))).name
+            state = job.get("state")
+            if state == "finished" and job.get("summary"):
+                # A background COMMAND (the self-test) already knows how to
+                # describe its own result, so say that rather than "go and
+                # review it" — there is nothing to review, the answer is the
+                # sentence.
+                line = f"{job.get('prompt', 'That')} finished: {job['summary']}"
+            elif state == "finished":
+                line = (
+                    f"The coding job in {folder} just finished after "
+                    f"{minutes:.0f} minutes. Say review the coding job and "
+                    "I'll tell you what it actually changed."
+                )
+            elif state == "timeout":
+                line = f"The coding job in {folder} ran out of time after {minutes:.0f} minutes."
+            else:
+                line = f"The coding job in {folder} failed: {job.get('error', 'no reason given')}."
+            self.audit.write("system", summary=f"coding job {job.get('id')}: {state}",
+                             detail={"folder": str(job.get("folder", ""))})
+            self.say(line)
+
+    def shutdown(self, reason: str = "") -> None:
+        """
+        Tear down, recording WHY first and surviving a failure in any step.
+
+        The ordering here is the fix for a real hole. This method used to
+        call speaker.stop(), orb.stop() and mic.stop() and only THEN write
+        "Jalen stopped" — so any one of those three raising took the audit
+        line down with it, and the process disappeared leaving no record it
+        had ever stopped. That is one of the three reasons the 21 August
+        exit was undiagnosable (jarvis/crashlog.py has the other two).
+
+        So: the reason is written to disk and to the audit BEFORE anything
+        that can fail, and every teardown step gets its own try/except so a
+        broken speaker cannot also cost you the microphone release.
+        """
+        reason = reason or self._exit_reason or "shutdown"
+        crashlog.note_exit(reason, session_id=self.session_id, mode=self.mode)
         self.running.clear()
-        self.speaker.stop()
-        self.orb.stop()
-        self.mic.stop()
-        self.audit.write("system", summary="Jalen stopped")
-        self.audit.close()
+
+        # Written first, and separately from close(), so that the line
+        # exists even if every single teardown step below throws.
+        try:
+            self.audit.write("system", summary=f"Jalen stopped ({reason})")
+        except Exception:
+            pass
+
+        for label, step in (
+            ("speaker", self.speaker.stop),
+            ("orb", self.orb.stop),
+            ("mic", self.mic.stop),
+        ):
+            try:
+                step()
+            except Exception as exc:
+                # Report it and keep going. A failure to stop the speaker is
+                # not a reason to leave the microphone device held open.
+                crashlog.write(f"shutdown step {label!r} failed: {type(exc).__name__}: {exc}")
+                try:
+                    self.audit.error(f"shutdown.{label}", exc)
+                except Exception:
+                    pass
+
         if self.brain is not None and self._loop is not None:
             try:
                 self._run_coro(self.brain.stop())
             except Exception:
                 pass
-        self._stop_loop()
+        try:
+            self._stop_loop()
+        except Exception as exc:
+            crashlog.write(f"shutdown step 'loop' failed: {type(exc).__name__}: {exc}")
+        try:
+            self.audit.close()
+        except Exception:
+            pass

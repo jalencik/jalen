@@ -3,6 +3,8 @@ The global hotkey. This is how Jalen starts without typing anything.
 
     Ctrl+Alt+J        wake him — launch him if he isn't running, listen if he is
     Ctrl+Alt+K        the kill switch (config/jarvis.yaml, safety.kill_switch_hotkey)
+    Ctrl+Alt+B        make the orb bigger
+    Ctrl+Alt+S        make the orb smaller
 
 Run it with:
     .venv\\Scripts\\pythonw.exe scripts\\hotkeys.py
@@ -172,6 +174,20 @@ def on_wake() -> None:
         runtime.send_signal("toggle")
 
 
+def on_orb(direction: str):
+    """
+    Resize the orb. Does nothing if Jalen is not running, on purpose: a
+    resize key that LAUNCHES an assistant would be a genuinely surprising
+    thing to have happen because you reached for Ctrl+Alt+S in an editor.
+    """
+    def press() -> None:
+        if runtime.running_instance() is None:
+            log(f"orb {direction} pressed — Jalen is not running, ignored")
+            return
+        runtime.send_signal(f"orb-{direction}")
+    return press
+
+
 def on_kill() -> None:
     """The kill switch. Stops him cleanly, or forcefully if he won't."""
     log("kill pressed — " + runtime.stop_running_instance())
@@ -224,6 +240,12 @@ def main() -> int:
                         ["ctrl+shift+j", "ctrl+alt+f9"]), "wake", on_wake),
         (2, _candidates("safety.kill_switch_hotkey", "ctrl+alt+k",
                         ["ctrl+shift+k", "ctrl+alt+f10"]), "kill switch", on_kill),
+        (3, _candidates("ui.orb_bigger_hotkey", "ctrl+alt+b",
+                        ["ctrl+shift+b", "ctrl+alt+f11"]), "orb bigger",
+         on_orb("bigger")),
+        (4, _candidates("ui.orb_smaller_hotkey", "ctrl+alt+s",
+                        ["ctrl+shift+s", "ctrl+alt+f12"]), "orb smaller",
+         on_orb("smaller")),
     ]
 
     actions: dict[int, tuple[str, str, object]] = {}

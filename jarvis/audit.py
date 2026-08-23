@@ -11,6 +11,7 @@ Audio is never written. Only text.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -49,6 +50,8 @@ class AuditLog:
         # memory.private_mode_default was configurable but ignored — Jalen
         # always started logging regardless of the flag (spec G58).
         self._private = bool(cfg.get_path("memory.private_mode_default", False))
+        # Set by redact_next_utterance(); consumed by the next utterance().
+        self._redact_next = False
 
         if self.enabled:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,8 +117,44 @@ class AuditLog:
                 pass
 
     # ------------------------------------------------------------ convenience
+    #
+    # Utterances that CONTAIN a secret, and must be written down as their
+    # shape rather than their content.
+    #
+    # The vault passphrase is the case that matters. Said out loud it becomes
+    # an ordinary transcript line, and this file is plain text by design so
+    # that it can be read in Notepad — which would put the master passphrase
+    # on disk next to the vault it opens.
+    #
+    # This only covers the ACCIDENT. It is not the fix: a spoken passphrase
+    # has already been sent to Groq for transcription before any of this code
+    # runs, so it has left the machine regardless. See unlock_vault's
+    # docstring — the passphrase should be typed, never spoken.
+    _SECRET_SHAPES = (
+        re.compile(r"\b(?:un)?lock(?:ing)?\b[^.]{0,40}\bvault\b", re.I),
+        re.compile(r"\bvault\b[^.]{0,40}\bpass(?:phrase|word|code)\b", re.I),
+        re.compile(r"\bmy pass(?:phrase|word|code) is\b", re.I),
+    )
+
     def utterance(self, text: str, *, who: str = "user", origin: str = "user") -> None:
-        self.write("utterance", summary=text, origin=origin, detail={"who": who})
+        summary = text
+        if who == "user" and any(p.search(text or "") for p in self._SECRET_SHAPES):
+            summary = "[vault passphrase spoken - not recorded]"
+        elif self._redact_next and who == "user":
+            summary = "[sensitive answer - not recorded]"
+        self._redact_next = False
+        self.write("utterance", summary=summary, origin=origin, detail={"who": who})
+
+    def redact_next_utterance(self) -> None:
+        """
+        The next thing he says is an answer to a question about a secret.
+
+        Set by the caller that ASKED — ask_user, when the question mentions a
+        passphrase or password. Without it, "what's the passphrase?" followed
+        by the passphrase logs the answer with no context to catch it by: the
+        utterance on its own looks like any other sentence.
+        """
+        self._redact_next = True
 
     def action(self, verdict, outcome: str, error: str | None = None) -> None:
         detail = dict(verdict.detail)
