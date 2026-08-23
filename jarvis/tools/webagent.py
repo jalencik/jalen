@@ -56,7 +56,9 @@ nothing is downloaded, and the profile costs about 11 MB.
 from __future__ import annotations
 
 import json
+import queue
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -323,66 +325,157 @@ class BrowserUnavailable(RuntimeError):
 
 class _Session:
     """
-    One Chrome, one profile, kept alive between rounds.
+    One Chrome, one profile, ONE THREAD, kept alive between rounds.
 
-    Kept alive deliberately: a follow-up has to land in the SAME conversation,
-    and closing the browser between rounds would lose the tab, the thread, and
-    everything the other model had already been told.
+    THE BUG THIS SHAPE EXISTS TO FIX
+    --------------------------------
+    He asked for the ten richest people, handed off to Gemini, and got:
+    "That failed on the browser side, Boss - a crash-log error from the
+    delegate tool itself." Reproduced exactly:
+
+        thread A:  open the browser        -> ok
+        thread B:  use the same browser    -> greenlet.error: cannot switch
+                                              to a different thread
+
+    Playwright's synchronous API is bound to the thread that created it, and
+    it is NOT thread-safe. The brain runs every tool call through
+    asyncio.to_thread, which hands out whichever pool thread is free - so his
+    sequence (web_search, then web_read, then web_delegate) touched the
+    browser from three different threads and the third one died.
+
+    Nothing about the calling code was wrong. A singleton holding Playwright
+    objects is simply not a thing that can be shared, and the failure only
+    appears once a second thread gets involved - which is why every test
+    passed and the first real use did not.
+
+    SO THE BROWSER OWNS A THREAD, and callers send it work.
+    Every operation is a callable that receives the page and runs THERE.
+    Callers block for the result, so it reads like ordinary code:
+
+        session.do(lambda page: page.title())
 
     HEADED, always. A headless window cannot be signed into by a human, and
     signing in is the one thing this design hands back to him.
     """
 
     _instance: "_Session | None" = None
+    _lock = threading.Lock()
 
     def __init__(self) -> None:
-        self._pw = None
-        self._ctx = None
-        self.page = None
+        self._jobs: "queue.Queue[tuple]" = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._ready: "queue.Queue[str]" = queue.Queue(maxsize=1)
 
     @classmethod
     def get(cls) -> "_Session":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls()
+            return cls._instance
 
-    def start(self) -> None:
-        if self._ctx is not None:
-            return
+    # ------------------------------------------------------------- the thread
+    def _pump(self) -> None:
+        """Owns the browser for its whole life. Never touched from outside."""
         try:
             from playwright.sync_api import sync_playwright
-        except ImportError as exc:  # pragma: no cover - environment specific
-            raise BrowserUnavailable(
-                "Playwright isn't installed. "
-                "Run: .venv\\Scripts\\python.exe -m pip install playwright"
-            ) from exc
+        except ImportError:
+            self._ready.put(
+                "Playwright isn't installed. Run: "
+                ".venv\\Scripts\\python.exe -m pip install playwright"
+            )
+            return
+
+        try:
+            pw = sync_playwright().start()
+        except Exception as exc:  # noqa: BLE001
+            self._ready.put(f"Playwright wouldn't start: {type(exc).__name__}: {exc}")
+            return
 
         PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-        self._pw = sync_playwright().start()
         try:
-            self._ctx = self._pw.chromium.launch_persistent_context(
+            ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(PROFILE_DIR),
                 channel="chrome",      # HIS Chrome. Nothing is downloaded.
                 headless=False,
                 args=["--no-first-run", "--no-default-browser-check"],
             )
-        except Exception as exc:
-            self.stop()
-            raise BrowserUnavailable(
-                f"Chrome wouldn't start: {type(exc).__name__}: {exc}"
-            ) from exc
-        self.page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
-
-    def stop(self) -> None:
-        for closer in (getattr(self._ctx, "close", None),
-                       getattr(self._pw, "stop", None)):
+        except Exception as exc:  # noqa: BLE001
             try:
-                if closer:
-                    closer()
+                pw.stop()
             except Exception:
                 pass
-        self._ctx = self._pw = self.page = None
-        type(self)._instance = None
+            # The likeliest cause by far, and worth naming: Chrome refuses to
+            # open a profile directory another Chrome already holds.
+            hint = ""
+            if "ProcessSingleton" in str(exc) or "already in use" in str(exc).lower():
+                hint = (" Something else is already using Jalen's browser "
+                        "profile - close the window I opened earlier.")
+            self._ready.put(f"Chrome wouldn't start: {type(exc).__name__}: {exc}.{hint}")
+            return
+
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        self._ready.put("")          # "" means started cleanly
+
+        while True:
+            job, out = self._jobs.get()
+            if job is None:
+                break
+            try:
+                out.put(("ok", job(page)))
+            except Exception as exc:  # noqa: BLE001
+                out.put(("err", exc))
+        for close in (ctx.close, pw.stop):
+            try:
+                close()
+            except Exception:
+                pass
+
+    def start(self) -> None:
+        """Bring the browser up. Idempotent. Raises BrowserUnavailable."""
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._thread = threading.Thread(
+                target=self._pump, name="jalen-browser", daemon=True)
+            self._thread.start()
+            try:
+                problem = self._ready.get(timeout=90)
+            except queue.Empty:
+                raise BrowserUnavailable(
+                    "Chrome didn't finish starting within 90 seconds."
+                ) from None
+            if problem:
+                self._thread = None
+                raise BrowserUnavailable(problem)
+
+    def do(self, job, *, timeout: float = 360.0):
+        """
+        Run `job(page)` on the browser's own thread and return its result.
+
+        Blocking on purpose. The caller is already on a worker thread, and
+        pretending this is asynchronous would just move the same waiting
+        somewhere harder to read.
+        """
+        self.start()
+        out: "queue.Queue[tuple]" = queue.Queue(maxsize=1)
+        self._jobs.put((job, out))
+        try:
+            status, value = out.get(timeout=timeout)
+        except queue.Empty:
+            raise BrowserUnavailable(
+                f"The browser stopped responding after {int(timeout)}s."
+            ) from None
+        if status == "err":
+            raise value
+        return value
+
+    def stop(self) -> None:
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                self._jobs.put((None, None))
+                self._thread.join(timeout=15)
+            self._thread = None
+            type(self)._instance = None
 
 
 def _first_visible(page, selectors, timeout: float = 3.0):
@@ -590,20 +683,68 @@ def _resolve(chat_id: str) -> tuple[dict | None, dict, str]:
 # ---------------------------------------------------------------------------
 # DELEGATION
 # ---------------------------------------------------------------------------
-def _open(adapter: SiteAdapter):
-    """Browser up, on the right page. Returns (page, error)."""
-    session = _Session.get()
+def _host(url: str) -> str:
+    return (url or "").split("//")[-1].split("/")[0].lower()
+
+
+def _goto(page, adapter: SiteAdapter) -> str:
+    """
+    Make sure the page is on the right site. "" or a reason it is not.
+
+    RUNS ON THE BROWSER THREAD ONLY. Everything that touches `page` does;
+    that is the whole point of the session above.
+    """
     try:
-        session.start()
-    except BrowserUnavailable as exc:
-        return None, str(exc)
-    page = session.page
-    try:
-        if adapter.url.split("//")[-1].split("/")[0] not in (page.url or ""):
+        if _host(adapter.url) not in _host(page.url or ""):
             page.goto(adapter.url, timeout=45000, wait_until="domcontentloaded")
-    except Exception as exc:
-        return None, f"I couldn't open {adapter.label}: {type(exc).__name__}"
-    return page, ""
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        return f"I couldn't open {adapter.label}: {type(exc).__name__}"
+
+
+def _exchange(adapter: SiteAdapter, message: str, criteria: list) -> dict:
+    """
+    One complete round trip, as a SINGLE job on the browser thread.
+
+    Composed into one job deliberately rather than five small ones. Between
+    two separate jobs another caller could interleave its own, and "navigate,
+    then someone else navigates, then submit" would type a brief into
+    whatever page happened to be showing.
+    """
+    def job(page) -> dict:
+        problem = _goto(page, adapter)
+        if problem:
+            return {"error": problem}
+        state = page_state(page, adapter)
+        if state != "ready":
+            return {"state": state}
+        problem = submit_prompt(page, adapter, message)
+        if problem:
+            return {"error": problem}
+        finished, why = wait_for_completion(page, adapter)
+        return {
+            "answer": read_response(page, adapter),
+            "finished": finished,
+            "why": why,
+            "url": page.url,
+        }
+
+    try:
+        return _Session.get().do(job, timeout=REPLY_TIMEOUT_S + 120)
+    except BrowserUnavailable as exc:
+        return {"error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"The browser failed: {type(exc).__name__}: {exc}"}
+
+
+def _blocked(adapter: SiteAdapter, state: str) -> str:
+    if state == "challenge":
+        return (f"{adapter.label} is showing a human verification check. I "
+                f"won't try to get past that - the window is open, clear it "
+                f"and tell me to carry on.")
+    return (f"You're not signed in to {adapter.label}. Say 'sign me in to "
+            f"{adapter.label}' and I'll walk you through it - the window is "
+            f"already open.")
 
 
 def web_delegate(agent: str, spec: Any = None, **fields) -> str:
@@ -638,29 +779,14 @@ def web_delegate(agent: str, spec: Any = None, **fields) -> str:
             + "\n\nGive me those and I'll send it."
         )
 
-    page, error = _open(adapter)
-    if error:
-        return error
-
-    state = page_state(page, adapter)
-    if state == "challenge":
-        return (f"{adapter.label} is showing a human verification check. I "
-                f"won't try to get past that - the window is open, clear it "
-                f"and tell me to carry on.")
-    if state == "signed-out":
-        return (f"You're not signed in to {adapter.label}. Say 'sign me in "
-                f"to {adapter.label}' and I'll walk you through it - the "
-                f"window is already open.")
-
     brief = task.render()
-    error = submit_prompt(page, adapter, brief)
-    if error:
-        return error
+    result = _exchange(adapter, brief, task.success_criteria)
+    if result.get("error"):
+        return result["error"]
+    if result.get("state"):
+        return _blocked(adapter, result["state"])
 
-    finished, why = wait_for_completion(page, adapter)
-    answer = read_response(page, adapter)
     chat_id = f"web-{key}-{uuid.uuid4().hex[:8]}"
-
     chats = _load()
     chats[chat_id] = {
         "id": chat_id,
@@ -669,22 +795,22 @@ def web_delegate(agent: str, spec: Any = None, **fields) -> str:
         "objective": task.objective,
         "criteria": task.success_criteria,
         "spec": data,
-        "url": page.url,
+        "url": result.get("url", ""),
         "rounds": [{
             "at": time.time(),
             "kind": "brief",
             "sent": brief,
-            "answer": answer,
-            "verified_complete": finished,
-            "note": why,
+            "answer": result.get("answer", ""),
+            "verified_complete": result.get("finished", False),
+            "note": result.get("why", ""),
         }],
     }
     _save(chats)
 
-    if not finished:
-        return (f"I sent the brief to {adapter.label} but {why}\n\n"
-                f"Conversation id: {chat_id}\n"
-                f"What it had produced so far:\n{answer[:1500]}")
+    if not result.get("finished"):
+        return (f"I sent the brief to {adapter.label} but {result.get('why')}"
+                f"\n\nConversation id: {chat_id}\n"
+                f"What it had produced so far:\n{result.get('answer','')[:1500]}")
     return read_result(chat_id)
 
 
@@ -713,37 +839,33 @@ def web_follow_up(chat_id: str = "", corrections: str = "") -> str:
         )
 
     adapter = SITES[chat["agent"]]
-    page, error = _open(adapter)
-    if error:
-        return error
-    state = page_state(page, adapter)
-    if state != "ready":
-        return (f"{adapter.label} needs you first - it's showing a "
-                f"{'human check' if state == 'challenge' else 'sign-in page'}.")
-
+    criteria = chat.get("criteria", [])
     message = (
         "Your previous answer does not yet meet the brief. Corrections:\n\n"
         f"{corrections.strip()}\n\n"
         "The success criteria have not changed:\n"
-        + "\n".join(f"- {c}" for c in chat.get("criteria", []))
+        + "\n".join(f"- {c}" for c in criteria)
         + "\n\nRevise your answer so every criterion above is met. Do not "
           "restate what you already did correctly - give the corrected work."
     )
-    error = submit_prompt(page, adapter, message)
-    if error:
-        return error
 
-    finished, why = wait_for_completion(page, adapter)
-    answer = read_response(page, adapter)
+    result = _exchange(adapter, message, criteria)
+    if result.get("error"):
+        return result["error"]
+    if result.get("state"):
+        return _blocked(adapter, result["state"])
+
     chat["rounds"].append({
         "at": time.time(), "kind": "correction", "sent": message,
-        "answer": answer, "verified_complete": finished, "note": why,
+        "answer": result.get("answer", ""),
+        "verified_complete": result.get("finished", False),
+        "note": result.get("why", ""),
     })
     _save(chats)
 
-    if not finished:
-        return (f"I sent the correction but {why}\n\n"
-                f"What it had so far:\n{answer[:1500]}")
+    if not result.get("finished"):
+        return (f"I sent the correction but {result.get('why')}\n\n"
+                f"What it had so far:\n{result.get('answer','')[:1500]}")
     return read_result(chat["id"])
 
 
@@ -831,19 +953,27 @@ def web_sign_in_state(agent: str = "") -> str:
     if adapter is None:
         return "Which one - ChatGPT or Gemini?"
 
-    page, error = _open(adapter)
-    if error:
-        return error
-    state = page_state(page, adapter)
-    if state == "ready":
+    def job(page) -> str:
+        problem = _goto(page, adapter)
+        return problem or page_state(page, adapter)
+
+    try:
+        outcome = _Session.get().do(job, timeout=120)
+    except BrowserUnavailable as exc:
+        return str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return f"The browser failed: {type(exc).__name__}: {exc}"
+
+    if outcome not in ("ready", "signed-out", "challenge"):
+        return outcome        # it is an error message
+    if outcome == "ready":
         return f"You're already signed in to {adapter.label}."
-    if state == "challenge":
+    if outcome == "challenge":
         return (f"{adapter.label} is showing a human verification check. I "
                 f"don't try to get past those. The window is open - clear it "
                 f"and say 'carry on'.")
 
-    has_account = _vault_has(adapter)
-    if has_account:
+    if _vault_has(adapter):
         return (
             f"You're signed out of {adapter.label}, and I have a saved login "
             f"for it. Shall I sign you in? I'll type the password straight "
@@ -881,13 +1011,15 @@ def open_signup(agent: str = "") -> str:
     adapter = SITES.get((agent or "").strip().lower())
     if adapter is None:
         return "Which one - ChatGPT or Gemini?"
-    session = _Session.get()
+    url = adapter.signup_url or adapter.url
     try:
-        session.start()
-        session.page.goto(adapter.signup_url or adapter.url, timeout=45000,
-                          wait_until="domcontentloaded")
-    except Exception as exc:
-        return f"I couldn't open the sign-up page: {type(exc).__name__}"
+        _Session.get().do(
+            lambda page: page.goto(url, timeout=45000,
+                                   wait_until="domcontentloaded"),
+            timeout=120,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"I couldn't open the sign-up page: {type(exc).__name__}: {exc}"
     return (
         f"The {adapter.label} sign-up page is open. Creating an account means "
         f"agreeing to their terms, choosing a password and usually proving "

@@ -200,3 +200,82 @@ def test_the_gemini_adapter_uses_the_same_machinery(page):
     ok, _ = wa.wait_for_completion(page, ADAPTER, timeout=20, stable_for=0.6)
     assert ok
     assert "via gemini selectors" in wa.read_response(page, ADAPTER)
+
+
+# ---------------------------------------------------------------------------
+# THE BUG THAT REACHED HIM
+#
+# "That failed on the browser side, Boss - a crash-log error from the delegate
+#  tool itself, not something I can retry around."
+#
+# Everything above passed while this was broken, because every test in this
+# file ran on one thread. Playwright's sync API is bound to the thread that
+# created it, the brain runs every tool through asyncio.to_thread, and his
+# sequence (web_search, then web_read, then web_delegate) touched the browser
+# from three different pool threads. The third one died with
+# "greenlet.error: cannot switch to a different thread".
+#
+# Nothing about the calling code was wrong. A singleton holding Playwright
+# objects is simply not shareable, and the failure only appears once a second
+# thread gets involved - which is exactly what a single-threaded test suite
+# never does.
+# ---------------------------------------------------------------------------
+def test_the_browser_survives_being_used_from_another_thread(monkeypatch):
+    """
+    The regression test for the crash he hit. Drives the real session object
+    from two genuinely different threads.
+    """
+    import queue as _queue
+    import threading
+
+    monkeypatch.setattr(wa.CHATGPT, "url", _url())
+
+    def on_a_new_thread(fn, name):
+        out: "_queue.Queue[tuple]" = _queue.Queue()
+
+        def wrap():
+            try:
+                out.put(("ok", fn()))
+            except Exception as exc:  # noqa: BLE001
+                out.put(("err", f"{type(exc).__name__}: {exc}"))
+
+        thread = threading.Thread(target=wrap, name=name)
+        thread.start()
+        thread.join(timeout=180)
+        return out.get(timeout=5)
+
+    session = wa._Session.get()
+    try:
+        status, first = on_a_new_thread(
+            lambda: session.do(lambda page: page.goto(_url()) or "opened"),
+            "browser-caller-A")
+        assert status == "ok", first
+
+        # A DIFFERENT thread. This is the line that used to raise.
+        for n in range(3):
+            status, value = on_a_new_thread(
+                lambda: session.do(lambda page: page.title()),
+                f"browser-caller-B{n}")
+            assert status == "ok", (
+                f"the browser died when a second thread used it: {value}"
+            )
+            assert value == "Fake chat"
+    finally:
+        session.stop()
+
+
+def test_the_page_never_escapes_its_thread():
+    """
+    Asserted structurally, because the behavioural test above needs a real
+    browser and this is the property that matters: no caller may hold a page.
+    A returned page would be usable from the calling thread, which is how the
+    bug worked in the first place.
+    """
+    import inspect
+
+    source = inspect.getsource(wa)
+    assert "self.page" not in source, (
+        "_Session exposes a page again - callers can touch it from their own "
+        "thread, which is the exact crash this replaced"
+    )
+    assert "def do(self, job" in source
