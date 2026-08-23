@@ -43,6 +43,7 @@ class _Gate:
         self._awaiting_confirmation = False
         self._awaiting_stop = False
         self._awaiting_reply = False
+        self._pending_rating = None
         self.kill_phrases = KILL_PHRASES
 
     should_act_on = Jalen.should_act_on

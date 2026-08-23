@@ -200,6 +200,12 @@ class Jalen:
         self._awaiting_reply = False
         self._awaiting_confirmation = False
         self._awaiting_stop = False
+        # "after the work has been done, it should ask the user, Hey boss,
+        # How do you rate my work out of 10". Holds the context of the job
+        # being rated, or None. Deliberately NOT reusing _awaiting_reply:
+        # that routes into a queue a waiting coroutine sits on, and nothing
+        # is waiting here - the question is asked after the turn is over.
+        self._pending_rating: dict | None = None
         # Last thing he said, for re-attaching a continuation fragment —
         # see the stitching block in process().
         self._last_user_text = ""
@@ -920,6 +926,15 @@ class Jalen:
         # while a question is open there is no other interpretation: "open
         # chrome" said in answer to "what's your phone number" is an answer,
         # not a command, and routing it would be both wrong and irreversible.
+        # A rating he was just asked for. Before _awaiting_reply because
+        # nothing is waiting on a queue here, and before the router because
+        # a bare "eight" would otherwise route to whatever "eight" matches.
+        if self._pending_rating is not None:
+            if time.time() - self._pending_rating.get("asked_at", 0) > self.RATING_EXPIRES_S:
+                self._pending_rating = None      # he moved on; so do we
+            elif self._take_rating(text):
+                return
+
         if self._awaiting_reply:
             self._reply_q.put(text)
             return
@@ -1034,6 +1049,7 @@ class Jalen:
             only possible outcome, no matter what you said.
             """
             nonlocal follow_up_until
+            started_at = time.time()
             try:
                 with systools.com_initialized():
                     self.process(text)
@@ -1042,6 +1058,7 @@ class Jalen:
                 self._finish_timing(timer)
                 with self._turn_lock:
                     self._active_turns.discard(turn_id)
+                self._maybe_ask_for_a_rating(text, started_at)
             # Only the newest turn owns the UI state and the follow-up window.
             # Without this, a slow turn finishing late would reopen the
             # follow-up window and reset the orb long after the user moved on.
@@ -1447,6 +1464,8 @@ class Jalen:
             return True
         if self._awaiting_confirmation or self._awaiting_stop or self._awaiting_reply:
             return True
+        if self._pending_rating is not None:
+            return True
         # THE EMERGENCY STOP IS EXEMPT, and it has to be.
         #
         # "stop", "cancel" and "abort" are safety.kill_phrases — the thing
@@ -1462,6 +1481,69 @@ class Jalen:
         if (text or "").lower().strip().rstrip(".!?") in self.kill_phrases:
             return True
         return addressed_to_jalen(text)
+
+    # ------------------------------------------------------------- feedback
+    RATING_EXPIRES_S = 300.0
+
+    def _maybe_ask_for_a_rating(self, about: str, started_at: float) -> None:
+        """
+        Ask how it went, but only after something worth having an opinion on.
+
+        The restraint IS the feature. An assistant that asks for a score
+        after "what's the time" is not collecting feedback, it is collecting
+        resentment - and the numbers it gets back are worthless anyway,
+        because nobody thinks about a question they are asked forty times a
+        day. feedback.worth_asking_about() says no by default.
+
+        Asked AFTER playback has finished, never before: talking over the
+        answer he is still listening to, in order to ask him to rate it,
+        would be its own small insult.
+        """
+        if self.muted or self.paused or self._pending_rating is not None:
+            return
+        try:
+            from .tools import feedback
+
+            used = systools.tools_since(started_at)
+            if not feedback.worth_asking_about(used, time.time() - started_at):
+                return
+            self._pending_rating = {
+                "about": about,
+                "did": ", ".join(dict.fromkeys(used)) or "(no tools)",
+                "asked_at": time.time(),
+            }
+            self.say(feedback.the_question())
+        except Exception as exc:  # noqa: BLE001
+            # Feedback is a nicety. It must never take a turn down with it.
+            self.audit.error("rating-prompt", exc)
+            self._pending_rating = None
+
+    def _take_rating(self, text: str) -> bool:
+        """
+        Treat this utterance as the answer to "how do you rate my work".
+
+        Returns True if it was consumed. A NUMBER is required: if he said
+        something else, that was a new request rather than a rating, so it
+        falls through to the router and the question is dropped. Asking a
+        second time would be worse than never asking.
+        """
+        pending, self._pending_rating = self._pending_rating, None
+        if pending is None:
+            return False
+        try:
+            from .tools import feedback
+
+            score = feedback.parse_rating(text)
+            if score is None:
+                return False
+            self.say(feedback.record_rating(
+                score=score, comment=text,
+                about=pending.get("about", ""), did=pending.get("did", ""),
+            ))
+        except Exception as exc:  # noqa: BLE001
+            self.audit.error("rating", exc)
+            self.say("Thanks - I couldn't file that, but I heard you.")
+        return True
 
     def _refresh_orb(self, listening: bool = False) -> None:
         """Recompute what the orb should show from what is actually true."""

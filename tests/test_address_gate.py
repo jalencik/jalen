@@ -55,6 +55,7 @@ class _Gate:
         self._awaiting_confirmation = confirmation
         self._awaiting_stop = stop
         self._awaiting_reply = reply
+        self._pending_rating = None
         # The real list, not a stand-in. The emergency stop is exempt from
         # the gate (see tests/test_stop_and_quit.py), and a fake list here
         # would let this file pass while the exemption was broken.

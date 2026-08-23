@@ -59,6 +59,7 @@ green:
     - jalen_orb_move       # moves its own overlay to a corner
     - list_web_chats       # reads a local json file
     - read_web_result      # reads what already came back
+    - rating_history       # reads a local file of his own scores
     - jalen_read_all       # speaks text already on his screen
     - private_mode
     - set_posture

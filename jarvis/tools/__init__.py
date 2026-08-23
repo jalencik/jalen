@@ -13,11 +13,14 @@ time rather than left to be discovered at call time.
 from __future__ import annotations
 
 import contextlib
+import time
+from collections import deque
 from typing import Any
 
 from . import (
     agents,
     webagent,
+    feedback,
     attachments, autofill, browsertabs, bulkmail, coding, desktop,
     devwork,
     drafting,
@@ -67,7 +70,7 @@ for _module in (
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
     technician, repairs, vault, interaction, browsertabs, attachments,
     bulkmail, autofill, drafting, devwork, selfcontrol, agents,
-    webagent,
+    webagent, feedback,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:
@@ -75,8 +78,33 @@ for _module in (
     REGISTRY.update(_module.REGISTRY)
 
 
+# WHAT RAN, AND WHEN.
+#
+# One ring buffer at the single choke point every tool call passes through -
+# the brain's wrapper and the router's local dispatch both land here. The
+# alternative was threading a turn id through the agent SDK, the tool
+# wrappers and the router, to answer one question: "did this turn actually
+# DO anything, or was it a lookup?"
+#
+# That question is what stops Jalen asking "how do you rate my work out of
+# ten" after somebody asks it the time. See jarvis/tools/feedback.py.
+#
+# Bounded, because this runs forever. 400 entries is a few hours of heavy
+# use and costs a few kilobytes.
+_RECENT: "deque[tuple[float, str]]" = deque(maxlen=400)
+
+
+def tools_since(when: float) -> list[str]:
+    """Names of the tools that ran after `when` (time.time()), in order."""
+    return [name for at, name in list(_RECENT) if at >= when]
+
+
 def call(tool: str, args: dict) -> str:
     fn = REGISTRY.get(tool)
     if fn is None:
         raise KeyError(tool)
+    # Recorded BEFORE the call, not after: a tool that raises still did
+    # something, and a turn whose only action failed is exactly the turn
+    # worth asking him about.
+    _RECENT.append((time.time(), tool))
     return fn(**(args or {}))

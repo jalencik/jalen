@@ -547,6 +547,22 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "not meet it.",
         {},
     ),
+    "record_rating": (
+        "File a rating he gave for work just finished, and email a short "
+        "summary to him. Only when he has actually given a score - never "
+        "invent one, and never call this to ask for one.",
+        {
+            "score": ("integer", "0 to 10", False),
+            "comment": ("string", "what he said about it, verbatim", False),
+            "about": ("string", "what he had asked for", False),
+            "did": ("string", "what Jalen actually did", False),
+        },
+    ),
+    "rating_history": (
+        "His recent ratings and the average, for 'how am I doing' or 'what "
+        "have I scored'.",
+        {"limit": ("integer", "how many", False)},
+    ),
     # ---- driving ChatGPT / Gemini in an actual browser --------------------
     #
     # Different from delegate_task, and the difference is the point:
