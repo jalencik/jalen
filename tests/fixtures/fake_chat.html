@@ -1,0 +1,110 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fake chat</title>
+<!--
+A stand-in for ChatGPT and Gemini, close enough to test the parts that matter.
+
+WHY THIS EXISTS
+---------------
+The browser delegation cannot be tested against the real sites here: they
+need his accounts, they rate-limit, and they would put real prompts into his
+real chat history. But the three things most likely to be wrong are not about
+those sites at all:
+
+    can we type into a contenteditable and send it
+    can we tell "still generating" from "finished"
+    can we read the answer back with its formatting intact
+
+All three are testable against a page that STREAMS like they do - which is
+the only property that makes completion detection hard. A page that answers
+instantly would let a broken detector pass.
+
+It deliberately uses the same hooks the real adapters look for
+(#prompt-textarea, data-testid=send-button / stop-button,
+data-message-author-role=assistant) so the test exercises the real selector
+lists rather than a special case.
+
+Query flags:
+    ?signedout=1   render the login controls instead
+    ?challenge=1   render a CAPTCHA-shaped iframe
+    ?delay=1200    how long the answer takes to stream (default 1200ms)
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  #prompt-textarea { border: 1px solid #999; min-height: 3rem; padding: .5rem; }
+  [data-message-author-role="assistant"] { white-space: pre-wrap; margin: 1rem 0;
+    padding: .5rem; background: #f4f4f4; }
+  button { padding: .4rem .8rem; margin-right: .5rem; }
+  .hidden { display: none; }
+</style>
+
+<div id="app"></div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const app = document.getElementById("app");
+
+// Both flags together is the REALISTIC case, not an edge case: a CAPTCHA
+// almost always appears ON a login page, showing the login controls
+// underneath it. They render together so page_state has to choose, which is
+// the thing worth testing.
+if (params.get("signedout") || params.get("challenge")) {
+  app.innerHTML = `<h1>Fake chat</h1>
+    ${params.get("challenge") ? `
+      <iframe title="challenge widget" width="300" height="80"></iframe>
+      <p>verify you are human</p>` : ""}
+    ${params.get("signedout") ? `
+      <button data-testid="login-button">Log in</button>
+      <button>Sign up</button>` : ""}`;
+} else {
+  app.innerHTML = `<h1>Fake chat</h1>
+    <div id="thread"></div>
+    <div id="prompt-textarea" contenteditable="true"></div>
+    <p>
+      <button data-testid="send-button">Send</button>
+      <button data-testid="stop-button" class="hidden">Stop</button>
+    </p>`;
+
+  const delay = parseInt(params.get("delay") || "1200", 10);
+  const box = document.getElementById("prompt-textarea");
+  const thread = document.getElementById("thread");
+  const send = document.querySelector('[data-testid="send-button"]');
+  const stop = document.querySelector('[data-testid="stop-button"]');
+
+  send.addEventListener("click", () => {
+    const asked = box.innerText.trim();
+    if (!asked) return;
+    box.innerText = "";
+
+    // The answer echoes the prompt back so a test can prove that what was
+    // typed is what arrived - a send that silently truncates would otherwise
+    // look identical to one that worked.
+    const words = ("ANSWERING: " + asked + "\n\nline two\n  indented line three")
+      .split(/(\s+)/);
+
+    const node = document.createElement("div");
+    node.setAttribute("data-message-author-role", "assistant");
+    thread.appendChild(node);
+
+    // STREAMED, one chunk at a time, with the stop button visible
+    // throughout - exactly the state a naive "sleep 30 seconds and read it"
+    // detector gets wrong in both directions.
+    stop.classList.remove("hidden");
+    let i = 0;
+    const step = Math.max(1, Math.round(delay / Math.max(words.length, 1)));
+    const timer = setInterval(() => {
+      if (i >= words.length) {
+        clearInterval(timer);
+        stop.classList.add("hidden");
+        return;
+      }
+      node.append(words[i++]);
+    }, step);
+  });
+
+  // Enter sends too, like both real sites.
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send.click(); }
+  });
+}
+</script>

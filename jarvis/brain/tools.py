@@ -547,6 +547,68 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "not meet it.",
         {},
     ),
+    # ---- driving ChatGPT / Gemini in an actual browser --------------------
+    #
+    # Different from delegate_task, and the difference is the point:
+    # delegate_task uses the APIs (his Gemini key is 403'd and he has no
+    # OpenAI key, so both are blocked by billing). These drive the web chats
+    # he already pays for, in a browser, where the conversation history lives.
+    "web_delegate": (
+        "Hand a task to ChatGPT or Gemini in a REAL BROWSER and wait for the "
+        "answer. Use this rather than delegate_task when he says 'ask "
+        "ChatGPT' / 'ask Gemini', or when the API route is blocked. `spec` is "
+        "a structured work order, not a sentence - pass a JSON object with: "
+        "objective, context, success_criteria (a list of CHECKABLE items - "
+        "this is what the answer gets judged against), constraints, "
+        "negative_requirements, and optionally known_facts, inputs, task, "
+        "required_output, edge_cases, verification. A thin spec is REFUSED "
+        "and you are told exactly which part is missing. It returns the "
+        "answer plus the criteria and asks YOU to judge it - do that "
+        "criterion by criterion against the text, never against the other "
+        "model's claim about itself.",
+        {
+            "agent": ("string", "chatgpt or gemini", True),
+            "spec": ("object", "the structured work order", True),
+        },
+    ),
+    "web_follow_up": (
+        "Send a correction into the SAME browser conversation, and wait "
+        "again. Use after judging a web_delegate result as anything other "
+        "than SATISFIED. Name the criterion number, say what is wrong, and "
+        "say what to change - never 'please improve it'. Hard limit of three "
+        "corrections; after that the brief was wrong rather than the answer.",
+        {
+            "chat_id": ("string", "which conversation; empty means the latest", False),
+            "corrections": ("string", "precisely what is missing or wrong", True),
+        },
+    ),
+    "read_web_result": (
+        "Re-read what ChatGPT or Gemini said in the browser, with the "
+        "original objective and success criteria alongside it, so it can be "
+        "judged.",
+        {"chat_id": ("string", "empty means the latest", False)},
+    ),
+    "list_web_chats": (
+        "The browser delegations so far, newest first.",
+        {"limit": ("integer", "how many", False)},
+    ),
+    "web_sign_in_state": (
+        "Whether he is signed in to ChatGPT or Gemini in Jalen's browser "
+        "profile, and what to do about it. Opens the window but types "
+        "nothing. Call this when web_delegate reports he is signed out.",
+        {"agent": ("string", "chatgpt or gemini", True)},
+    ),
+    "open_signup": (
+        "Open the sign-up page for ChatGPT or Gemini and hand it to him. "
+        "Creating an account means agreeing to terms and proving you are "
+        "human, so Jalen does not do it - it opens the page and waits.",
+        {"agent": ("string", "chatgpt or gemini", True)},
+    ),
+    "close_browser": (
+        "Close the browser Jalen was using for delegation. The conversation "
+        "is lost when this happens, so only when he is finished.",
+        {},
+    ),
     "delegate_task": (
         "Hand a task to another AI: gemini, or chatgpt (needs an API key). "
         "The `brief` must be a FULL engineered brief - context, objective, "

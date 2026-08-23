@@ -59,3 +59,8 @@ sqlite-vec==0.1.9            # pre-v1: pinned on purpose
 
 # --- dev ---
 pytest>=8.0.0
+
+# Driving ChatGPT and Gemini in a real browser (jarvis/tools/webagent.py).
+# channel="chrome" uses the Chrome already installed, so NO browser is
+# downloaded - the package itself is the only cost.
+playwright>=1.48

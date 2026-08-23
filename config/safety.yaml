@@ -57,6 +57,8 @@ green:
     - jalen_timing         # reads its own stopwatch; touches nothing
     - jalen_orb_size       # resizes its own overlay
     - jalen_orb_move       # moves its own overlay to a corner
+    - list_web_chats       # reads a local json file
+    - read_web_result      # reads what already came back
     - jalen_read_all       # speaks text already on his screen
     - private_mode
     - set_posture

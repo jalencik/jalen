@@ -250,6 +250,14 @@ _CLAUSE_JOINERS = re.compile(
 )
 
 
+def _which_ai(m: "re.Match") -> str:
+    """Whichever of the alternatives matched. 'chat gpt' -> 'chatgpt'."""
+    for group in m.groups():
+        if group:
+            return group.lower().replace(" ", "")
+    return ""
+
+
 def looks_like_a_name(value: str) -> bool:
     """True when this could plausibly be an app, window, file or folder name."""
     text = (value or "").strip()
@@ -615,6 +623,27 @@ def _rules() -> list[Rule]:
            r"|^(?:is|are) (?:the |my )?(?:agent|coding job)s? (?:done|finished)\??$"
            r"|^what(?:'s| is) claude (?:code )?(?:doing|working on)\??$", re.I),
          "list_coding_jobs", lambda m: {}, None),
+        # Signing in to the web chats. Routed locally because it is a state
+        # question with a short factual answer, and because he asks it
+        # exactly when a delegation has just failed - which is the worst
+        # moment for it to need the network.
+        #
+        # The DELEGATION itself is deliberately NOT routed here. It needs a
+        # structured work order - objective, criteria, constraints - and a
+        # regex cannot build one. The brain has the tool and the context.
+        (R(r"^sign (?:me )?(?:in|into) (?:to )?(chat ?gpt|gemini)$"
+           r"|^(?:am i |are you )?signed in(?: to)? (chat ?gpt|gemini)\??$"
+           r"|^log (?:me )?in(?:to)? (?:to )?(chat ?gpt|gemini)$", re.I),
+         "web_sign_in_state",
+         lambda m: {"agent": _which_ai(m)}, None),
+        (R(r"^(?:sign|register) me up (?:to |for )?(chat ?gpt|gemini)$"
+           r"|^create (?:me )?(?:an? )?(chat ?gpt|gemini) account$", re.I),
+         "open_signup", lambda m: {"agent": _which_ai(m)}, None),
+        (R(r"^close (?:the )?browser$|^shut (?:the )?browser$", re.I),
+         "close_browser", n, None),
+        (R(r"^(?:list|show|what) (?:are )?(?:the |my )?web (?:chats?|delegations?)\??$"
+           r"|^what have you asked (?:chat ?gpt|gemini)\??$", re.I),
+         "list_web_chats", lambda m: {}, None),
         # "Why are you so slow" was unanswerable for months because nothing
         # measured a turn. Now it is a question with a number for an answer.
         (R(r"^(?:how (?:fast|quick|slow) (?:was that|were you|are you)|"
