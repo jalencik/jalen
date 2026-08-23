@@ -609,3 +609,20 @@ personal:
   # The handle the channel post format signs off with. Empty keeps the one
   # written into the worked examples in docs/community_post_format.md.
   channel_handle: ""
+
+# ---------------------------------------------------------------------------
+# VAULT
+# ---------------------------------------------------------------------------
+vault:
+  # The passphrase box SHOWS what you type, on purpose.
+  #
+  # Masking defends against exactly one thing - somebody reading your screen -
+  # and on a personal laptop, alone, that threat is usually absent while the
+  # cost is present every single time: you cannot tell whether you mistyped a
+  # character, so you retype the whole thing or guess.
+  #
+  # Set this true to mask it by default. Either way the checkbox inside the
+  # box flips it, and the protections that actually matter are unchanged: the
+  # passphrase is never transcribed, never sent to any model, and never
+  # logged.
+  hide_passphrase: false

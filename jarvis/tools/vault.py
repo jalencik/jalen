@@ -242,12 +242,46 @@ def unlock_vault_prompt(timeout_s: float = 120.0) -> str:
     return result
 
 
+def caps_lock_on() -> bool:
+    """
+    Is Caps Lock on right now? False anywhere that cannot be asked.
+
+    A small thing that wastes a genuinely infuriating amount of time: a
+    masked box plus Caps Lock is a wrong password with no visible cause, and
+    people retype it three times before looking at the keyboard.
+    """
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.user32.GetKeyState(0x14) & 1)
+    except Exception:
+        return False
+
+
 def _ask_passphrase_on_screen(timeout_s: float) -> str | None:
     """
-    A small always-on-top password box. Returns the text, or None if
+    A small always-on-top passphrase box. Returns the text, or None if
     cancelled or timed out.
 
-    Its own Tk root on its own thread: the orb already owns a Tk mainloop on
+    VISIBLE BY DEFAULT, which is unusual and deliberate. His words: "that
+    passwords should be visible, the fact that it is invisible is so
+    uncomfortable you know? maybe we gotta come up with some better
+    approach."
+
+    He is right about the discomfort and it is not irrational. Masking
+    protects against exactly one thing - somebody reading your screen - and
+    on a personal laptop, alone, that threat is usually absent while the cost
+    is present every single time: you cannot tell whether you fat-fingered a
+    character, so you either retype the whole thing or guess.
+
+    So the choice is HIS, made visible, rather than a default nobody can see
+    the reason for. Shown by default, one click to hide, and the honest
+    consequence written next to the control instead of assumed. The
+    protections that actually matter here are untouched either way: it is
+    never transcribed, never sent to any model, never logged, and it goes out
+    of scope with the frame that reads it.
+
+    Its own Tk root on its own thread - the orb already owns a mainloop on
     another thread, and two roots in one interpreter cannot share one.
     """
     import queue
@@ -255,24 +289,59 @@ def _ask_passphrase_on_screen(timeout_s: float) -> str | None:
     import tkinter as tk
 
     answer: queue.Queue[str | None] = queue.Queue(maxsize=1)
+    from ..config import CONFIG
+
+    # Shown by default; vault.hide_passphrase: true in config flips it.
+    start_hidden = bool(CONFIG.get_path("vault.hide_passphrase", False))
 
     def run() -> None:
         root = tk.Tk()
         root.title("Jalen - unlock vault")
         root.attributes("-topmost", True)
         root.configure(bg="#14181d")
-        root.geometry("380x150")
-        tk.Label(
-            root, text="Vault passphrase", bg="#14181d", fg="#e8edf2",
-            font=("Segoe UI", 11),
-        ).pack(pady=(18, 6))
-        entry = tk.Entry(root, show="•", width=34, font=("Segoe UI", 11))
-        entry.pack()
+        root.geometry("440x230")
+
+        tk.Label(root, text="Vault passphrase", bg="#14181d", fg="#e8edf2",
+                 font=("Segoe UI", 12)).pack(pady=(18, 8))
+
+        entry = tk.Entry(root, width=38, font=("Consolas", 12),
+                         bg="#1d232b", fg="#e8edf2", insertbackground="#ff8a3d",
+                         relief="flat")
+        entry.pack(ipady=5)
         entry.focus_force()
-        tk.Label(
-            root, text="Typed here it is never transcribed, sent or logged.",
-            bg="#14181d", fg="#8b97a5", font=("Segoe UI", 8),
-        ).pack(pady=(8, 0))
+
+        hidden = tk.BooleanVar(value=start_hidden)
+        note = tk.Label(root, text="", bg="#14181d", fg="#8b97a5",
+                        font=("Segoe UI", 8))
+        counter = tk.Label(root, text="", bg="#14181d", fg="#5f6b78",
+                           font=("Segoe UI", 8))
+
+        def restyle(*_a) -> None:
+            entry.config(show="•" if hidden.get() else "")
+            note.config(
+                text=("Hidden. Nobody can read it - including you."
+                      if hidden.get() else
+                      "Visible, so you can check it. Anyone looking at your "
+                      "screen can read it too."),
+                fg="#8b97a5" if hidden.get() else "#c9a227",
+            )
+
+        def retally(*_a) -> None:
+            n = len(entry.get())
+            caps = "   CAPS LOCK IS ON" if caps_lock_on() else ""
+            counter.config(text=f"{n} character{'' if n == 1 else 's'}{caps}",
+                           fg="#ff6b6b" if caps else "#5f6b78")
+
+        tk.Checkbutton(
+            root, text="Hide what I type", variable=hidden, command=restyle,
+            bg="#14181d", fg="#8b97a5", selectcolor="#1d232b",
+            activebackground="#14181d", activeforeground="#e8edf2",
+            font=("Segoe UI", 9), bd=0, highlightthickness=0,
+        ).pack(pady=(10, 2))
+        counter.pack()
+        note.pack(pady=(2, 0))
+        tk.Label(root, text="Never transcribed, never sent to any model, never logged.",
+                 bg="#14181d", fg="#5f6b78", font=("Segoe UI", 8)).pack(pady=(6, 0))
 
         def submit(_event=None) -> None:
             answer.put(entry.get() or None)
@@ -283,10 +352,16 @@ def _ask_passphrase_on_screen(timeout_s: float) -> str | None:
             root.destroy()
 
         entry.bind("<Return>", submit)
+        entry.bind("<KeyRelease>", retally)
         root.bind("<Escape>", cancel)
         root.protocol("WM_DELETE_WINDOW", cancel)
-        tk.Button(root, text="Unlock", command=submit).pack(pady=8)
-        # Never leave a password box open forever on an unattended machine.
+        tk.Button(root, text="Unlock", command=submit, relief="flat",
+                  bg="#ff8a3d", fg="#14181d", font=("Segoe UI", 10, "bold"),
+                  padx=18, pady=3).pack(pady=10)
+
+        restyle()
+        retally()
+        # Never leave a passphrase box open forever on an unattended machine.
         root.after(int(timeout_s * 1000), cancel)
         root.mainloop()
 

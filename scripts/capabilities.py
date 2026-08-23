@@ -32,11 +32,19 @@ GROUPS: list[tuple[str, str, tuple[str, ...]]] = [
     ("Checking on itself", "It can test and diagnose itself now.",
      ("run_own_tests", "self_diagnose", "own_health", "open_own_project",
       "review_weaknesses", "log_weakness", "audit_digest")),
-    ("Handing work to other AIs", "Gemini, ChatGPT, Claude Code, the desktop app.",
+    ("Handing work to other AIs", "Gemini, ChatGPT, Hermes, Claude Code, the desktop app.",
      ("delegate_task", "follow_up_task", "list_delegations", "review_delegation",
       "master_prompt_guide", "hand_off_to", "ask_claude_code",
       "claude_code_status", "start_coding_job", "list_coding_jobs",
       "review_coding_job")),
+    ("Driving ChatGPT and Gemini in a browser",
+     "Opens Chrome, submits a work order, waits, reads the answer, and judges "
+     "it against what you actually asked for.",
+     ("web_delegate", "web_follow_up", "read_web_result", "list_web_chats",
+      "web_sign_in_state", "open_signup", "close_browser!")),
+    ("Learning and feedback",
+     "Getting faster at what you repeat, and asking how it did.",
+     ("what_i_have_learned", "forget_habit", "record_rating", "rating_history")),
     ("Code and projects", "Git, VS Code, and looking at what an agent changed.",
      ("project_status", "init_git_repo", "open_in_vscode")),
     ("Email", "Reading, drafting and sending Gmail.",
@@ -150,10 +158,21 @@ def main() -> int:
         print(f"- [ ] {star} **{name.replace('jalen_', '')}** - {what}")
     print()
 
+    def claims(pattern: str, name: str) -> bool:
+        """
+        Substring by default; a trailing "!" means EXACTLY this tool.
+
+        Needed because "close_browser" also matches "close_browser_tab", and
+        those are different browsers: one is the window Jalen drives ChatGPT
+        in, the other is a tab of his own. Filing them together would tell
+        him that closing a YouTube tab ends a delegation.
+        """
+        return name == pattern[:-1] if pattern.endswith("!") else pattern in name
+
     for title, blurb, prefixes in GROUPS:
         names = sorted(
             n for n in remaining
-            if any(p in n for p in prefixes)
+            if any(claims(p, n) for p in prefixes)
         )
         if not names:
             continue

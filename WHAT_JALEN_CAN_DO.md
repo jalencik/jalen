@@ -1,5 +1,5 @@
 
-# What Jalen can do  (147 things)
+# What Jalen can do  (156 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -15,11 +15,11 @@ _Its own controls. All free, all instant, none need the network._
 - [ ] * **set_posture** - Change how cautious the safety gate is
 - [ ] * **sleep** - Go quiet until you say the wake word
 - [ ] * **timing** - How long the last turn actually took, broken down
-- [ ] * **orb_size** - Make the orb bigger or smaller by voice
+- [ ] * **orb_move** - Move the orb to a corner of the screen
 - [ ] * **reload_config** - Re-read config without restarting
+- [ ] * **orb_size** - Resize the orb by voice, or Ctrl+Alt+B / Ctrl+Alt+S
 - [ ] * **restart** - Restart itself
 - [ ] * **greet** - Say hello
-- [ ] * **calibrate_hands** - Show what the camera sees, to learn the gesture
 - [ ] * **read_all** - Speak the rest of an answer that was cut short
 - [ ] * **resume** - Start listening again
 - [ ] * **quit** - Stop Jalen entirely
@@ -29,9 +29,7 @@ _Its own controls. All free, all instant, none need the network._
 - [ ] * **private_mode** - Stop writing anything to the audit log
 - [ ] * **unmute** - Talk again
 - [ ] * **morning_brief** - The day's summary on demand
-- [ ] * **hand_control** - Turn hand-gesture control of the orb on or off
 - [ ] * **audit_digest** - What Jalen did today
-- [ ] * **hand_status** - Whether the camera is on, and how many hands it sees
 
 ## Checking on itself
 _It can test and diagnose itself now._
@@ -44,7 +42,7 @@ _It can test and diagnose itself now._
 - [ ] * **self_diagnose** - Jalen's own diagnostics: packages, models, microphone, credentials, disk space, and what setup is still outstanding
 
 ## Handing work to other AIs
-_Gemini, ChatGPT, Claude Code, the desktop app._
+_Gemini, ChatGPT, Hermes, Claude Code, the desktop app._
 
 - [ ] * **ask_claude_code** - Open Claude Code in a folder and start it working on a prompt  [tells you first, you can say stop]
 - [ ] * **claude_code_status** - Check whether the Claude Code CLI is installed and where
@@ -58,6 +56,25 @@ _Gemini, ChatGPT, Claude Code, the desktop app._
 - [ ]   **review_coding_job** - Read back a finished coding job so you can judge it
 - [ ]   **review_delegation** - Read back a delegated conversation so you can judge it
 - [ ]   **start_coding_job** - Start Claude Code on a real job in a folder, in the BACKGROUND  [tells you first, you can say stop]
+
+## Driving ChatGPT and Gemini in a browser
+_Opens Chrome, submits a work order, waits, reads the answer, and judges it against what you actually asked for._
+
+- [ ] * **close_browser** - Close the browser Jalen was using for delegation  [tells you first, you can say stop]
+- [ ] * **list_web_chats** - The browser delegations so far, newest first
+- [ ] * **open_signup** - Open the sign-up page for ChatGPT or Gemini and hand it to him  [tells you first, you can say stop]
+- [ ]   **read_web_result** - Re-read what ChatGPT or Gemini said in the browser, with the original objective and success criteria alongside it, so it can be judged
+- [ ]   **web_delegate** - Hand a task to ChatGPT or Gemini in a REAL BROWSER and wait for the answer  [tells you first, you can say stop]
+- [ ]   **web_follow_up** - Send a correction into the SAME browser conversation, and wait again  [tells you first, you can say stop]
+- [ ] * **web_sign_in_state** - Whether he is signed in to ChatGPT or Gemini in Jalen's browser profile, and what to do about it  [tells you first, you can say stop]
+
+## Learning and feedback
+_Getting faster at what you repeat, and asking how it did._
+
+- [ ] * **forget_habit** - Forget a learned shortcut
+- [ ] * **rating_history** - His recent ratings and the average, for 'how am I doing' or 'what have I scored'
+- [ ]   **record_rating** - File a rating he gave for work just finished, and email a short summary to him
+- [ ] * **what_i_have_learned** - The requests Jalen has learned to answer without asking the model, and how much time that has saved
 
 ## Code and projects
 _Git, VS Code, and looking at what an agent changed._
@@ -213,11 +230,11 @@ _The vault, and typing into forms._
 
 ---
 
-125 tools: 14 amber, 100 green, 11 red
-85 of them also answer to a spoken phrase, for free.
+136 tools: 19 amber, 106 green, 11 red
+90 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
-  - the orb, and sizing it with your hands
+  - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S
   - the wake word, barge-in, and the follow-up window
   - the safety gate itself
 
