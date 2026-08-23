@@ -95,10 +95,19 @@ def test_the_orb_is_a_ghost_whenever_it_is_busy():
     import inspect
 
     source = inspect.getsource(Orb._run)
-    assert 'want = self._state != "idle"' in source, (
-        "the click-through rule has flipped back - a busy orb now blocks "
-        "the cursor, which is the exact bug this asserts against"
+    assert "set_click_through(self._hwnd, True)" in source, (
+        "the orb is no longer unconditionally click-through - it can eat "
+        "the cursor again"
     )
+    assert 'self._state == "idle"' not in source, (
+        "click-through has become conditional on state again; with no mouse "
+        "bindings left there is no reason for it ever to be solid"
+    )
+    for binding in ("<Button-1>", "<B1-Motion>", "<MouseWheel>"):
+        assert binding not in source, (
+            f"{binding} is back - the orb is draggable again, and he asked "
+            f"for it to stay still"
+        )
 
 
 # ------------------------------------------------------------ colour lookup

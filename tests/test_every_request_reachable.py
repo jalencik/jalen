@@ -102,12 +102,8 @@ SPOKEN = [
     ("read it all", "jalen_read_all"),
     ("close the youtube window", "close_browser_tab"),
     ("what tabs are open", "list_browser_tabs"),
-    ("make the orb bigger", "jalen_orb_size"),
-    ("make yourself bigger", "jalen_orb_size"),
-    ("make yourself smaller", "jalen_orb_size"),
-    ("normal size", "jalen_orb_size"),
-    ("move yourself to the top left", "jalen_orb_move"),
-    ("put yourself in the middle", "jalen_orb_move"),
+    ("play we are the people", "play_media"),
+    ("play timeless", "play_media"),
     # Sizing the orb with his hands, which he asked for twice with a photo.
     # Both directions are listed: the OFF phrase contains the ON phrase, so a
     # rule reordering would silently leave him with a camera he cannot switch
@@ -158,23 +154,22 @@ def test_the_orb_is_big_enough_to_see():
     assert int(CONFIG.get_path("ui.orb_size", 84)) >= 300
 
 
-def test_bare_size_words_do_not_hijack_a_follow_up():
+def test_bare_words_do_not_hijack_a_follow_up():
     """
-    Replaces the camera on/off ledger row, which went with the gesture.
+    The orb-size rules that used to sit here are gone, but the hazard they
+    guarded against is not: the follow-up window is open after every reply,
+    so any rule matching a bare adjective would swallow an answer meant for
+    something else.
 
-    The risk moved rather than disappeared. The follow-up window is open for
-    twelve seconds after every reply, so a rule matching a bare "smaller"
-    would swallow an answer meant for something else entirely. "orb" or
-    "yourself" is required, and this is the row that notices if that ever
-    gets relaxed.
+    These are the words most likely to be said in answer to a question.
     """
     r = IntentRouter(CONFIG)
-    for bare in ("bigger", "smaller", "normal", "huge"):
+    for bare in ("bigger", "smaller", "normal", "huge", "the first one",
+                 "the second one", "that one"):
         hit = r.route(bare)
-        assert hit is None or hit.tool != "jalen_orb_size", (
-            f"a bare {bare!r} now resizes the orb - it will eat follow-ups"
+        assert hit is None or hit.tool in ("cancel", "jalen_ack"), (
+            f"a bare {bare!r} routes to {hit.tool} - it will eat follow-ups"
         )
-    assert r.route("make yourself bigger").tool == "jalen_orb_size"
 
 
 def test_the_camera_is_not_armed_by_default():

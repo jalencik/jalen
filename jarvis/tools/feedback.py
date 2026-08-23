@@ -130,26 +130,50 @@ def parse_rating(said: str) -> "int | None":
     """
     Pull a score out of whatever he said. None if there isn't one.
 
-    People answer this in words as often as digits, and "I'd say about a
-    seven" has to count — an assistant that only accepts "7" has asked a
-    question it cannot hear the answer to.
+    THE BUG THIS EXISTS TO NOT REPEAT. He said:
+
+        "Jalen I rate your work out of 10 is 5 because you didn't properly
+         connected webdelegate"
+
+    and the email that reached his inbox said 10/10. The old version fell
+    through to "first number in the sentence", and the first number was the
+    SCALE, not the score. A wrong rating is worse than no rating: it reads
+    as data and it is fiction, and it was fiction that flattered itself.
+
+    So the scale is removed BEFORE any number is looked for. Three passes:
+
+        1. "8 out of 10" / "8/10"  - a number bound to the scale IS the score
+        2. strip every remaining mention of the scale
+        3. only then, look for a number or a number-word in what is left
     """
     import re
 
-    text = (said or "").lower()
+    text = " " + (said or "").lower().strip() + " "
+
+    # 1. The score stated WITH the scale, in that order.
+    match = re.search(r"\b(10|[0-9])\s*(?:/|out of|outta)\s*(?:10|ten)\b", text)
+    if match:
+        return int(match.group(1))
+
+    # 2. Otherwise the scale is noise, and it must not be mistaken for the
+    #    score. "out of 10 is 5" has to leave "is 5".
+    text = re.sub(r"\b(?:out of|outta|over|on a scale of)\s*(?:10|ten)\b", " ", text)
+    text = re.sub(r"/\s*(?:10|ten)\b", " ", text)
+    text = re.sub(r"\bout of\b", " ", text)
+
+    # 3. A digit first - people say "5" more often than "five" when scoring.
+    match = re.search(r"\b(10|[0-9])\b", text)
+    if match:
+        return int(match.group(1))
+
     words = {
         "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
         "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
     }
-    # "eight out of ten" - take the first number, not the ten.
-    match = re.search(r"\b(10|[0-9])\s*(?:/|out of)\s*10\b", text)
-    if match:
-        return int(match.group(1))
     for word, value in words.items():
         if re.search(rf"\b{word}\b", text):
             return value
-    match = re.search(r"\b(10|[0-9])\b", text)
-    return int(match.group(1)) if match else None
+    return None
 
 
 # Things that must never travel in an email. The audit log's own shapes are

@@ -492,32 +492,6 @@ class Orb:
             x, y = self.margin, self.margin
         return f"{w}x{h}+{x}+{y}"
 
-    def resize_by(self, delta: int) -> None:
-        """Grow or shrink the orb, clamped to something still usable."""
-        self._q.put(("resize", int(delta)))
-
-    def resize_to(self, size: int) -> None:
-        """
-        Set the orb to an absolute size, clamped exactly as resize_by is.
-
-        Used by "normal size" and by any caller that knows the number it
-        wants. Absolute rather than a delta because a delta that gets clipped
-        at the screen limit leaves the caller's idea of the size and the
-        orb's real size permanently out of step.
-        """
-        self._q.put(("resize_to", int(size)))
-
-    def move_to(self, position: str) -> None:
-        """
-        Put the orb in a named corner, cancelling any drag.
-
-        Named corners rather than coordinates: "top left" is something you
-        can say out loud and something that means the same thing on a laptop
-        screen and an external monitor, which pixel coordinates are not.
-        """
-        self._q.put(("move", str(position)))
-
-    @staticmethod
     def _clamp_size(root: tk.Tk, size: int) -> int:
         """
         Keep the orb inside the screen it is being drawn on.
@@ -926,31 +900,20 @@ class Orb:
             canvas.config(width=canvas_w, height=canvas_h)
             root.geometry(self._geometry(root, canvas_w, canvas_h))
 
-        # Drag to reposition. Only possible while IDLE — the orb is
-        # click-through in every other state, on purpose.
-        drag = {"x": 0, "y": 0}
-
-        def on_drag(event) -> None:
-            x = root.winfo_x() + event.x - drag["x"]
-            y = root.winfo_y() + event.y - drag["y"]
-            # Remembered so a later resize does not snap it back to its
-            # configured corner.
-            self._manual_xy = (x, y)
-            root.geometry(f"+{x}+{y}")
-
-        canvas.bind("<Button-1>", lambda e: drag.update(x=e.x, y=e.y))
-        canvas.bind("<B1-Motion>", on_drag)
-
-        # Scroll over the orb to resize it. Idle only, same as dragging.
+        # NO MOUSE BINDINGS AT ALL, and no click-through toggling.
         #
-        # Hand-gesture resizing used to live here too. It was removed: it
-        # needed a webcam held open, a ~200 MB dependency, and it never once
-        # worked for the person it was built for. Ctrl+Alt+B / Ctrl+Alt+S and
-        # "make yourself bigger" do the same job with no camera at all.
-        def on_wheel(event) -> None:
-            self.resize_by(24 if event.delta > 0 else -24)
-
-        canvas.bind("<MouseWheel>", on_wheel)
+        # There used to be drag-to-move and wheel-to-resize here, plus a rule
+        # that made the window solid while idle so the mouse could reach it.
+        # His verdict after using it: "make yourself bigger and smaller none
+        # of it is working, just forget it man, we do not need feature, you
+        # gotta remove this altogether, it should stay still in one place,
+        # and it should not move, it should not be draggable".
+        #
+        # Removing it makes the cursor problem go away permanently rather
+        # than conditionally. The window is click-through in EVERY state now,
+        # so there is no combination of circumstances in which the orb can
+        # take a click meant for something underneath it. That is a stronger
+        # guarantee than any state machine, and it needed less code.
 
         def tick() -> None:
             if self._stop.is_set():
@@ -970,22 +933,6 @@ class Orb:
                     previous = self._state
                     self._state = state
                     root.after(int(float(seconds) * 1000), lambda: setattr(self, "_state", previous))
-                elif kind == "move":
-                    self.position = str(value)
-                    self._manual_xy = None   # a named corner overrides a drag
-                    apply_size()
-                elif kind == "resize":
-                    self.size = self._clamp_size(root, self.size + int(value))  # type: ignore[arg-type]
-                    apply_size()
-                elif kind == "resize_to":
-                    target = self._clamp_size(root, int(value))  # type: ignore[arg-type]
-                    # Only touch the window when the size actually changed:
-                    # a geometry() call that changes nothing still makes the
-                    # window flicker.
-                    if target != self.size:
-                        self.size = target
-                        apply_size()
-
             now = time.monotonic()
             canvas.delete("all")
             name_h = name_height()
@@ -1028,11 +975,13 @@ class Orb:
             # wheel bindings below, which need a window the mouse can hit.
             # But those are for repositioning an orb you are looking at, i.e.
             # an IDLE one. Nobody drags the orb mid-sentence.
+            # Click-through, unconditionally. Nothing on this window is
+            # meant to be clicked, so there is no state in which it should
+            # intercept the mouse.
             if self.click_through_when_busy and self._hwnd:
-                want = self._state != "idle"
-                if want != self._click_through_applied:
-                    if set_click_through(self._hwnd, want):
-                        self._click_through_applied = want
+                if self._click_through_applied is not True:
+                    if set_click_through(self._hwnd, True):
+                        self._click_through_applied = True
 
             # RE-ASSERT ALWAYS-ON-TOP, periodically.
             #

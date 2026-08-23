@@ -58,10 +58,21 @@ CHECKS = [
     # The check is not deleted, it is REPLACED. A withdrawn request still
     # needs its replacement guarded, or "we removed it because he said so"
     # quietly becomes "we removed it and put nothing there".
-    ("M1", "1. orb resize, no camera required",
+    # WITHDRAWN AGAIN in message 14, after he actually used it: "make
+    # yourself bigger and smaller none of it is working, just forget it man,
+    # we do not need feature, you gotta remove this altogether, it should
+    # stay still in one place, and it should not move, it should not be
+    # draggable."
+    #
+    # What replaces it is stronger than what it replaced: with nothing on the
+    # orb meant to be clicked, the window is click-through in EVERY state, so
+    # there is no longer any combination of circumstances where it can take a
+    # click meant for something underneath it.
+    ("M1", "1. the orb never touches the cursor",
      lambda: not (ROOT / "jarvis/ui/gestures.py").exists()
-             and routes("make yourself bigger", "jalen_orb_size")
-             and "orb_bigger_hotkey" in (ROOT / "config/jarvis.yaml").read_text(encoding="utf-8")),
+             and not hasattr(__import__("jarvis.ui.orb", fromlist=["x"]).Orb, "resize_by")
+             and "set_click_through(self._hwnd, True)" in
+                 (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
     ("M1", "2. silent exit -> diagnosable",
      lambda: (ROOT / "jarvis/crashlog.py").exists() and "--why" in (ROOT / "run.py").read_text(encoding="utf-8")),
     ("M1", "3. wake model / his voice",
@@ -107,9 +118,8 @@ CHECKS = [
      lambda: "WAVES travelling outward" in (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
     ("M3", "2f. thinking = different motion",
      lambda: "cannot be mistaken for listening" in (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
-    ("M3", "2g. size the orb without touching it",
-     lambda: routes("make yourself smaller", "jalen_orb_size")
-             and routes("move yourself to the top left", "jalen_orb_move")),
+    ("M3", "2g. the orb stays put and stays out of the way",
+     lambda: not hasattr(__import__("jarvis.ui.orb", fromlist=["x"]).Orb, "move_to")),
     ("M3", "4. new-user sweep exists",
      lambda: (ROOT / "tests/test_new_user_sweep.py").exists()),
 

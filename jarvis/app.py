@@ -425,13 +425,57 @@ class Jalen:
 
     @staticmethod
     def _parse_yes_no(text: str) -> Optional[bool]:
-        low = text.strip().lower().rstrip(".!?")
-        if low in ("yes", "yeah", "yep", "yes please", "do it", "go ahead", "confirm",
-                   "sure", "ok", "okay", "correct", "affirmative", "send it"):
-            return True
-        if low in ("no", "nope", "don't", "dont", "stop", "cancel", "abort",
-                   "no thanks", "never mind", "nevermind", "wait"):
-            return False
+        """
+        Yes, no, or "that was not an answer".
+
+        THIS WAS A LIST OF EXACT STRINGS, and it cost him a send. In the log:
+
+            Jalen:  "send email: antonis@gmu.edu. Confirm?"
+            He:     "Of course."
+            Jalen:  "No answer, so I've cancelled it."
+
+        "Of course" was not in the list, so an unmistakable yes became a
+        timeout. His words afterwards: "as long as I am showing any kind of
+        agreement, it should confirm you know". He is right, and exact-match
+        was always going to lose this fight - people do not answer a
+        confirmation from a menu.
+
+        So: NEGATIVES ARE CHECKED FIRST, then agreement is looked for
+        anywhere in the sentence rather than as the whole of it. The order
+        matters more than the lists do - "no, don't send it" contains "send
+        it", and a yes-first search would send the email he just refused.
+        """
+        low = " " + re.sub(r"[^a-z0-9' ]", " ", text.strip().lower()) + " "
+        low = re.sub(r"\s+", " ", low)
+        if not low.strip():
+            return None
+
+        # --- NO, and first, because a refusal usually mentions the action ---
+        for phrase in (
+            " no ", " nope ", " nah ", " don't ", " dont ", " do not ",
+            " stop ", " cancel ", " abort ", " no thanks ", " never mind ",
+            " nevermind ", " wait ", " hold on ", " not yet ", " not now ",
+            " forget it ", " leave it ", " skip it ", " negative ",
+            " definitely not ", " absolutely not ", " i'd rather not ",
+        ):
+            if phrase in low:
+                return False
+
+        # --- YES, anywhere in the sentence ---
+        for phrase in (
+            " yes ", " yeah ", " yep ", " yup ", " ya ", " sure ", " ok ",
+            " okay ", " okey ", " of course ", " course ", " certainly ",
+            " definitely ", " absolutely ", " please do ", " do it ",
+            " go ahead ", " go on ", " go for it ", " send it ", " send them ",
+            " confirm ", " confirmed ", " correct ", " affirmative ",
+            " that's right ", " thats right ", " exactly ", " right ",
+            " carry on ", " continue ", " proceed ", " fine ", " alright ",
+            " all right ", " why not ", " i agree ", " agreed ", " approve ",
+            " approved ", " sounds good ", " perfect ", " great ", " good ",
+            " let's do it ", " lets do it ", " make it happen ", " yes please ",
+        ):
+            if phrase in low:
+                return True
         return None
 
     # ---------------------------------------------------------------- handling
@@ -542,16 +586,6 @@ class Jalen:
         obstacle is the mute; paused, it's the pause; idle, it's that nothing
         is listening yet. One key resolves whichever one is in the way.
         """
-        # Resize keys. They return False: pressing Ctrl+Alt+B means "make
-        # the orb bigger", not "and now listen to me" — turning a resize
-        # into a listening window would have the orb pop open every time he
-        # adjusted its size.
-        if signal == "orb-bigger":
-            self._resize_orb("bigger")
-            return False
-        if signal == "orb-smaller":
-            self._resize_orb("smaller")
-            return False
         if signal == "mute":
             self.muted = True
             self.orb.set_state("muted")
@@ -629,16 +663,6 @@ class Jalen:
                 daemon=True, name="jalen-read-all",
             ).start()
             return None
-        if tool == "jalen_orb_size":
-            # Local, not a REGISTRY tool: it needs the orb object this
-            # process owns, it must work with the network down, and the
-            # brain has no business round-tripping a window resize.
-            return self._resize_orb(
-                str(intent.args.get("change", "") or ""),
-                intent.args.get("delta"),
-            )
-        if tool == "jalen_orb_move":
-            return self._move_orb(str(intent.args.get("position", "") or ""))
         if tool == "jalen_timing":
             # Deliberately reports the PREVIOUS turn, not this one: this
             # turn has not finished, and its own first_audio mark is the
@@ -1513,6 +1537,20 @@ class Jalen:
             return True
         if self._pending_rating is not None:
             return True
+        # STILL THE SAME SENTENCE.
+        #
+        # He gets cut off at the fast endpoint, keeps talking, and the rest
+        # arrives as its own utterance a second later. Without this, the gate
+        # threw that fragment away for not starting with his name - which is
+        # exactly the "why do I have to keep repeating hey Jalen" complaint,
+        # and it was a hole I opened when I added the gate.
+        #
+        # Narrow on purpose: it is not "anything within N seconds". Either
+        # the fragment OPENS like a continuation ("and also...", "to my
+        # channel") or what he said last ENDED like one ("...send it to").
+        # Noise satisfies neither.
+        if self._continues_last_utterance(text):
+            return True
         # THE EMERGENCY STOP IS EXEMPT, and it has to be.
         #
         # "stop", "cancel" and "abort" are safety.kill_phrases — the thing
@@ -1528,6 +1566,15 @@ class Jalen:
         if (text or "").lower().strip().rstrip(".!?") in self.kill_phrases:
             return True
         return addressed_to_jalen(text)
+
+    def _continues_last_utterance(self, text: str) -> bool:
+        """Is this the rest of the sentence he was already saying?"""
+        window = float(self.cfg.get_path("conversation.stitch_window_s", 8))
+        if not self._last_user_text:
+            return False
+        if time.monotonic() - self._last_user_at > window:
+            return False
+        return is_continuation(text) or looks_unfinished(self._last_user_text)
 
     # ------------------------------------------------------------- feedback
     RATING_EXPIRES_S = 300.0
@@ -1606,72 +1653,6 @@ class Jalen:
             state = "idle"
         self._orb_listening = listening
         self.orb.set_state(state)
-
-    # --------------------------------------------------------- orb controls
-    #
-    # These replaced hand-gesture resizing, which was removed. The gesture
-    # needed a webcam held open for a feature used a few times a month, cost
-    # a ~200 MB dependency, and — the part that settled it — never once
-    # worked for the person who asked for it. A key combination and a spoken
-    # sentence do the same job, work with the camera unplugged, and cannot
-    # be triggered by accident while you gesture at somebody in a call.
-
-    # What each word means, in pixels of orb.
-    ORB_STEP = 40
-    ORB_PRESETS = {
-        "normal": 84, "default": 84, "small": 140, "medium": 260,
-        "big": 420, "large": 420, "huge": 640, "tiny": 120,
-    }
-
-    ORB_CORNERS = {
-        "top-left": ("top left", "upper left", "top-left"),
-        "top-right": ("top right", "upper right", "top-right"),
-        "bottom-left": ("bottom left", "lower left", "bottom-left"),
-        "bottom-right": ("bottom right", "lower right", "bottom-right"),
-        "center": ("center", "centre", "middle"),
-    }
-
-    def _resize_orb(self, change: str, delta: object = None) -> str:
-        """
-        "bigger" / "smaller" / "normal size" / an explicit delta.
-
-        Returns what it did, in the words he used, because a resize is the
-        one command whose result he can already see — a long confirmation
-        would be read out over a change he has watched happen.
-        """
-        word = (change or "").strip().lower()
-
-        if delta is not None and not word:
-            try:
-                step = int(delta)   # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                step = 0
-            if step:
-                self.orb.resize_by(step)
-                return "Bigger." if step > 0 else "Smaller."
-
-        for name, size in self.ORB_PRESETS.items():
-            if name in word:
-                self.orb.resize_to(size)
-                return f"{name.capitalize()} size."
-
-        if any(w in word for w in ("bigger", "larger", "grow", "up", "increase")):
-            self.orb.resize_by(self.ORB_STEP)
-            return "Bigger."
-        if any(w in word for w in ("smaller", "shrink", "down", "decrease", "less")):
-            self.orb.resize_by(-self.ORB_STEP)
-            return "Smaller."
-        return "Bigger or smaller? I can also do normal, big, or huge."
-
-    def _move_orb(self, position: str) -> str:
-        """Put the orb in a named corner."""
-        want = (position or "").strip().lower().replace("_", " ")
-        for canonical, spellings in self.ORB_CORNERS.items():
-            if any(spelling in want for spelling in spellings):
-                self.orb.move_to(canonical)
-                return f"Moved to the {canonical.replace('-', ' ')}."
-        return ("Where to? Top left, top right, bottom left, bottom right, "
-                "or the middle.")
 
     def _on_speaker_state(self, state: str) -> None:
         """

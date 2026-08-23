@@ -44,9 +44,13 @@ class _Gate:
         self._awaiting_stop = False
         self._awaiting_reply = False
         self._pending_rating = None
+        self._last_user_text = ""
+        self._last_user_at = 0.0
+        self.cfg = CONFIG
         self.kill_phrases = KILL_PHRASES
 
     should_act_on = Jalen.should_act_on
+    _continues_last_utterance = Jalen._continues_last_utterance
 
 
 def _reaches_something(router, phrase: str) -> str:

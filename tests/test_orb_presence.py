@@ -116,20 +116,29 @@ def test_the_wave_headroom_leaves_room_for_the_rings():
     assert WAVE_HEADROOM >= 1.55
 
 
-def test_resize_is_reachable_by_voice():
+def test_the_orb_has_no_controls_at_all():
     """
-    The orb is click-through while BUSY, so it receives no mouse events at
-    all in those states — including scroll. Voice and Ctrl+Alt+B /
-    Ctrl+Alt+S are the control surfaces that work in every state.
+    Resizing and moving were removed at his request, after he tried them:
+    "make yourself bigger and smaller none of it is working, just forget it
+    man... it should stay still in one place, and it should not move, it
+    should not be draggable."
+
+    The removal is what makes the cursor guarantee unconditional. With
+    nothing on the window meant to be clicked, it is click-through in every
+    state, and no sequence of events can make it eat a click again.
     """
     from jarvis.brain.router import IntentRouter
+    from jarvis.ui.orb import Orb
 
     router = IntentRouter(CONFIG)
-    bigger = router.route("make the orb bigger")
-    smaller = router.route("make the orb smaller")
-    assert bigger is not None and bigger.tool == "jalen_orb_size"
-    assert bigger.args["change"] == "bigger"
-    assert smaller is not None and smaller.args["change"] == "smaller"
+    for phrase in ("make the orb bigger", "make yourself smaller",
+                   "normal size", "move yourself to the top left"):
+        hit = router.route(phrase)
+        assert hit is None or not hit.tool.startswith("jalen_orb"), (
+            f"{phrase!r} still reaches an orb control"
+        )
+    for gone in ("resize_by", "resize_to", "move_to"):
+        assert not hasattr(Orb, gone), f"Orb.{gone} survived the removal"
 
 
 @pytest.mark.parametrize("phrase", ["smaller", "bigger", "make it bigger"])

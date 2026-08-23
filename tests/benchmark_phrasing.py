@@ -64,7 +64,7 @@ def route_tool(router, text):
 # ============================================================================
 PHRASES: list[tuple[str, str]] = [
     # ---- media -------------------------------------------------------------
-    ("play timeless", "open_target"),
+    ("play timeless", "play_media"),
     ("put on some music", "media_play_pause"),
     ("put on the music", "media_play_pause"),
     ("pause the music", "media_play_pause"),

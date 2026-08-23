@@ -356,7 +356,7 @@ def test_every_new_rule_targets_a_real_registered_tool(router):
     from jarvis import tools
 
     app_level_intents = {
-        "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_quit", "jalen_pause", "jalen_ack", "jalen_timing", "jalen_orb_size", "jalen_orb_move", "jalen_read_all",
+        "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_quit", "jalen_pause", "jalen_ack", "jalen_timing",  "jalen_read_all",
         "jalen_resume", "jalen_restart", "private_mode", "set_posture", "morning_brief",
         "audit_digest", "cancel", "acknowledge", "greet", "reload_config",
         # Hand-gesture orb resizing. App-level for the same reason

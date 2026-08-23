@@ -154,12 +154,7 @@ def clear_stop_request() -> None:
 # that safe without a lock.
 SIGNAL_PATH = RUNTIME_DIR / "jalen.signal"
 
-# orb-bigger / orb-smaller replaced hand-gesture resizing. They go
-# through the same sentinel file as the wake key because they come
-# from the same separate hotkey process, and a resize must work while
-# Jalen is mid-sentence — i.e. from outside his own loop.
-VALID_SIGNALS = frozenset({"wake", "mute", "unmute", "toggle",
-                           "orb-bigger", "orb-smaller"})
+VALID_SIGNALS = frozenset({"wake", "mute", "unmute", "toggle"})
 
 
 def send_signal(name: str) -> None:

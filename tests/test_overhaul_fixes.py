@@ -355,7 +355,7 @@ def test_self_controls_are_never_gated():
 
     engine = SafetyEngine(CONFIG)
     controls = ["jalen_quit", "jalen_pause", "jalen_resume", "jalen_restart",
-                "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_ack", "jalen_timing", "jalen_orb_size", "jalen_orb_move", "jalen_read_all", "private_mode",
+                "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_ack", "jalen_timing",  "jalen_read_all", "private_mode",
                 "set_posture", "reload_config", "audit_digest", "morning_brief"]
     gated = {}
     for tool in controls:
@@ -741,10 +741,23 @@ def test_named_site_search_routes_locally(router, phrase, site, query):
     assert intent.args["query"] == query
 
 
-def test_play_without_a_site_still_means_a_local_file(router):
-    """"play timeless" means the file on this machine; only "... on
-    youtube" means YouTube. The local-file rule was grabbing both."""
-    assert route_tool(router, "play timeless") == "open_target"
+def test_play_without_a_site_tries_local_then_youtube(router):
+    """
+    WAS: "play timeless" means the file on this machine, full stop.
+
+    That was wrong in the common case and he hit it: "this bitch has been
+    searching for 'we are the people' when I am actually saying play we are
+    the people man". open_target searched his Desktop for a FILE by that
+    name, found nothing, and said so. Nobody saying "play We Are The People"
+    means "look for a file called that".
+
+    play_media keeps the local reading - "play my interview recording" is
+    still a file - and falls through to YouTube when nothing local matches,
+    so neither reading needs him to say where.
+    """
+    assert route_tool(router, "play timeless") == "play_media"
+    assert route_tool(router, "play we are the people") == "play_media"
+    assert route_tool(router, "play timeless on youtube") == "play_on_youtube"
 
 
 def test_youtube_title_notification_count_is_not_spoken():

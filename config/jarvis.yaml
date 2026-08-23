@@ -180,17 +180,31 @@ vad:
   # So the fast path is the common case by a wide margin.
 
   # Fast endpoint. What almost every turn actually pays.
-  # Raise it if he gets cut off mid-sentence more than rarely; lower it
-  # (450 is about the floor before natural pauses start tripping it) if
-  # replies still feel like they lag behind him.
-  fast_silence_ms: 600
+  #
+  # WAS 600ms, and 600 was tuned for latency rather than for him. His words:
+  # "it is making me rush you know, just because I wanna end my sentence, it
+  # is natural while I am speaking might be 3 4 seconds of pauses".
+  #
+  # 600ms cuts a thinking pause every time. The cost of cutting him off is
+  # not 600ms - it is the whole turn, plus saying it again, plus the "why is
+  # it not listening to me". The cost of waiting is 800ms once.
+  #
+  # This is deliberately NOT raised to 3-4 seconds. Waiting four seconds
+  # after every sentence would make it feel broken in the other direction.
+  # The pauses longer than this are caught by the continuation stitching
+  # instead (conversation.stitch_window_s): he keeps talking, the fragment
+  # is recognised as part of the same thought, and the two are joined.
+  fast_silence_ms: 1400
 
   # Patient endpoint. Only used after the transcript says he isn't done.
   # This was the value EVERY turn used to pay, and 700ms before that —
   # 700 guillotined people mid-thought ("open chrome ... and go to
   # youtube" was captured as just "open chrome": cut at 1.34s, 1.38s of
   # 4.75s kept), which is what "it is ignoring me" was.
-  silence_ms: 2000
+  # Patient endpoint, used once the transcript says he is mid-sentence.
+  # Raised with the fast one: if the words say more is coming, waiting is
+  # obviously right.
+  silence_ms: 4000
 
   min_speech_ms: 250               # ignore blips shorter than this
 
@@ -431,11 +445,6 @@ ui:
   # cursor stopped working whenever Jalen was doing anything at all.
   # Windows only; a no-op elsewhere.
   click_through_when_busy: true
-  # Resizing the orb from anywhere, without the camera that used to do it.
-  # Each falls back to the next free combination if another application
-  # already owns it — see scripts/hotkeys.py.
-  orb_bigger_hotkey: ctrl+alt+b
-  orb_smaller_hotkey: ctrl+alt+s
   transcript_window: true          # C15 long content appears here instead of being read out
   show_transcript: true            # small caption under the orb showing the last thing
                                     # Jalen heard (the STT transcript); auto-hides after ~8s

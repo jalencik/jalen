@@ -56,12 +56,16 @@ class _Gate:
         self._awaiting_stop = stop
         self._awaiting_reply = reply
         self._pending_rating = None
+        self._last_user_text = ""
+        self._last_user_at = 0.0
+        self.cfg = CONFIG
         # The real list, not a stand-in. The emergency stop is exempt from
         # the gate (see tests/test_stop_and_quit.py), and a fake list here
         # would let this file pass while the exemption was broken.
         self.kill_phrases = set(CONFIG.get_path("safety.kill_phrases"))
 
     should_act_on = Jalen.should_act_on
+    _continues_last_utterance = Jalen._continues_last_utterance
 
 
 # ---------------------------------------------------------------------------

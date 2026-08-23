@@ -212,7 +212,77 @@ def _first_youtube_result(query: str) -> tuple[str | None, str | None]:
     return video_id, title
 
 
+# What "play X" actually means, when he did not say where.
+#
+# HIS COMPLAINT, and it was fair:
+#
+#     "this bitch has been searching for 'we are the people' when I am
+#      actually saying play we are the people man, it means it cannot handle
+#      it without that go to youtube jargon"
+#
+# It routed to open_target - a search of his Desktop and Documents for a FILE
+# by that name - which found nothing and said so. Nobody saying "play We Are
+# The People" means "look for a file called that", and requiring him to add
+# "on YouTube" is making him speak the router's language instead of his own.
+#
+# LOCAL FIRST, THEN YOUTUBE, because both readings are real: "play my
+# interview recording" is a file and "play We Are The People" is not. Trying
+# the file search costs nothing when it misses, and a hit is unambiguous.
+_MEDIA_FILLER = re.compile(
+    r"^(?:me|us|it|that|this|the|a|an|some|my)\s+", re.I
+)
+
+
+def _strip_filler(query: str) -> str:
+    """
+    "play me the We are the people" -> "We are the people".
+
+    Straight out of the log: open_target was handed "me the We are the
+    people" and searched for a file by that literal name. Repeated because
+    "me the" is two fillers, and one pass leaves the second.
+    """
+    text = (query or "").strip()
+    for _ in range(3):
+        stripped = _MEDIA_FILLER.sub("", text).strip()
+        if stripped == text:
+            break
+        text = stripped
+    return text or (query or "").strip()
+
+
+def play_media(query: str) -> str:
+    """
+    Play something. A local file if there is one, YouTube otherwise - GREEN.
+
+    Never answers "I couldn't find an app, file or folder called ..." for a
+    song title, which is the reply that started this.
+    """
+    wanted = _strip_filler(query)
+    if not wanted:
+        return "Play what?"
+
+    # Local files, quietly. Only an actual media file counts - matching a
+    # PDF called "we are the people" and opening it would be worse than
+    # missing.
+    try:
+        from .launcher import find_files
+
+        hits = [h for h in (find_files(wanted) or [])
+                if str(h).lower().endswith(
+                    (".mp3", ".mp4", ".m4a", ".wav", ".flac", ".mkv", ".avi",
+                     ".mov", ".webm", ".ogg", ".wma", ".aac"))]
+        if hits:
+            from .launcher import open_target
+
+            return open_target(str(hits[0]))
+    except Exception:
+        pass       # a failed local search must never block the YouTube path
+
+    return play_on_youtube(wanted)
+
+
 REGISTRY: dict[str, Any] = {
+    "play_media": play_media,
     "search_site": search_site,
     "play_on_youtube": play_on_youtube,
 }

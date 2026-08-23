@@ -55,11 +55,10 @@ green:
     - jalen_sleep
     - jalen_ack            # answering to his own name
     - jalen_timing         # reads its own stopwatch; touches nothing
-    - jalen_orb_size       # resizes its own overlay
-    - jalen_orb_move       # moves its own overlay to a corner
     - list_web_chats       # reads a local json file
     - read_web_result      # reads what already came back
     - rating_history       # reads a local file of his own scores
+    - play_media           # opens a media file or a youtube video
     - what_i_have_learned  # reads its own habit file
     # GREEN despite sending an email, and the reason is that the destination
     # is not a choice: feedback.FEEDBACK_TO is a constant, the recipient is

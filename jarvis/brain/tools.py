@@ -558,6 +558,12 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "to forget all of them. Use when he says a habit is wrong.",
         {"text": ("string", "the request to forget; empty means all", False)},
     ),
+    "play_media": (
+        "Play something he named without saying where: a local media file if "
+        "one matches, YouTube otherwise. Use for 'play X' when he did not "
+        "say YouTube - never make him add the word.",
+        {"query": ("string", "what to play", True)},
+    ),
     "record_rating": (
         "File a rating he gave for work just finished, and email a short "
         "summary to him. Only when he has actually given a score - never "

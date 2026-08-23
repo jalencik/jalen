@@ -565,32 +565,32 @@ def _rules() -> list[Rule]:
         # "orb" is required, not optional. A bare "smaller" would match this
         # and hijack a follow-up meant for something else — and the follow-up
         # window is open for twelve seconds after every reply.
-        # "orb" or "yourself" is REQUIRED, never a bare "bigger". The
-        # follow-up window is open for twelve seconds after every reply, and
-        # a bare "smaller" would hijack an answer meant for something else.
-        (R(r"^(?:make |set )?(?:the |your ?)?(?:orb|yourself|you)\s+"
-           r"(bigger|larger|smaller|tinier|huge|big|small|tiny|normal|medium)"
-           r"(?: size)?$"
-           r"|^(?:make (?:the |your )?orb (bigger|larger|smaller|tinier)"
-           r"|(bigger|larger|smaller|tinier) orb"
-           r"|orb (bigger|larger|smaller|tinier))$"
-           r"|^(?:orb|yourself) (?:back to )?normal(?: size)?$"
-           r"|^normal (?:orb )?size$", re.I),
-         "jalen_orb_size",
-         lambda m: {"change": next((g for g in m.groups() if g), "normal")},
-         None),
-        # Moving it. Named corners only — "top left" means the same thing on
-        # a laptop panel and a 4K monitor, which pixel coordinates do not.
-        (R(r"^(?:move|put|place|send) (?:the |your ?)?(?:orb|yourself|you) "
-           r"(?:to |in |into |at )?(?:the )?"
-           r"(top ?left|top ?right|bottom ?left|bottom ?right|upper ?left"
-           r"|upper ?right|lower ?left|lower ?right|middle|cent[er]{2})"
-           r"(?: corner)?$"
-           r"|^orb (?:to (?:the )?)?(top ?left|top ?right|bottom ?left"
-           r"|bottom ?right|middle|cent[er]{2})$", re.I),
-         "jalen_orb_move",
-         lambda m: {"position": next((g for g in m.groups() if g), "")},
-         None),
+        # Orb size and position rules lived here. Removed with the
+        # feature: "we do not need feature, you gotta remove this
+        # altogether, it should stay still in one place". The orb is now
+        # fixed by ui.orb_position and ui.orb_size in config.
+
+        # Signing in to the web chats. Routed locally because it is a state
+        # question with a short factual answer, and because he asks it
+        # exactly when a delegation has just failed - which is the worst
+        # moment for it to need the network.
+        #
+        # The DELEGATION itself is deliberately NOT routed here. It needs a
+        # structured work order - objective, criteria, constraints - and a
+        # regex cannot build one. The brain has the tool and the context.
+        (R(r"^sign (?:me )?(?:in|into) (?:to )?(chat ?gpt|gemini)$"
+           r"|^(?:am i |are you )?signed in(?: to)? (chat ?gpt|gemini)\??$"
+           r"|^log (?:me )?in(?:to)? (?:to )?(chat ?gpt|gemini)$", re.I),
+         "web_sign_in_state",
+         lambda m: {"agent": _which_ai(m)}, None),
+        (R(r"^(?:sign|register) me up (?:to |for )?(chat ?gpt|gemini)$"
+           r"|^create (?:me )?(?:an? )?(chat ?gpt|gemini) account$", re.I),
+         "open_signup", lambda m: {"agent": _which_ai(m)}, None),
+        (R(r"^close (?:the )?browser$|^shut (?:the )?browser$", re.I),
+         "close_browser", n, None),
+        (R(r"^(?:list|show|what) (?:are )?(?:the |my )?web (?:chats?|delegations?)\??$"
+           r"|^what have you asked (?:chat ?gpt|gemini)\??$", re.I),
+         "list_web_chats", lambda m: {}, None),
         # Jalen checking Jalen. Routed locally because the answer is a
         # subprocess and a summary, not a conversation - and because he asks
         # it precisely when something feels wrong, which is the worst moment
@@ -623,44 +623,6 @@ def _rules() -> list[Rule]:
            r"|^(?:is|are) (?:the |my )?(?:agent|coding job)s? (?:done|finished)\??$"
            r"|^what(?:'s| is) claude (?:code )?(?:doing|working on)\??$", re.I),
          "list_coding_jobs", lambda m: {}, None),
-        # What it has learned. Routed locally: it reads one small file, and
-        # he asks it precisely when he wants to check whether a shortcut is
-        # wrong - which must not need the network.
-        (R(r"^what have you learn(?:ed|t)(?: (?:about me|so far))?\??$"
-           r"|^(?:what are|show me) your habits\??$"
-           r"|^are you getting (?:faster|better)\??$"
-           r"|^what do you know about me\??$", re.I),
-         "what_i_have_learned", lambda m: {}, None),
-        (R(r"^forget (?:that|your habits"
-           r"|everything (?:you'?ve|you have) learn(?:ed|t)"
-           r"|what (?:you'?ve|you have) learn(?:ed|t))$"
-           r"|^stop doing that automatically$", re.I),
-         "forget_habit", lambda m: {}, None),
-        (R(r"^(?:what|how) (?:have i |did i )?rated?(?: you)?\??$"
-           r"|^(?:my|show my|what are my) ratings\??$"
-           r"|^how am i rating you\??$", re.I),
-         "rating_history", lambda m: {}, None),
-        # Signing in to the web chats. Routed locally because it is a state
-        # question with a short factual answer, and because he asks it
-        # exactly when a delegation has just failed - which is the worst
-        # moment for it to need the network.
-        #
-        # The DELEGATION itself is deliberately NOT routed here. It needs a
-        # structured work order - objective, criteria, constraints - and a
-        # regex cannot build one. The brain has the tool and the context.
-        (R(r"^sign (?:me )?(?:in|into) (?:to )?(chat ?gpt|gemini)$"
-           r"|^(?:am i |are you )?signed in(?: to)? (chat ?gpt|gemini)\??$"
-           r"|^log (?:me )?in(?:to)? (?:to )?(chat ?gpt|gemini)$", re.I),
-         "web_sign_in_state",
-         lambda m: {"agent": _which_ai(m)}, None),
-        (R(r"^(?:sign|register) me up (?:to |for )?(chat ?gpt|gemini)$"
-           r"|^create (?:me )?(?:an? )?(chat ?gpt|gemini) account$", re.I),
-         "open_signup", lambda m: {"agent": _which_ai(m)}, None),
-        (R(r"^close (?:the )?browser$|^shut (?:the )?browser$", re.I),
-         "close_browser", n, None),
-        (R(r"^(?:list|show|what) (?:are )?(?:the |my )?web (?:chats?|delegations?)\??$"
-           r"|^what have you asked (?:chat ?gpt|gemini)\??$", re.I),
-         "list_web_chats", lambda m: {}, None),
         # "Why are you so slow" was unanswerable for months because nothing
         # measured a turn. Now it is a question with a number for an answer.
         (R(r"^(?:how (?:fast|quick|slow) (?:was that|were you|are you)|"
@@ -697,8 +659,18 @@ def _rules() -> list[Rule]:
         # name finds the actual track.
         # Not "... on youtube" — that is a YouTube request, handled below,
         # and this local-file rule was grabbing it first.
+        # "play we are the people" - a song, not a filename.
+        #
+        # This used to point at open_target, a search of his Desktop and
+        # Documents for a FILE by that name. In the log it was handed "me the
+        # We are the people" and answered "I couldn't find an app, file or
+        # folder called me the We are the people". His reply: "it means it
+        # cannot handle it without that go to youtube jargon man".
+        #
+        # play_media tries local media files first and falls through to
+        # YouTube, so both readings work and neither needs him to say where.
         (R(r"^(?:play|put on) (?!.* on youtube$)(.+)$", re.I),
-         "open_target", lambda m: {"name": m.group(1).strip()}, None),
+         "play_media", lambda m: {"query": m.group(1).strip()}, None),
         (R(r"^(next|skip)( song| track| this)?$", re.I), "media_next", n, None),
         (R(r"^(previous|back|last) (song|track)$", re.I), "media_previous", n, None),
         (R(r"^volume (up|down)$", re.I),
