@@ -117,6 +117,16 @@ def probe_other_ai() -> list[tuple[str, str, str]]:
 
     import os
 
+    # Hermes, the fourth opinion. Not probed with a live call: unlike the
+    # other two it may be billed per request through OpenRouter, and a
+    # readiness check that quietly spends money is a bad readiness check.
+    hermes_key = os.getenv("HERMES_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+    out.append((
+        "Hermes", AVAILABLE if hermes_key else BLOCKED,
+        f"key present ({agents.HERMES_MODEL})" if hermes_key
+        else "no HERMES_API_KEY or OPENROUTER_API_KEY - openrouter.ai/keys",
+    ))
+
     if os.getenv("OPENAI_API_KEY"):
         answer, error = agents._ask_chatgpt(
             [{"role": "user", "content": "Reply with: ok"}])
@@ -127,6 +137,74 @@ def probe_other_ai() -> list[tuple[str, str, str]]:
         out.append(("ChatGPT", BLOCKED,
                     "no OPENAI_API_KEY - the code and library are ready, "
                     "add a key from platform.openai.com/api-keys"))
+    return out
+
+
+def probe_browser() -> list[tuple[str, str, str]]:
+    """
+    The browser route to ChatGPT and Gemini.
+
+    Worth its own section because it is the one that works when the API keys
+    do NOT - it uses the web chats he already pays for, and neither the 403
+    on his Gemini key nor the missing OpenAI key touches it.
+
+    Nothing here opens a window. It asks whether the parts EXIST.
+    """
+    out = []
+    have_playwright = _importable("playwright")
+    out.append((
+        "Browser automation",
+        AVAILABLE if have_playwright else MISSING,
+        "playwright installed; uses your INSTALLED Chrome, nothing downloaded"
+        if have_playwright
+        else "pip install playwright",
+    ))
+
+    profile = ROOT / "data" / "browser_profile"
+    signed_in = profile.is_dir() and any(profile.rglob("Cookies"))
+    out.append((
+        "Signed in to the web chats",
+        AVAILABLE if signed_in else PARTIAL,
+        "the profile has a session; delegation can run unattended"
+        if signed_in
+        else "you have not signed in inside Jalen's Chrome profile yet - "
+             'say "sign me in to ChatGPT" once and it persists',
+    ))
+
+    from jarvis.tools import webagent
+
+    chats = webagent._load()
+    out.append((
+        "Supervised delegation",
+        AVAILABLE if chats else PARTIAL,
+        f"{len(chats)} conversation(s) run and judged" if chats
+        else "machinery tested against a real browser (11 tests); never yet "
+             "pointed at the real sites",
+    ))
+    return out
+
+
+def probe_learning() -> list[tuple[str, str, str]]:
+    from jarvis import habits
+
+    data = habits._load()
+    learned = [v for v in data.values() if v.get("count", 0) >= habits.LEARN_AFTER]
+    out = [(
+        "Learning your repeats",
+        AVAILABLE if learned else PARTIAL,
+        f"{len(learned)} habit(s) learned, {len(data)} being watched"
+        if learned
+        else f"nothing learned yet - it needs the same request "
+             f"{habits.LEARN_AFTER} times",
+    )]
+    ratings = ROOT / "data" / "ratings.jsonl"
+    n = len(ratings.read_text(encoding="utf-8").strip().splitlines()) if ratings.exists() else 0
+    out.append((
+        "Rating and feedback email",
+        AVAILABLE if n else PARTIAL,
+        f"{n} rating(s) filed and emailed" if n
+        else "wired and tested; you have not rated a job yet",
+    ))
     return out
 
 
@@ -231,7 +309,9 @@ def main() -> int:
         ("Voice", probe_speech),
         ("The brain and coding agents", probe_brain),
         ("Other AI models", probe_other_ai),
+        ("The browser route (works when the API keys don't)", probe_browser),
         ("Accounts", probe_accounts),
+        ("Getting better over time", probe_learning),
         ("Interface", probe_ui),
         ("Verified end to end", probe_flows),
     ]
