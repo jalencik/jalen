@@ -669,7 +669,9 @@ def _rules() -> list[Rule]:
         #
         # play_media tries local media files first and falls through to
         # YouTube, so both readings work and neither needs him to say where.
-        (R(r"^(?:play|put on) (?!.* on youtube$)(.+)$", re.I),
+        (R(r"^(?:play|put on|listen to|i want to (?:hear|listen to)"
+           r"|can i (?:hear|listen to)|let'?s listen to)"
+           r" (?!.* on youtube$)(.+)$", re.I),
          "play_media", lambda m: {"query": m.group(1).strip()}, None),
         (R(r"^(next|skip)( song| track| this)?$", re.I), "media_next", n, None),
         (R(r"^(previous|back|last) (song|track)$", re.I), "media_previous", n, None),
