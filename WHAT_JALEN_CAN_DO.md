@@ -1,5 +1,5 @@
 
-# What Jalen can do  (156 things)
+# What Jalen can do  (161 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -15,9 +15,7 @@ _Its own controls. All free, all instant, none need the network._
 - [ ] * **set_posture** - Change how cautious the safety gate is
 - [ ] * **sleep** - Go quiet until you say the wake word
 - [ ] * **timing** - How long the last turn actually took, broken down
-- [ ] * **orb_move** - Move the orb to a corner of the screen
 - [ ] * **reload_config** - Re-read config without restarting
-- [ ] * **orb_size** - Resize the orb by voice, or Ctrl+Alt+B / Ctrl+Alt+S
 - [ ] * **restart** - Restart itself
 - [ ] * **greet** - Say hello
 - [ ] * **read_all** - Speak the rest of an answer that was cut short
@@ -60,21 +58,21 @@ _Gemini, ChatGPT, Hermes, Claude Code, the desktop app._
 ## Driving ChatGPT and Gemini in a browser
 _Opens Chrome, submits a work order, waits, reads the answer, and judges it against what you actually asked for._
 
-- [ ] * **close_browser** - Close the browser Jalen was using for delegation  [tells you first, you can say stop]
+- [ ] * **close_browser** - Close the browser Jalen was using for delegation
 - [ ] * **list_web_chats** - The browser delegations so far, newest first
-- [ ] * **open_signup** - Open the sign-up page for ChatGPT or Gemini and hand it to him  [tells you first, you can say stop]
+- [ ] * **open_signup** - Open the sign-up page for ChatGPT or Gemini and hand it to him
 - [ ]   **read_web_result** - Re-read what ChatGPT or Gemini said in the browser, with the original objective and success criteria alongside it, so it can be judged
 - [ ]   **web_delegate** - Hand a task to ChatGPT or Gemini in a REAL BROWSER and wait for the answer  [tells you first, you can say stop]
 - [ ]   **web_follow_up** - Send a correction into the SAME browser conversation, and wait again  [tells you first, you can say stop]
-- [ ] * **web_sign_in_state** - Whether he is signed in to ChatGPT or Gemini in Jalen's browser profile, and what to do about it  [tells you first, you can say stop]
+- [ ] * **web_sign_in_state** - Whether he is signed in to ChatGPT or Gemini in Jalen's browser profile, and what to do about it
 
 ## Learning and feedback
 _Getting faster at what you repeat, and asking how it did._
 
-- [ ] * **forget_habit** - Forget a learned shortcut
-- [ ] * **rating_history** - His recent ratings and the average, for 'how am I doing' or 'what have I scored'
+- [ ]   **forget_habit** - Forget a learned shortcut
+- [ ]   **rating_history** - His recent ratings and the average, for 'how am I doing' or 'what have I scored'
 - [ ]   **record_rating** - File a rating he gave for work just finished, and email a short summary to him
-- [ ] * **what_i_have_learned** - The requests Jalen has learned to answer without asking the model, and how much time that has saved
+- [ ]   **what_i_have_learned** - The requests Jalen has learned to answer without asking the model, and how much time that has saved
 
 ## Code and projects
 _Git, VS Code, and looking at what an agent changed._
@@ -203,6 +201,8 @@ _The vault, and typing into forms._
 
 - [ ]   **fill_credential** - Type a stored secret into the field HE HAS FOCUSED  [tells you first, you can say stop]
 - [ ]   **fill_field** - Type ordinary text into the focused field — a name, a phone number, a short answer
+- [ ]   **fill_form_field** - Type a value into one named field  [tells you first, you can say stop]
+- [ ]   **fill_login_field** - Type his saved password into this page's password box  [stops and waits for you to say yes]
 - [ ]   **list_secrets** - The NAMES of what is stored — never the values
 - [ ]   **list_site_decisions** - Every site he has approved or blocked, so he can audit it
 - [ ]   **remember_site_decision** - Record that he approves a site FOREVER, or blocks it forever  [stops and waits for you to say yes]
@@ -225,13 +225,18 @@ _The vault, and typing into forms._
 
 ## Everything else
 
+- [ ]   **form_errors** - What the form is complaining about right now
+- [ ]   **inspect_form** - List every field on the form currently open in Jalen's browser: its label, type, whether it is required, and whether it is already filled
 - [ ]   **next_field** - Press Tab to move to the next field
 - [ ]   **open_storage_settings** - Show where the disk space went
+- [ ] * **play_media** - Play something he named without saying where: a local media file if one matches, YouTube otherwise
+- [ ]   **submit_form** - Submit the form and report what the page said back, including any validation errors  [stops and waits for you to say yes]
+- [ ]   **upload_to_form** - Attach a real file to the form's file input - a CV, a PDF, an image  [tells you first, you can say stop]
 
 ---
 
-136 tools: 19 amber, 106 green, 11 red
-90 of them also answer to a spoken phrase, for free.
+143 tools: 18 amber, 112 green, 13 red
+86 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
   - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S

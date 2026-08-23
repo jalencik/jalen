@@ -580,6 +580,58 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "have I scored'.",
         {"limit": ("integer", "how many", False)},
     ),
+    # ---- filling in a real form, in Jalen's own browser --------------------
+    #
+    # These work on the page open in JALEN'S browser (the one web_delegate and
+    # open_url use), not on his everyday Chrome. Start with inspect_form: it
+    # is what makes "ask him for what is missing" possible instead of "click
+    # a field and I'll type into it".
+    "inspect_form": (
+        "List every field on the form currently open in Jalen's browser: its "
+        "label, type, whether it is required, and whether it is already "
+        "filled. ALWAYS call this first before filling anything - then fill "
+        "what you know and ASK HIM (ask_user) for the required fields you "
+        "don't. Never invent a value for a form.",
+        {},
+    ),
+    "fill_form_field": (
+        "Type a value into one named field. Use the label exactly as "
+        "inspect_form reported it. Refuses password fields - those only ever "
+        "come from the vault via fill_login_field.",
+        {
+            "field": ("string", "the field's label, from inspect_form", True),
+            "value": ("string", "what to type", True),
+        },
+    ),
+    "upload_to_form": (
+        "Attach a real file to the form's file input - a CV, a PDF, an image. "
+        "Give the full path. If the page has several upload boxes, also give "
+        "the field label.",
+        {
+            "path": ("string", "full path to the file", True),
+            "field": ("string", "which upload box, if there are several", False),
+        },
+    ),
+    "form_errors": (
+        "What the form is complaining about right now. Call after "
+        "submit_form, and whenever he says it didn't work.",
+        {},
+    ),
+    "submit_form": (
+        "Submit the form and report what the page said back, including any "
+        "validation errors. Consequential and not undoable - he is asked "
+        "first. Never call this until every required field inspect_form "
+        "listed is filled.",
+        {},
+    ),
+    "fill_login_field": (
+        "Type his saved password into this page's password box. Only works "
+        "when the host has an explicit vault approval, when there is exactly "
+        "one password box, and only into a real input[type=password]. The "
+        "value never reaches you. If a code or a checkbox follows, that part "
+        "is his.",
+        {"site": ("string", "which saved login; defaults to the page's host", False)},
+    ),
     # ---- driving ChatGPT / Gemini in an actual browser --------------------
     #
     # Different from delegate_task, and the difference is the point:

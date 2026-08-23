@@ -80,6 +80,38 @@ _SECRET_ARGS = (
 )
 
 
+# Arguments that carry whatever he happened to say. Never learned: the habit
+# is worth having for the tool CHOICE, not for replaying prose, and prose is
+# where a card number or an address ends up.
+_FREE_TEXT_ARGS = frozenset({
+    "text", "body", "message", "corrections", "brief", "content",
+    "prompt", "note", "subject", "value", "answer", "spec", "objective",
+})
+# "query" is deliberately NOT on that list. It is what makes "play we are the
+# people" learnable, and refusing it would have cost the most obviously
+# repeated request he has. Queries are still screened by _looks_sensitive.
+
+
+def _looks_sensitive(value: str) -> bool:
+    """
+    Does this look like something that should not sit in a plain-text file?
+
+    Shape-based and deliberately blunt. A false positive costs one habit
+    nobody learns; a false negative costs a card number on disk.
+    """
+    text = str(value)
+    digits = sum(c.isdigit() for c in text)
+    if digits >= 8:
+        return True            # cards, phone numbers, NI/SSN, account numbers
+    if _TOKENISH.search(text):
+        return True
+    return False
+
+
+# A long unbroken run of mixed characters is a token, not a word he said.
+_TOKENISH = re.compile(r"[A-Za-z0-9_\-]{24,}")
+
+
 def _shape(text: str) -> str:
     """
     The stable shape of a request, for matching.
@@ -111,17 +143,41 @@ def _save(data: dict) -> None:
 
 
 def _learnable(tool: str, args: dict) -> bool:
-    """Is this decision safe to remember at all?"""
+    """
+    Is this decision safe to write to a plain-text file on disk?
+
+    SCREENS THE VALUE, NOT JUST THE NAME. It used to check only the argument
+    NAME and the length, which an adversarial review pointed out is most of
+    the way to nothing: `fill_form_field(field="card", value="4111...")`,
+    `draft_email(body="my NI number is ...")` and a search `query` full of
+    someone's phone number all have innocuous names, are under the length
+    cap, and would have been written to data/habits.json on the FIRST
+    sighting - remember() stores at count=1, it does not wait for the
+    threshold.
+
+    data/habits.json matches none of safety.yaml's never_touch patterns, so
+    anything landing there is readable by read_file, search_in_files, and by
+    any brief handed to another AI.
+
+    Free-text arguments are refused wholesale rather than pattern-matched.
+    The value of a habit is skipping the TOOL CHOICE; replaying arbitrary
+    prose was never the point, so nothing is lost by declining to store it.
+    """
     if not tool:
         return False
     for name, value in (args or {}).items():
         low = str(name).lower()
         if any(marker in low for marker in _SECRET_ARGS):
             return False
+        if low in _FREE_TEXT_ARGS:
+            return False
         if not isinstance(value, (str, int, float, bool, type(None))):
             return False
-        if isinstance(value, str) and len(value) > 200:
-            return False       # a whole email body is not a stable argument
+        if isinstance(value, str):
+            if len(value) > 200:
+                return False   # a whole email body is not a stable argument
+            if _looks_sensitive(value):
+                return False
     return True
 
 
@@ -136,7 +192,13 @@ def remember(text: str, tool: str, args: dict | None = None,
     """
     key = _shape(text)
     args = dict(args or {})
-    if not key or len(key) < 3 or not _learnable(tool, args):
+    # THE KEY IS ALSO HIS WORDS. Screening the arguments while storing a
+    # normalised copy of the whole sentence as the dictionary key would be
+    # half a defence - "remind me to call 07700900123" is sensitive in the
+    # key whatever the arguments look like.
+    if not key or len(key) < 3 or _looks_sensitive(key):
+        return
+    if not _learnable(tool, args):
         return
 
     now = time.time() if now is None else now

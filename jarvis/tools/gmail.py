@@ -138,6 +138,15 @@ def _extract_body(payload: dict) -> str:
 
 def _fence(text: str, source: str) -> str:
     """Wrap read content so the model cannot mistake it for an instruction."""
+    # RAISE THE FLAG. This fence is the door untrusted text comes
+    # through, so it is also where the turn becomes tainted - every
+    # tool call after this one classifies as origin="content" and a
+    # RED or AMBER tool is refused outright. See jarvis/taint.py:
+    # that check existed and was correct for months, and nothing had
+    # ever told it.
+    from .. import taint
+
+    taint.mark(source)
     flags = _safety.scan_for_injection(text)
     warning = ""
     if flags:

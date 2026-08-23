@@ -412,7 +412,14 @@ class Brain:
             raw_tool = input_data.get("tool_name") or input_data.get("name") or "unknown"
             tool = raw_tool[len(MCP_TOOL_PREFIX):] if raw_tool.startswith(MCP_TOOL_PREFIX) else raw_tool
             args = input_data.get("tool_input") or input_data.get("input") or {}
-            origin = "content" if input_data.get("_from_content") else "user"
+            # WAS: input_data.get("_from_content") alone, which NOTHING ever
+            # set. The SDK does not put that key on the payload and neither
+            # did we, so origin was always "user" and the injection guard
+            # below was unreachable code for months. See jarvis/taint.py.
+            from .. import taint
+
+            origin = ("content" if input_data.get("_from_content")
+                      else taint.origin_now())
 
             verdict = self.safety.classify(tool, args, origin=origin)
 

@@ -1,6 +1,6 @@
 # What Jalen can do
 
-**137 tools.** Generated from the running code by
+**143 tools.** Generated from the running code by
 `scripts/abilities.py`, so it cannot promise something that no longer
 exists. Every quoted phrase is one the test suite already asserts.
 
@@ -245,7 +245,7 @@ Needs: `prompt`
 
 Check whether the Claude Code CLI is installed and where. Call this if ask_claude_code reports it can't find it.
 
-### `close_browser`   — AMBER
+### `close_browser`   — GREEN
 
 Close the browser Jalen was using for delegation. The conversation is lost when this happens, so only when he is finished.
 
@@ -289,7 +289,7 @@ The browser delegations so far, newest first.
 
 The house standard for briefing another AI. READ THIS BEFORE delegate_task, every time - delegate_task refuses a brief that does not meet it.
 
-### `open_signup`   — AMBER
+### `open_signup`   — GREEN
 
 Open the sign-up page for ChatGPT or Gemini and hand it to him. Creating an account means agreeing to terms and proving you are human, so Jalen does not do it - it opens the page and waits.
 
@@ -325,7 +325,7 @@ Send a correction into the SAME browser conversation, and wait again. Use after 
 
 Needs: `corrections`
 
-### `web_sign_in_state`   — AMBER
+### `web_sign_in_state`   — GREEN
 
 Whether he is signed in to ChatGPT or Gemini in Jalen's browser profile, and what to do about it. Opens the window but types nothing. Call this when web_delegate reports he is signed out.
 
@@ -811,6 +811,16 @@ Type ordinary text into the focused field — a name, a phone number, a short an
 
 Needs: `text`
 
+### `fill_form_field`   — AMBER
+
+Type a value into one named field. Use the label exactly as inspect_form reported it. Refuses password fields - those only ever come from the vault via fill_login_field.
+
+Needs: `field`, `value`
+
+### `fill_login_field`   — RED
+
+Type his saved password into this page's password box. Only works when the host has an explicit vault approval, when there is exactly one password box, and only into a real input[type=password]. The value never reaches you. If a code or a checkbox follows, that part is his.
+
 ### `list_secrets`   — GREEN
 
 The NAMES of what is stored — never the values. Use for 'what do you have of mine'.
@@ -918,9 +928,25 @@ Needs: `question`
 
 ## Everything else
 
+### `form_errors` — GREEN
+
+What the form is complaining about right now. Call after submit_form, and whenever he says it didn't work.
+
+### `inspect_form` — GREEN
+
+List every field on the form currently open in Jalen's browser: its label, type, whether it is required, and whether it is already filled. ALWAYS call this first before filling anything - then fill what you know and ASK HIM (ask_user) for the required fields you don't. Never invent a value for a form.
+
 ### `list_delegations` — GREEN
 
 Conversations with other AIs, and how many rounds each has had.
+
+### `submit_form` — RED
+
+Submit the form and report what the page said back, including any validation errors. Consequential and not undoable - he is asked first. Never call this until every required field inspect_form listed is filled.
+
+### `upload_to_form` — AMBER
+
+Attach a real file to the form's file input - a CV, a PDF, an image. Give the full path. If the page has several upload boxes, also give the field label.
 
 ---
 
@@ -944,4 +970,4 @@ Conversations with other AIs, and how many rounds each has had.
 - Reach Gemini or ChatGPT over their APIs on this machine - the Gemini key is 403'd and there is no OpenAI key. The browser route works instead.
 - Undo a sent email or a deleted file. That is why those ask first.
 
-**137 tools** — 19 amber, 107 green, 11 red
+**143 tools** — 18 amber, 112 green, 13 red

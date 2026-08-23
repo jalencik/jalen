@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fake application form</title>
+<!--
+A stand-in for a real application form. Shaped like the awkward parts of one,
+not like a tidy example:
+
+  * a field labelled by <label for>, one by aria-label, one by placeholder
+    only, and one with nothing but a name attribute - all four are how real
+    forms identify fields, and a scanner that only handles the first is a
+    scanner that works on demos
+  * "Email" and "Confirm email", so a matcher that takes the first substring
+    hit puts the address in the wrong box and the form fails validation later
+  * a required field left empty, so "ask him for what is missing" has
+    something to find
+  * a real input[type=password], because the whole invariant is that a
+    password goes into that and nothing else
+  * a <select>, a file input, and server-side validation that appears only
+    after submitting
+
+Query flags:
+    ?passwords=2   render two password boxes (a sign-up form) - must REFUSE
+    ?nofile=1      no file input at all
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 34rem; }
+  label { display: block; margin-top: .9rem; font-weight: 600; }
+  input, select, textarea { width: 100%; padding: .4rem; margin-top: .2rem; }
+  .error { color: #b00; margin-top: .4rem; }
+  button { margin-top: 1.2rem; padding: .5rem 1.2rem; }
+</style>
+
+<h1>Application</h1>
+<form id="app" onsubmit="return check(event)">
+  <label for="fullname">Full name</label>
+  <input id="fullname" name="fullname" type="text" required>
+
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email" required>
+
+  <label for="email2">Confirm email</label>
+  <input id="email2" name="email2" type="email" required>
+
+  <input id="country" type="text" aria-label="Country of residence" name="country">
+
+  <input type="text" placeholder="Your project title" name="project">
+
+  <input type="text" name="referee_email">
+
+  <label for="cat">Category</label>
+  <select id="cat" name="cat">
+    <option>Choose one</option>
+    <option>Climate</option>
+    <option>Health</option>
+    <option>Education</option>
+  </select>
+
+  <label for="pw">Password</label>
+  <!-- NOT required: native validation fires before the form's own
+       onsubmit, so a required-and-empty password would mask the
+       server-style errors these tests are about. Jalen refuses to
+       type into a password box, so it can never be filled here. -->
+  <input id="pw" name="pw" type="password">
+
+  <div id="second"></div>
+  <div id="fileholder">
+    <label for="cv">Upload your CV</label>
+    <input id="cv" name="cv" type="file">
+  </div>
+
+  <div id="errors"></div>
+  <button type="submit">Submit application</button>
+</form>
+
+<script>
+const params = new URLSearchParams(location.search);
+
+if (params.get("passwords") === "2") {
+  document.getElementById("second").innerHTML =
+    '<label for="pw2">Confirm password</label>' +
+    '<input id="pw2" name="pw2" type="password" required>';
+}
+if (params.get("nofile")) {
+  document.getElementById("fileholder").innerHTML = "";
+}
+
+// Validation that only appears AFTER submitting, like a real server does.
+// A submit that reports success while the page is showing "emails do not
+// match" is the failure this exists to catch.
+function check(e) {
+  e.preventDefault();
+  const problems = [];
+  const email = document.getElementById("email").value;
+  const email2 = document.getElementById("email2").value;
+  if (email && email2 && email !== email2) problems.push("The two emails do not match");
+  if (!document.getElementById("country").value) problems.push("Country is required");
+  document.getElementById("errors").innerHTML =
+    problems.map(p => '<div class="error" role="alert">' + p + '</div>').join("");
+  if (!problems.length) {
+    document.body.innerHTML = "<h1>Application received</h1>";
+    history.pushState({}, "", "?done=1");
+  }
+  return false;
+}
+</script>

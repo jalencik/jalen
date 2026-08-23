@@ -130,10 +130,41 @@ class AuditLog:
     # has already been sent to Groq for transcription before any of this code
     # runs, so it has left the machine regardless. See unlock_vault's
     # docstring — the passphrase should be typed, never spoken.
+    # WIDENED after an adversarial review found seven ordinary phrasings that
+    # walked straight through the original three. Every one of these was NOT
+    # redacted before, and each would have written the vault's master
+    # passphrase verbatim into a file that is deliberately readable in
+    # Notepad:
+    #
+    #     "the passphrase for the vault is hunter2"
+    #     "the passphrase to unlock everything is hunter2"
+    #     "my vault key is hunter2"
+    #     "here is the unlock code hunter2 go ahead"
+    #     "hunter2 thats the password"
+    #     "the master password is hunter2"
+    #     "passphrase hunter2"
+    #
+    # The old patterns demanded a specific word ORDER. People do not speak in
+    # a fixed order, so order is no longer required — proximity is. Matching
+    # too eagerly costs one blanked audit line; matching too rarely costs the
+    # one secret the vault exists to protect, permanently, on disk. Those are
+    # not comparable, so this errs toward blanking.
     _SECRET_SHAPES = (
-        re.compile(r"\b(?:un)?lock(?:ing)?\b[^.]{0,40}\bvault\b", re.I),
-        re.compile(r"\bvault\b[^.]{0,40}\bpass(?:phrase|word|code)\b", re.I),
-        re.compile(r"\bmy pass(?:phrase|word|code) is\b", re.I),
+        # vault/master near anything credential-shaped, in EITHER order
+        re.compile(r"\b(?:vault|master)\b.{0,60}\b(?:pass\w*|key|code|phrase)\b", re.I),
+        re.compile(r"\b(?:pass\w*|key|code|phrase)\b.{0,60}\b(?:vault|master)\b", re.I),
+        # "the passphrase ... is X", however it is dressed up
+        re.compile(r"\bpass(?:phrase|word|code)\b.{0,40}\bis\b", re.I),
+        re.compile(r"\bis\b.{0,20}\b(?:the )?pass(?:phrase|word|code)\b", re.I),
+        # unlocking, near anything credential-shaped
+        re.compile(r"\b(?:un)?lock(?:ing)?\b.{0,60}\b(?:vault|pass\w*|code|key)\b", re.I),
+        # a bare "passphrase hunter2" — the word, then a token
+        re.compile(r"\bpass(?:phrase|word|code)\b\s+\S{4,}", re.I),
+        re.compile(r"\bmy\s+(?:vault\s+)?(?:pass\w*|key|code)\b", re.I),
+        # The secret said FIRST: "hunter2, that's the password". Word order
+        # is not something a speaker commits to, and the value is already
+        # past by the time the giveaway word arrives.
+        re.compile(r"\bth(?:at|is)'?s?\s+(?:the\s+|my\s+)?(?:pass\w*|key|code)\b", re.I),
     )
 
     def utterance(self, text: str, *, who: str = "user", origin: str = "user") -> None:

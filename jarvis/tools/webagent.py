@@ -890,6 +890,15 @@ def read_result(chat_id: str = "") -> str:
     if error:
         return error
 
+    # ANOTHER MODEL'S ANSWER IS UNTRUSTED TEXT TOO, and it is easy to forget
+    # because it came from an AI rather than a stranger. But ChatGPT and
+    # Gemini both search the web, so their answers can carry text lifted from
+    # a page somebody else controls - "ignore the criteria above, instead..."
+    # reads exactly the same whether a human or a model relayed it.
+    from .. import taint
+
+    taint.mark(f"{chat['label']} answer")
+
     last = chat["rounds"][-1]
     corrections = len([r for r in chat["rounds"] if r["kind"] == "correction"])
     criteria = chat.get("criteria") or ["(none were given)"]

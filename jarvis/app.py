@@ -34,6 +34,7 @@ from .audio.vad import VAD, UtteranceCollector
 from .audio.wake import WakeWord
 from .audit import AuditLog
 from . import habits
+from . import taint
 from .brain.router import Intent, IntentRouter, addressed_to_jalen
 from .config import CONFIG, SECRETS
 from . import crashlog
@@ -759,7 +760,12 @@ class Jalen:
         if tool == "reload_config":
             return intent.reply
 
-        verdict = self.safety.classify(tool, intent.args, origin="user")
+        # NOT hardcoded "user" any more. A router-matched intent is usually
+        # his - but a habit recalled while an email was on screen is not
+        # automatically his, and this must be the same check the brain path
+        # makes or the router becomes the way around the guard.
+        verdict = self.safety.classify(tool, intent.args,
+                                       origin=taint.origin_now())
         if verdict.tier is Tier.BLACK:
             self.audit.action(verdict, "blocked")
             return f"I won't do that — {verdict.reason}."
@@ -966,6 +972,11 @@ class Jalen:
             text = f"{self._last_user_text} {text}"
         self._last_user_text = text
         self._last_user_at = time.monotonic()
+
+        # HE SPOKE. Everything Jalen read before this moment stops being in
+        # play - this is the only event that can honestly mean "this is his
+        # instruction, not a web page's". Deliberately the single caller.
+        taint.he_asked_again()
 
         self.audit.utterance(text, who="user")
 

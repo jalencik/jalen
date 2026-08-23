@@ -57,8 +57,16 @@ green:
     - jalen_timing         # reads its own stopwatch; touches nothing
     - list_web_chats       # reads a local json file
     - read_web_result      # reads what already came back
+    # Opening a sign-up page, closing the browser, and asking whether
+    # he is signed in. None of them type anything or send anything.
+    - open_signup
+    - close_browser
+    - web_sign_in_state
     - rating_history       # reads a local file of his own scores
     - play_media           # opens a media file or a youtube video
+    # Reading a form. Changes nothing on the page and types nothing.
+    - inspect_form         # lists the fields, so it can ASK for what is missing
+    - form_errors          # what the page is complaining about
     - what_i_have_learned  # reads its own habit file
     # GREEN despite sending an email, and the reason is that the destination
     # is not a choice: feedback.FEEDBACK_TO is a constant, the recipient is
@@ -220,6 +228,21 @@ amber:
     - edit_file
     - create_github_issue
     - write_notion_page
+    # Typing into a form field, and attaching a file to one. AMBER rather
+    # than GREEN for one reason that matters more than the announcement: the
+    # injection guard refuses AMBER to anything Jalen merely READ, so a web
+    # page cannot talk Jalen into filling in its own form or attaching a file
+    # to it. They were reaching AMBER by default already; naming them here
+    # makes that a decision instead of an accident.
+    - fill_form_field
+    - upload_to_form
+    # Same reasoning as delegate_task directly above: this sends his
+    # words to a THIRD PARTY and spends money doing it. It was
+    # reaching AMBER by DEFAULT, which is a different thing - under a
+    # posture of "autonomous" an unclassified tool goes GREEN and
+    # would have sent silently.
+    - web_delegate
+    - web_follow_up
     # Opens a password box on screen. Harmless in itself — the passphrase
     # goes straight from the keyboard into the key derivation, never through
     # a transcript, a model or a log — but a password prompt that ANYTHING
@@ -281,6 +304,16 @@ red:
   reason: "Irreversible, public, spends money, or speaks as you. (spec F46)"
   confirm_template: "{summary}. Confirm?"
   tools:
+    # Submitting a form is not "clicking a button" - it is applying for
+    # something, creating an account, or spending money, and there is no
+    # undo. The AMBER announce-and-wait window is not enough for an action
+    # whose whole cost lands the instant it happens.
+    - submit_form
+    # Types a real password into a real page. RED for the obvious reason,
+    # and gated three more ways inside the tool itself: only into an actual
+    # input[type=password], only when there is exactly one of them, and only
+    # on a host with an EXACT vault approval.
+    - fill_login_field
     # Deleting files, even files that are safe to delete by definition.
     # An application writing to its temp file right now can lose work — but
     # the real reason is that a voice assistant which deletes without asking
@@ -315,7 +348,6 @@ red:
     - merge_pull_request
     - modify_system_setting
     - change_account_setting
-    - submit_form
     - spend_money               # F46 - see the BLACK note below
 
 black:
