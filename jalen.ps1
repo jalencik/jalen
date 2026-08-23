@@ -65,6 +65,7 @@ switch ($Command.ToLower()) {
     "voice"     { & $py (Join-Path $scripts "record_wake_samples.py") }
     "todo"      { & $py (Join-Path $scripts "whats_left.py") }
     "can"       { & $py (Join-Path $scripts "capabilities.py") }
+    "abilities" { & $py (Join-Path $scripts "abilities.py") }
     "disk"      { & $py (Join-Path $scripts "disk_audit.py") }
     "ready"     { & $py (Join-Path $scripts "readiness.py") }
     "licence"   { & $py (Join-Path $scripts "choose_licence.py") }

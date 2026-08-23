@@ -110,8 +110,6 @@ APP_LEVEL = {
     "jalen_ack": "Answer to its own name",
     "jalen_timing": "How long the last turn actually took, broken down",
     "jalen_read_all": "Speak the rest of an answer that was cut short",
-    "jalen_orb_size": "Resize the orb by voice, or Ctrl+Alt+B / Ctrl+Alt+S",
-    "jalen_orb_move": "Move the orb to a corner of the screen",
     "morning_brief": "The day's summary on demand",
     "greet": "Say hello",
     "cancel": "Stop what you are doing",
