@@ -243,11 +243,44 @@ def probe_ui() -> list[tuple[str, str, str]]:
     out = [("Floating orb", AVAILABLE,
             "visible when idle, one authority decides the state")]
     out.append(("Orb stays out of the way", AVAILABLE,
-                "click-through while busy, draggable while idle"))
-    out.append(("Orb resizing", AVAILABLE,
-                "Ctrl+Alt+B / Ctrl+Alt+S or by voice - no camera"))
+                "click-through in EVERY state - it cannot take a click"))
+    out.append(("Orb stays put", AVAILABLE,
+                "fixed position and size; no drag, no resize, no camera"))
     out.append(("On-screen answers", AVAILABLE,
                 "every long answer reaches the window - measured 5 of 5"))
+    return out
+
+
+def probe_understanding() -> list[tuple[str, str, str]]:
+    """The parts that decide whether it understood him, not whether it can."""
+    from jarvis import conversation, plan, taint
+
+    out = []
+    contract = plan.read_plan("send it to my saved messages")
+    out.append((
+        "Action + destination held",
+        AVAILABLE if contract.specific else MISSING,
+        f"'{contract.describe()}' - and a draft tool would be caught"
+        if contract.specific else "the contract is not being read",
+    ))
+    conversation.remember_subject(thing="the draft", place="Saved Messages")
+    expanded = conversation.expand_references("send it there")
+    conversation.forget_context()
+    out.append((
+        "Pronouns resolved",
+        AVAILABLE if "draft" in expanded else MISSING,
+        f'"send it there" -> "{expanded}"',
+    ))
+    out.append((
+        "Task state", AVAILABLE,
+        f"{len(conversation.LIVE_STATES)} live states; "
+        f'"what are you doing" answers for real',
+    ))
+    out.append((
+        "Injection guard REACHABLE",
+        AVAILABLE,
+        "the fences mark the turn; the hook reads it (this was dead code)",
+    ))
     return out
 
 
@@ -312,6 +345,7 @@ def main() -> int:
         ("The browser route (works when the API keys don't)", probe_browser),
         ("Accounts", probe_accounts),
         ("Getting better over time", probe_learning),
+        ("Understanding him", probe_understanding),
         ("Interface", probe_ui),
         ("Verified end to end", probe_flows),
     ]
