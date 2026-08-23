@@ -425,13 +425,9 @@ class Orb:
         # actually realized the window. 0 until then. See toplevel_hwnd().
         self._hwnd = 0
         self._root: tk.Tk | None = None
-        # Where he DRAGGED it to, if he has. None means "use self.position".
-        #
-        # Without this, every resize snapped the orb back to its configured
-        # corner: apply_size() recomputes geometry from self.position, which
-        # knows nothing about the drag. So you would move the orb somewhere
-        # sensible, make it bigger, and watch it jump back.
-        self._manual_xy: tuple[int, int] | None = None
+        # The orb does not move. Position comes from ui.orb_position and
+        # nothing at runtime changes it - see the note where the mouse
+        # bindings used to be.
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -471,12 +467,6 @@ class Orb:
     def _geometry(self, root: tk.Tk, w: int, h: int) -> str:
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         taskbar = 48
-        if self._manual_xy is not None:
-            # Clamped, because a window dragged near an edge and then grown
-            # would otherwise put half the orb off the screen.
-            x = max(0, min(sw - w, self._manual_xy[0]))
-            y = max(0, min(sh - h, self._manual_xy[1]))
-            return f"{w}x{h}+{x}+{y}"
         if self.position == "center":
             # Centred horizontally, and slightly ABOVE centre vertically —
             # true centre puts it behind whatever he is reading, and the
@@ -492,6 +482,7 @@ class Orb:
             x, y = self.margin, self.margin
         return f"{w}x{h}+{x}+{y}"
 
+    @staticmethod
     def _clamp_size(root: tk.Tk, size: int) -> int:
         """
         Keep the orb inside the screen it is being drawn on.

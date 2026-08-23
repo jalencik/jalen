@@ -98,6 +98,31 @@ _CONTINUATION_OPENER = re.compile(
 )
 
 
+# Did he ask to HEAR the whole thing?
+#
+# Long answers are capped at tts.max_spoken_chars and the rest goes to the
+# screen. That is right for an answer he did not ask to hear in full, and
+# wrong - obviously, infuriatingly wrong - when he did:
+#
+#     "it is not reading emals till the end, it just moved to antoher email
+#      when I wanted him to read that out loud till the end"
+#
+# The cap is a default about length, never a rule about what he is allowed
+# to hear. When he says "read it", the cap does not apply.
+_READ_IT_ALL = re.compile(
+    r"\bread\b(?![a-z])"
+    r"|\bout loud\b|\baloud\b"
+    r"|\btill the end\b|\bto the end\b|\bin full\b|\bfull(?:ly)?\b"
+    r"|\bwhole thing\b|\ball of (?:it|them)\b|\bentire\b|\bevery word\b",
+    re.I,
+)
+
+
+def wants_it_all(text: str) -> bool:
+    """True when he asked to be read something rather than told about it."""
+    return bool(_READ_IT_ALL.search(text or ""))
+
+
 def looks_unfinished(text: str) -> bool:
     """True when the transcript reads like the middle of a sentence."""
     cleaned = (text or "").strip().lower().rstrip(".,!?;:")
@@ -841,7 +866,10 @@ class Jalen:
             return
 
         stream = self.speaker.open_stream()
-        max_spoken = self.speaker.max_spoken
+        # "read my email out loud" removes the cap for THIS turn only. The
+        # cap is a default about length, not a rule about what he may hear.
+        read_it_all = wants_it_all(user_text)
+        max_spoken = float("inf") if read_it_all else self.speaker.max_spoken
         state = {"chars": 0, "overflowed": False}
 
         def on_text(chunk: str) -> None:
@@ -904,7 +932,11 @@ class Jalen:
             self.say(reply)
             return
 
-        if state["overflowed"]:
+        # On screen whenever there is enough of it to be worth reading back,
+        # not only when speech was cut short. He asked for a full read AND
+        # complained the text never appeared; those are two requests, and
+        # satisfying the first must not cancel the second.
+        if state["overflowed"] or len(reply) > self.speaker.max_spoken:
             self.transcript.show("Full answer", reply)
             # Kept so "read it all" can speak the part he did not hear. The
             # cap exists because a forty-second monologue is unbearable, not
