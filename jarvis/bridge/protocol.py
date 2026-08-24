@@ -60,6 +60,10 @@ COMMANDS = frozenset({
     "press",
     "scroll",
     "wait_for",
+    # The chat panel: the app pushes a line of text for the panel to show.
+    # App-originated, like every command, so the asymmetry holds - the page
+    # cannot make the app say anything; only the app speaks into its panel.
+    "show_message",
 })
 
 # Events the extension may raise on its own. Also an allowlist.
@@ -69,6 +73,12 @@ EVENTS = frozenset({
     "tab_updated",
     "page_state_changed",
     "heartbeat",
+    # He typed a line into the chat panel. This is UNTRUSTED user text from a
+    # browser surface, handled by the app's normal brain turn - not a way for
+    # a web page to reach the app, because only the panel UI (not page script)
+    # can post it, and the app treats it as a request to consider, never a
+    # command to obey.
+    "user_message",
 })
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")

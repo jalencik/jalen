@@ -289,7 +289,9 @@ class Jalen:
         # "extension unavailable" rather than taking startup down with it.
         try:
             from .bridge.server import get_server
-            get_server().start()
+            bridge = get_server()
+            bridge.on_event(self._on_bridge_event)
+            bridge.start()
         except Exception as exc:  # noqa: BLE001
             self.audit.error("bridge.start", exc)
 
@@ -571,6 +573,39 @@ class Jalen:
             return self._reply_q.get(timeout=timeout)
         except queue.Empty:
             return ""
+
+    # ------------------------------------------------- chat panel (extension)
+    def _on_bridge_event(self, msg: dict) -> None:
+        """
+        Something happened in his Chrome. Today: a line typed into the
+        extension's chat panel.
+
+        Handled on its OWN thread, not the bridge read loop's, because a
+        brain turn takes seconds and the read loop must stay free to carry
+        the very commands that turn will issue. The panel text is untrusted
+        user input from a browser surface, so it goes through the ordinary
+        brain path - considered, never obeyed as a command.
+        """
+        if msg.get("event") != "user_message":
+            return
+        text = (msg.get("payload") or {}).get("text", "").strip()
+        if not text:
+            return
+        threading.Thread(target=self._answer_panel, args=(text,),
+                         name="jalen-panel-turn", daemon=True).start()
+
+    def _answer_panel(self, text: str) -> None:
+        from .bridge.server import get_server, BridgeError
+        try:
+            reply = self._run_coro(self.handle_with_brain(text))
+        except Exception as exc:  # noqa: BLE001
+            self.audit.error("panel.turn", exc)
+            reply = f"Something went wrong handling that: {type(exc).__name__}"
+        try:
+            get_server().send_command("show_message",
+                                      {"role": "jalen", "text": reply}, timeout=10)
+        except BridgeError:
+            pass          # panel closed or extension gone; nothing to show
 
     # ------------------------------------------------------------- timing
     def _mark_first_audio(self) -> None:

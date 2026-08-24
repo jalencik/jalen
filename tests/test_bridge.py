@@ -79,6 +79,26 @@ class TestProtocol:
         err = protocol.build_error("abc123", "PAGE_UNAVAILABLE", "gone")
         assert protocol.parse_incoming(err)["error"]["code"] == "PAGE_UNAVAILABLE"
 
+    def test_show_message_is_an_app_originated_command(self):
+        """The app speaks into its own panel; the page cannot."""
+        cmd = protocol.build_command("show_message",
+                                     {"role": "jalen", "text": "on it"})
+        assert protocol.parse_command(cmd)["command"] == "show_message"
+
+    def test_user_message_is_an_event_not_a_command(self):
+        """
+        A line the user typed in the panel arrives as an EVENT - untrusted
+        input the app considers - never as a command the app must run.
+        """
+        evt = protocol.build_event("user_message", {"text": "hi"})
+        assert protocol.parse_incoming(evt)["event"] == "user_message"
+        # And it may not masquerade as a command into the app.
+        fake = protocol.build_event("user_message", {"text": "x"})
+        fake["type"] = "command"
+        fake["command"] = "user_message"
+        with pytest.raises(protocol.ProtocolError):
+            protocol.parse_command(fake)
+
 
 # ---------------------------------------------------------------------------
 # FRAMING

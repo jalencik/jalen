@@ -4,19 +4,34 @@
   "version": "0.1.0",
   "description": "Lets Jalen read and act on pages inside your own Chrome, driven by the Jalen app on this machine.",
   "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq9c8OG/FdcXZUJB5OWB+DvXQZGgiYBGXloqbia6YZ2mxthKjN7RXDsBR+xLcza3GF60xO9l4pTt8xDt2cg/U3rU4fqK/yfLpHGw5DrzFu+ulmup0v5sY4tgtBvsHo7+MzUBzF5PjuZhDqljccuECd/sUcBA3p9hz7PS7zFNklNEErCwY68MOr0y3b0I0AJ1RpkoXmfgcM5YHzoSH6Jsc0rgquJ47tBXfiQg4lonnDcG2ywsGvVq0KjSPFK+VAGbwOCe5IyECmo8ag8HUsrmpenS/opH/+cM5kVy+bHW1rGRWeQQniPwB5hw4My41yISOvCJSl4ENTu9eH+b4odJlJQIDAQAB",
   "background": {
     "service_worker": "service_worker.js"
   },
   "action": {
-    "default_popup": "popup/popup.html",
-    "default_title": "Jalen"
+    "default_title": "Jalen",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "permissions": [
     "nativeMessaging",
     "tabs",
     "scripting",
-    "storage"
+    "storage",
+    "alarms",
+    "sidePanel"
   ],
+  "side_panel": {
+    "default_path": "popup/panel.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",

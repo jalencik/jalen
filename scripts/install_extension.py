@@ -28,15 +28,32 @@ VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 LAUNCHER = ROOT / "jalen_bridge_host.bat"
 HOST_MANIFEST = ROOT / "native_host_manifest.json"
 
+# The extension's id is PINNED by the "key" in browser_extension/manifest.json,
+# so it is always this - which means the user does not have to load the
+# extension, read its id, and paste it back. He just runs this. A stable id
+# is also what stops the single most common "not connected" cause: a host
+# manifest whose allowed_origins names an id the extension no longer has.
+PINNED_EXTENSION_ID = "emlfljokadcfdfedhkgkgecpgjfbhfkg"
+
 
 def _write_launcher() -> None:
     """
     A .bat, because Chrome's native-host `path` must be an executable and a
-    .py is not one. It runs the venv's python on the host module, and forwards
-    Chrome's stdio untouched. @echo off so no stray bytes reach the pipe.
+    .py is not one.
+
+    IT MUST cd TO THE PROJECT ROOT FIRST. Chrome launches the host from its
+    OWN working directory, not the project's, so `python -m jarvis.bridge.
+    native_host` from there fails with "No module named jarvis" - the host
+    dies on the first byte, the port disconnects, and the extension shows
+    "not connected" forever. Measured: this was exactly that bug. `cd /d`
+    handles a project on a different drive letter than Chrome.
+
+    @echo off, and nothing else writes to stdout, so no stray bytes corrupt
+    the native-messaging frames.
     """
     LAUNCHER.write_text(
         "@echo off\r\n"
+        f'cd /d "{ROOT}"\r\n'
         f'"{VENV_PY}" -m jarvis.bridge.native_host\r\n',
         encoding="utf-8",
     )
@@ -70,15 +87,11 @@ def _register() -> str:
 
 
 def main(argv) -> int:
-    if len(argv) < 2 or not argv[1].strip():
-        print("Give me the extension's ID. Load browser_extension/ as an "
-              "unpacked extension first (chrome://extensions -> Developer "
-              "mode -> Load unpacked), copy the Extension ID it shows, then:")
-        print("  .venv\\Scripts\\python.exe scripts\\install_extension.py "
-              "<EXTENSION_ID>")
-        return 2
-
-    extension_id = argv[1].strip().strip("/")
+    # The id is pinned, so no argument is needed. One is still accepted, for
+    # the rare case the extension was loaded without the key (e.g. packed
+    # differently) and shows a different id.
+    extension_id = argv[1].strip().strip("/") if len(argv) > 1 and argv[1].strip() \
+        else PINNED_EXTENSION_ID
     if not extension_id.isalnum() or len(extension_id) != 32:
         print(f"That doesn't look like a Chrome extension id "
               f"(32 letters): {extension_id!r}")

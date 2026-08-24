@@ -22,36 +22,43 @@ nothing external is contacted.
 
 ## Steps
 
-### 1. Load the extension
+### 1. Register the bridge
+
+In a terminal at the project root — **no extension ID needed**, the ID is
+pinned:
+
+```powershell
+.venv\Scripts\python.exe scripts\install_extension.py
+```
+
+It prints where it wrote the launcher, the host manifest, and the registry
+entry. All of it is **current-user only** — no admin, nothing machine-wide.
+
+### 2. Load the extension
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top-right).
 3. Click **Load unpacked**.
 4. Choose the folder:
    `C:\Users\user\Desktop\Jarvis-setup\jarvis\browser_extension`
-5. It appears as **Jalen**. **Copy its Extension ID** — the 32-letter string
-   shown on its card (e.g. `abcdefghijklmnopabcdefghijklmnop`).
+5. It appears as **Jalen** with its blue orb icon. Because the ID is pinned
+   in the manifest, it always matches what step 1 registered — nothing to
+   copy or paste.
 
-### 2. Register the bridge
-
-In a terminal at the project root:
-
-```powershell
-.venv\Scripts\python.exe scripts\install_extension.py <PASTE_THE_EXTENSION_ID>
-```
-
-It prints where it wrote the launcher, the host manifest, and the registry
-entry. All of it is **current-user only** — no admin, nothing machine-wide.
-
-### 3. Connect
+### 3. Connect — it's automatic
 
 1. **Fully quit and reopen Chrome** (Native Messaging hosts are read at
    startup).
-2. Start Jalen as usual.
-3. Click the **Jalen** extension icon. The popup should say **connected**.
+2. Start Jalen as usual — the bridge comes up with it.
+3. That's it. The extension connects on its own and **stays** connected: a
+   live link keeps it awake while Jalen runs, and a wake-timer reconnects it
+   within ~30s if Chrome or Jalen restarted. You never reconnect it by hand.
 
-That's it. From then on, when you say "use my own Chrome", "what's on this
-page", or "fill this form in", Jalen acts on the tab you're looking at.
+Click the **Jalen** orb in the toolbar to open the **chat panel** — a place
+to type to Jalen right inside Chrome, like a side conversation. The panel
+shows **connected / not connected** at the top. When you say (or type) "use
+my own Chrome", "what's on this page", or "fill this form in", Jalen acts on
+the tab you're looking at.
 
 ## What it can and can't do
 

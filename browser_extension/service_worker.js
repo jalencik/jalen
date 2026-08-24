@@ -17,16 +17,32 @@ let port = null;
 let reconnectTimer = null;
 
 // --------------------------------------------------------------- connection
+//
+// AUTO-ACTIVE is the whole requirement here: the moment his Chrome is running
+// and Jalen is up, this must connect itself and STAY connected, with no
+// manual step ever. Two mechanisms together get there:
+//
+//   1. A live connectNative port keeps the MV3 service worker alive, so while
+//      the app is up the worker does not sleep and the link holds.
+//   2. When the app is down (port drops), the worker WILL eventually sleep -
+//      MV3's rule, not ours. A chrome.alarm wakes it on a fixed cadence to
+//      retry, so the instant the app comes back the link re-forms on its own.
+//
+// So he never reconnects anything: start Jalen, and within a wake-cycle the
+// popup says connected.
 function connect() {
+  if (port) return;
   try {
     port = chrome.runtime.connectNative(HOST);
   } catch (e) {
+    port = null;
     scheduleReconnect();
     return;
   }
   port.onMessage.addListener(onCommand);
   port.onDisconnect.addListener(() => {
     port = null;
+    notifyPanel({ __jalen: "connection", connected: false });
     scheduleReconnect();
   });
   // Announce ourselves so the app knows a browser is live.
@@ -37,6 +53,7 @@ function connect() {
     event: "connected",
     payload: { at: Date.now() },
   });
+  notifyPanel({ __jalen: "connection", connected: true });
 }
 
 function scheduleReconnect() {
@@ -46,6 +63,21 @@ function scheduleReconnect() {
     connect();
   }, 2000);
 }
+
+// Wake-and-retry backstop for when the worker has slept. 0.5 min is the
+// smallest period Chrome honours; the connectNative port covers the gaps in
+// between while the app is up.
+chrome.alarms.create("jalen-keepalive", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "jalen-keepalive" && !port) connect();
+});
+// Reconnect on the events that spin a fresh worker up.
+chrome.runtime.onStartup.addListener(connect);
+chrome.runtime.onInstalled.addListener(connect);
+// Clicking the toolbar icon opens the chat panel (like Claude's extension).
+chrome.action.onClicked.addListener((tab) => {
+  try { chrome.sidePanel.open({ windowId: tab.windowId }); } catch (e) {}
+});
 
 function send(message) {
   if (port) {
@@ -92,6 +124,12 @@ async function run(command, payload) {
   switch (command) {
     case "ping":
       return { pong: true, at: Date.now() };
+
+    case "show_message":
+      // The app is speaking into its own chat panel.
+      notifyPanel({ __jalen: "message", role: payload.role || "jalen",
+                    text: payload.text || "" });
+      return { shown: true };
 
     // ---- tabs / windows -------------------------------------------------
     case "list_tabs": {
@@ -177,11 +215,29 @@ async function inPage(tabId, command, payload) {
 
 connect();
 
-// The popup (and only the popup - this is not exposed to page scripts) asks
-// whether the native port is live.
+// Push a message to the chat panel if it's open. Best-effort: if no panel is
+// listening, chrome.runtime.lastError is set and swallowed.
+function notifyPanel(message) {
+  try { chrome.runtime.sendMessage(message, () => void chrome.runtime.lastError); }
+  catch (e) { /* no panel open */ }
+}
+
+// Messages from the extension's OWN surfaces (popup, side panel) - never from
+// a web page, which cannot send here. Two things: a status query, and a line
+// the user typed into the chat panel.
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-  if (msg && msg.__jalen === "status") {
+  if (!msg || !msg.__jalen) return;
+  if (msg.__jalen === "status") {
     reply({ connected: !!port });
+    return true;
+  }
+  if (msg.__jalen === "chat" && msg.text) {
+    // Forward to the app as an untrusted user_message event.
+    send({
+      version: PROTOCOL_VERSION, request_id: rid(), type: "event",
+      event: "user_message", payload: { text: String(msg.text).slice(0, 4000) },
+    });
+    reply({ ok: !!port });
     return true;
   }
 });
