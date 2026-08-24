@@ -43,27 +43,97 @@ say so out loud, wait for him, and carry on the moment it clears. A
 challenge is a site saying "prove a human is here", and the correct response
 is to go and get one.
 
-WHY A SEPARATE CHROME PROFILE
------------------------------
-Chrome locks a user-data directory, so automating the profile he is browsing
-in is not slightly awkward, it is impossible. Jalen gets its own profile
-directory instead. He signs in there once and the session persists for
-months; his own Chrome, his own tabs and his own cookies are never touched.
+WHY A SEPARATE PROFILE, AND WHY IT IS STILL HIS ACCOUNT
+-------------------------------------------------------
+He asked, twice, for delegation to run in his normal browser as
+jaloliddin2009applicant@gmail.com and not in "ghost mode". Two hard facts
+from measuring his actual machine decide how that is possible:
 
-Verified on this machine: channel="chrome" drives his INSTALLED Chrome, so
-nothing is downloaded, and the profile costs about 11 MB.
+  1. Chrome 136+ (he is on 151) REFUSES to be automated on the profile he
+     browses in. launch_persistent_context on his real User Data directory
+     times out at 150 seconds; on a separate directory it starts in 0.8s.
+     This is a deliberate anti-cookie-theft control and it cannot be passed.
+
+  2. Google REFUSES to sign in a browser that carries navigator.webdriver,
+     which Playwright sets when it LAUNCHES Chrome. So a Playwright-launched
+     window can never complete a Google login - which is what made the old
+     separate profile feel like ghost mode: empty, and unable to sign in.
+
+Both dissolve with one change. Instead of Playwright LAUNCHING Chrome, Jalen
+launches a plain chrome.exe itself - a normal browser, no automation flags -
+on a dedicated profile directory, with a remote-debugging port, and then
+ATTACHES to it over CDP. Verified on this machine: navigator.webdriver is
+false over that attachment, so Google accepts a sign-in done in the window;
+and the directory is separate, so it never collides with his everyday
+Chrome and needs it neither closed nor touched.
+
+So he signs in ONCE, in a real window, as his own account. It persists for
+months. Delegation then drives that same window. It is his account, his
+history builds up in it, and the only thing separate is a folder he never
+has to see. His own Chrome, his own tabs and his own cookies are untouched.
 """
 from __future__ import annotations
 
 import json
 import queue
 import re
+import socket
+import subprocess
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+def _free_port() -> int:
+    """An OS-assigned free TCP port. Racy in theory, fine in practice: the
+    window between closing this socket and Chrome binding it is microseconds,
+    and the alternative - a fixed port - collides with a Chrome he left open
+    from last time, which is not theoretical at all."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _wait_for_port(port: int, timeout: float = 30.0) -> bool:
+    """True once something is listening on the port. CHECKED, not slept."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.3)
+    return False
+
+
+def _kill_stale_profile_chrome() -> None:
+    """
+    End any chrome.exe left holding JALEN'S profile, and only that.
+
+    Matched by the profile directory on the command line, so his everyday
+    Chrome - which runs on a different directory - is never a candidate. A
+    crash that skips _kill_proc is the reason this is needed: the orphaned
+    process keeps the profile lock, and the next launch would hand off to it
+    and never open its debug port.
+    """
+    needle = str(PROFILE_DIR)
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        "Where-Object { $_.CommandLine -and "
+        f"$_.CommandLine -like '*{needle}*' " + "} | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+        "-ErrorAction SilentlyContinue }"
+    )
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DATA = ROOT / "data"
@@ -391,6 +461,7 @@ class _Session:
         self._jobs: "queue.Queue[tuple]" = queue.Queue()
         self._thread: threading.Thread | None = None
         self._ready: "queue.Queue[str]" = queue.Queue(maxsize=1)
+        self._proc: "subprocess.Popen | None" = None
 
     @classmethod
     def get(cls) -> "_Session":
@@ -411,34 +482,68 @@ class _Session:
             )
             return
 
-        try:
-            pw = sync_playwright().start()
-        except Exception as exc:  # noqa: BLE001
-            self._ready.put(f"Playwright wouldn't start: {type(exc).__name__}: {exc}")
+        exe = _chrome_exe()
+        if not exe:
+            self._ready.put(
+                "I can't find Chrome. Web delegation needs Google Chrome "
+                "installed."
+            )
             return
 
+        # A crash last time can leave a chrome.exe holding this profile. If
+        # it does, the launch below hands off to it and exits, and the debug
+        # port - which that stale process was never started with - never
+        # opens. So clear it FIRST. This only ever targets chrome processes
+        # whose command line names Jalen's own profile directory; his
+        # everyday Chrome, on a different directory, is never matched.
+        _kill_stale_profile_chrome()
+
+        # STEP ONE: launch a PLAIN chrome.exe. No Playwright, so no
+        # navigator.webdriver, so Google will accept a sign-in done in it.
+        # A dedicated profile directory, so it never collides with his own
+        # Chrome. A remote-debugging port, so Jalen can attach.
         PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        port = _free_port()
         try:
-            ctx = pw.chromium.launch_persistent_context(
-                user_data_dir=str(PROFILE_DIR),
-                channel="chrome",      # HIS Chrome. Nothing is downloaded.
-                headless=False,
-                args=["--no-first-run", "--no-default-browser-check"],
+            self._proc = subprocess.Popen(
+                [exe,
+                 f"--user-data-dir={PROFILE_DIR}",
+                 f"--remote-debugging-port={port}",
+                 "--no-first-run", "--no-default-browser-check",
+                 "--no-service-autorun", "--password-store=basic",
+                 "about:blank"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         except Exception as exc:  # noqa: BLE001
-            try:
-                pw.stop()
-            except Exception:
-                pass
-            # The likeliest cause by far, and worth naming: Chrome refuses to
-            # open a profile directory another Chrome already holds.
-            hint = ""
-            if "ProcessSingleton" in str(exc) or "already in use" in str(exc).lower():
-                hint = (" Something else is already using Jalen's browser "
-                        "profile - close the window I opened earlier.")
-            self._ready.put(f"Chrome wouldn't start: {type(exc).__name__}: {exc}.{hint}")
+            self._ready.put(f"Chrome wouldn't start: {type(exc).__name__}: {exc}")
             return
 
+        # STEP TWO: wait for the debug port to answer. By CHECKING, not by a
+        # guessed sleep - the port is up when it is up.
+        if not _wait_for_port(port, timeout=30.0):
+            self._kill_proc()
+            self._ready.put(
+                "Chrome started but never opened its automation port. "
+                "Something may be blocking localhost, or another Chrome is "
+                "already using this profile."
+            )
+            return
+
+        # STEP THREE: attach over CDP. This does NOT set the automation flag,
+        # because we did not launch through Playwright - which is the whole
+        # point.
+        try:
+            pw = sync_playwright().start()
+            browser = pw.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{port}", timeout=30000)
+        except Exception as exc:  # noqa: BLE001
+            self._kill_proc()
+            self._ready.put(f"I couldn't attach to Chrome: {type(exc).__name__}: {exc}")
+            return
+
+        ctx = browser.contexts[0] if browser.contexts else browser.new_context()
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self._ready.put("")          # "" means started cleanly
 
@@ -450,11 +555,31 @@ class _Session:
                 out.put(("ok", job(page)))
             except Exception as exc:  # noqa: BLE001
                 out.put(("err", exc))
-        for close in (ctx.close, pw.stop):
+
+        # CDP attach: close the connection but let the browser process be
+        # ended deliberately, so his sign-in session is written to disk.
+        for close in (browser.close, pw.stop):
             try:
                 close()
             except Exception:
                 pass
+        self._kill_proc()
+
+    def _kill_proc(self) -> None:
+        """End the chrome.exe we launched, gracefully so the session saves."""
+        proc = getattr(self, "_proc", None)
+        if proc is None:
+            return
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=8)
+                except Exception:
+                    proc.kill()
+        except Exception:
+            pass
+        self._proc = None
 
     def start(self) -> None:
         """Bring the browser up. Idempotent. Raises BrowserUnavailable."""
@@ -465,10 +590,10 @@ class _Session:
                 target=self._pump, name="jalen-browser", daemon=True)
             self._thread.start()
             try:
-                problem = self._ready.get(timeout=90)
+                problem = self._ready.get(timeout=75)
             except queue.Empty:
                 raise BrowserUnavailable(
-                    "Chrome didn't finish starting within 90 seconds."
+                    "Chrome didn't finish starting within 75 seconds."
                 ) from None
             if problem:
                 self._thread = None
