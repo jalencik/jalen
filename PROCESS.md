@@ -321,3 +321,52 @@ through the safety engine — being fast is never a reason to skip a
 confirmation you would otherwise have been asked for.
 
 Ask it `"what have you learned"`. Correct it with `"forget that"`.
+
+---
+
+## Two ways into a browser, and why
+
+Jalen can drive a browser two different ways, because Chrome makes exactly
+one of them impossible and the other only recently possible.
+
+```
+  the SEPARATE window  (jarvis/tools/webagent.py)
+    plain chrome.exe on a dedicated profile, attached over CDP
+    -> his account, but not the tabs he browses in
+    -> used when the extension isn't connected
+
+  his REAL Chrome      (jarvis/bridge/ + browser_extension/)
+    an extension inside his everyday Chrome, talking to the app
+    -> the very tab he's looking at
+    -> used when he asks to use his own Chrome
+```
+
+Why two: Chrome 136+ refuses to let an outside program automate the profile
+you browse in (measured: 150s timeout vs 0.8s on a dedicated one), and Google
+refuses sign-ins from a program-launched browser. The extension is the only
+way *inside* his everyday Chrome, because Chrome trusts an extension it does
+not trust an external driver. The CDP window stays as the fallback for when
+the extension isn't loaded.
+
+### The extension data flow
+
+```
+  his voice
+    -> Python brain            (Gmail, vault, safety — the authority)
+    -> task state / safety tier
+    -> BridgeServer            (loopback, token-authed)   jarvis/bridge/server.py
+    -> native_host.py          (the process Chrome launches; a dumb relay)
+    -> Chrome Native Messaging (length-prefixed JSON frames)
+    -> service_worker.js       (carries out an ALREADY-authorised command)
+    -> the real page           (pageOp injected into the tab)
+    -> result back up the same wire
+    -> Python verifies, speaks / shows
+```
+
+The safety boundary is an asymmetry: **only the app originates commands.** The
+page can answer a question and can raise an event, but it can never tell the
+app "here is a secret, type it" — the command allowlist has no arbitrary-JS
+entry, and the app classifies every action by the same tiers as everywhere
+else. Passwords come from the vault, payment fields are his, CAPTCHA stops for
+a human, and the app↔extension link is gated by a per-run token only his
+account can read. Setup and the full security model: docs/CHROME_EXTENSION_SETUP.md.

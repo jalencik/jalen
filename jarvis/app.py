@@ -282,6 +282,17 @@ class Jalen:
         self._turn_timer: TurnTimer | None = None
         self.speaker.on_audio_start = self._mark_first_audio
 
+        # Bring the Chrome-extension bridge up now, not on first use: the
+        # extension in his everyday Chrome needs the app's loopback server
+        # listening in order to connect at all. Cheap - a socket bind, a
+        # file, an accept thread - and guarded so a bind failure degrades to
+        # "extension unavailable" rather than taking startup down with it.
+        try:
+            from .bridge.server import get_server
+            get_server().start()
+        except Exception as exc:  # noqa: BLE001
+            self.audit.error("bridge.start", exc)
+
     # -------------------------------------------------------------- event loop
     def _start_loop(self) -> None:
         ready = threading.Event()

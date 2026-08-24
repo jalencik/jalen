@@ -610,6 +610,35 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     # open_url use), not on his everyday Chrome. Start with inspect_form: it
     # is what makes "ask him for what is missing" possible instead of "click
     # a field and I'll type into it".
+    "ext_status": (
+        "Whether Jalen's Chrome extension is connected - i.e. whether Jalen "
+        "can act on his REAL, everyday Chrome tabs (as opposed to the "
+        "separate CDP browser). Call this when he asks to use his own Chrome "
+        "or when an ext_ tool reports it isn't connected.",
+        {},
+    ),
+    "ext_page_state": (
+        "Read the page on the tab HE is actually looking at, through the "
+        "Chrome extension - title, url, headings, form-field count. Use for "
+        "'what's on this page' about his own Chrome. Needs the extension "
+        "connected (ext_status).",
+        {},
+    ),
+    "ext_form_fields": (
+        "List the form fields on his real current tab via the extension, so "
+        "you can fill what you know and ask for the rest. Needs the "
+        "extension connected.",
+        {},
+    ),
+    "ext_fill_form_from_profile": (
+        "Fill the form on his REAL current Chrome tab from his personal-info "
+        "folder, through the extension - name, age, email, school, and the "
+        "rest. Never a password (vault) or a payment field (his by rule). "
+        "Reports what it filled and what it still needs. This is the "
+        "his-own-Chrome version of fill_form_from_profile; needs the "
+        "extension connected.",
+        {},
+    ),
     "inspect_form": (
         "List every field on the form currently open in Jalen's browser: its "
         "label, type, whether it is required, and whether it is already "

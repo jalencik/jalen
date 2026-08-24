@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Jalen",
+  "version": "0.1.0",
+  "description": "Lets Jalen read and act on pages inside your own Chrome, driven by the Jalen app on this machine.",
+  "minimum_chrome_version": "116",
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Jalen"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "tabs",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://gemini.google.com/*",
+    "https://accounts.google.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ]
+}

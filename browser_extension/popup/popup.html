@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px system-ui, sans-serif; width: 240px; margin: 0; padding: 12px;
+           color: #1a1a1a; background: #fff; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .row { display: flex; justify-content: space-between; padding: 3px 0; }
+    .k { color: #666; }
+    .v { font-weight: 600; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+           margin-right: 5px; vertical-align: middle; }
+    .up { background: #16a34a; }
+    .down { background: #dc2626; }
+    .muted { color: #888; font-size: 11px; margin-top: 8px; }
+    @media (prefers-color-scheme: dark) {
+      body { color: #eee; background: #1e1e1e; }
+      .k { color: #aaa; } .muted { color: #888; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Jalen</h1>
+  <div class="row"><span class="k">Connection</span>
+    <span class="v"><span id="dot" class="dot down"></span><span id="conn">checking…</span></span></div>
+  <div class="row"><span class="k">Page</span><span class="v" id="page">—</span></div>
+  <div class="muted" id="note">Jalen drives this from the app on your machine.</div>
+  <script src="popup.js"></script>
+</body>
+</html>

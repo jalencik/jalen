@@ -68,6 +68,11 @@ green:
     - inspect_form         # lists the fields, so it can ASK for what is missing
     - form_errors          # what the page is complaining about
     - whats_my             # reads one of his own details from the folder
+    # Reading his real Chrome through the extension. Reads only; the page is
+    # not changed and nothing is typed.
+    - ext_status           # is the extension connected
+    - ext_page_state       # title/url/headings of his current tab
+    - ext_form_fields      # the fields on his current tab
     - what_are_you_doing   # reads its own task list
     - cancel_task          # stops its own work, nothing else
     - what_i_have_learned  # reads its own habit file
@@ -244,6 +249,10 @@ amber:
     # by rule), so the worst it can do is put his own school in the wrong
     # ordinary box, which he can see and fix.
     - fill_form_from_profile
+    # The same, but on his real Chrome tab through the extension. Same tier
+    # and the same guarantees: no password, no payment field, only ordinary
+    # details he put in the folder.
+    - ext_fill_form_from_profile
     - upload_to_form
     # Same reasoning as delegate_task directly above: this sends his
     # words to a THIRD PARTY and spends money doing it. It was
