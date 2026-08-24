@@ -468,6 +468,20 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "is checked against it.",
         {},
     ),
+    "fill_login_code": (
+        "Read his latest one-time login code from his own email and type it "
+        "into the verification-code box on the page. Use this when a sign-in "
+        "asks for an emailed 2FA code. It only reads a code from the last few "
+        "minutes, only from the service's real sender (OpenAI for ChatGPT, "
+        "Google for Gemini), and NEVER tells you the code - it types it "
+        "straight in. If it can't find a fresh code it says so; do not invent "
+        "one or ask him to read it out unless it fails.",
+        {
+            "service": ("string", "chatgpt or gemini", True),
+            "within_minutes": ("number", "how recent the code must be; "
+                                         "default 10", False),
+        },
+    ),
     "fill_credential": (
         "Type a stored secret into the field HE HAS FOCUSED. He clicks the "
         "box; you type. You never choose the field — that is what stops a "

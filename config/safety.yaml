@@ -299,6 +299,12 @@ amber:
     # the friction the allowlist exists to remove. He still hears which
     # secret is going into which domain, and has the stop window.
     - fill_credential
+    # Reads his one-time login code from his own email and types it into the
+    # 2FA box. AMBER for the same reason as fill_credential: the value is
+    # secret-like, so it is never returned or logged, but the code is gated
+    # hard by sender and by recency before it is ever fetched - it completes
+    # his own security step, it does not defeat one - and he hears it happen.
+    - fill_login_code
     - close_browser_tab
     - fix_wifi_power_saving
     - ask_claude_code
