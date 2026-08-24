@@ -225,6 +225,19 @@ stt:
   fallback: "moonshine"            # used when offline or Groq errors (B16)
   moonshine_model: "TINY_STREAMING"
 
+  # HOW LONG TO WAIT FOR GROQ BEFORE USING THE LOCAL MODEL INSTEAD.
+  #
+  # The Groq SDK's own default is a 60 second read timeout, and that is a
+  # minute of total silence with him sat in it - the fallback below cannot
+  # help, because the call it is meant to rescue has not returned yet.
+  # His log has turns where the transcript took 36 seconds to appear.
+  #
+  # 8 seconds is chosen from his own numbers, not from taste: measured over
+  # 214 real turns, transcription takes 1.6s at the median and 4.4s at the
+  # 95th percentile. 8s is comfortably clear of a healthy call and cuts a
+  # stalled one off long before he starts wondering if it heard him.
+  groq_timeout_s: 8
+
 conversation:
   follow_up: true                  # C19 keep listening after it answers
   follow_up_timeout_s: 12

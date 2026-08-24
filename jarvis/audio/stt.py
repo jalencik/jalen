@@ -36,6 +36,7 @@ class Transcriber:
         self.language = cfg.get_path("stt.language", "en")
         self.groq_model = cfg.get_path("stt.groq_model", "whisper-large-v3-turbo")
         self.sample_rate = int(cfg.get_path("audio.sample_rate", 16000))
+        self.groq_timeout_s = float(cfg.get_path("stt.groq_timeout_s", 8))
         self._groq = None
         self._moonshine = None
         self.last_engine = ""
@@ -52,6 +53,19 @@ class Transcriber:
         return self._groq
 
     def _via_groq(self, audio: np.ndarray) -> str:
+        """
+        Groq, with a BOUND on how long it may think about it.
+
+        The SDK's default read timeout is 60 seconds. That is not a timeout,
+        it is an outage: the local fallback below exists precisely for a
+        Groq that is not answering, and it never gets a turn because the
+        call it is supposed to rescue has not returned yet. Measured in his
+        log: transcripts arriving 36 seconds after he stopped speaking, in
+        total silence, with a perfectly good offline model sat idle.
+
+        The timeout is what MAKES the fallback real. Without it the fallback
+        is a comment.
+        """
         client = self._groq_client()
         wav = _to_wav_bytes(audio, self.sample_rate)
         result = client.audio.transcriptions.create(
@@ -60,6 +74,7 @@ class Transcriber:
             language=self.language,
             response_format="text",
             temperature=0.0,
+            timeout=self.groq_timeout_s,
         )
         return (result if isinstance(result, str) else getattr(result, "text", "")).strip()
 

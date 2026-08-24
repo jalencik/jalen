@@ -152,6 +152,18 @@ SIGNAL_POLL_FRAMES = 10
 # slow enough to be a stat() every 150 frames rather than every one.
 JOB_POLL_FRAMES = 150
 
+# How fast Jalen actually talks, in characters per second.
+#
+# MEASURED, not estimated. 320 characters through en-US-AndrewNeural at
+# +18% returns 85,824 bytes of 48 kbps mp3 = 14.3 seconds of audio, so
+# 22.4 chars/sec. The previous figure of 14.0 was a guess and it made every
+# duration estimate 60% too long.
+#
+# Re-measure with scripts/ if the voice or the rate changes: both move this
+# number, and it is the only thing standing between him and a four-minute
+# answer he was not warned about.
+SPOKEN_CHARS_PER_SECOND = 22.4
+
 
 class Jalen:
     def __init__(self, cfg=CONFIG, secrets=SECRETS, mode: str = "voice") -> None:
@@ -889,13 +901,20 @@ class Jalen:
         # them - not because the content was wrong, but because he had no
         # idea he had asked for four minutes of speech.
         #
-        # ~14 characters a second, measured against edge-tts at the default
-        # rate. Announced only once, and only past a minute: telling him
-        # "this is twenty seconds" is itself an interruption.
+        # 22.4 characters a second. RE-MEASURED, because 14.0 was wrong and
+        # the error was all in one direction: a 320-character reply rendered
+        # by en-US-AndrewNeural at +18% comes back as 85,824 bytes of 48kbps
+        # mp3, which is 14.3 seconds of speech - 22.4 chars/sec, not 14.
+        #
+        # At 14.0 this told him "about three minutes" for something that
+        # actually ran under two, so the one warning designed to stop him
+        # being ambushed by a long read was itself overstating by sixty per
+        # cent. A warning that cries wolf gets ignored, and then the real
+        # four-minute answer arrives unannounced.
         def maybe_warn_about_length(so_far: int) -> None:
             if state["warned"] or not read_it_all:
                 return
-            seconds = so_far / 14.0
+            seconds = so_far / SPOKEN_CHARS_PER_SECOND
             if seconds < 60:
                 return
             state["warned"] = True
