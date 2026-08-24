@@ -583,6 +583,33 @@ integrations:
   vps:      { enabled: false }                                     # E40 - explicitly OFF, permanently
 
 # ---------------------------------------------------------------------------
+# WEB DELEGATION  (handing work to ChatGPT / Gemini in a real browser)
+# ---------------------------------------------------------------------------
+web:
+  # WHICH GOOGLE ACCOUNT SIGNS IN.
+  #
+  # "I do not want it to go through ghost mode, rather it should go through
+  #  my own google account."
+  #
+  # Jalen drives Chrome with its own profile directory - it has to, because
+  # Chrome locks a user-data directory and the one you are browsing in is
+  # therefore un-automatable. But an EMPTY profile is what made it feel like
+  # a stranger's browser: no Google session, so "Continue with Google" led
+  # to a chooser with nobody in it.
+  #
+  # Naming the account here fixes that. On the Google chooser Jalen picks
+  # THIS tile; on a fresh login it types THIS address into the email field.
+  # You complete the password and 2FA yourself - that part is yours and
+  # always will be - and the profile then stays signed in for months, so it
+  # is a one-time step, not a per-task one.
+  google_account: "jaloliddin2009applicant@gmail.com"
+
+  # How long Jalen waits, watching the page, while you finish the password
+  # and any 2FA prompt. It polls the real page state - it is not a sleep -
+  # and carries straight on with the task the moment you are through.
+  sign_in_wait_s: 300
+
+# ---------------------------------------------------------------------------
 # AUDIT  (spec F48, F52)
 # ---------------------------------------------------------------------------
 audit:

@@ -1,0 +1,176 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fake Google sign-in</title>
+<!--
+A stand-in for the ChatGPT -> "Continue with Google" -> account chooser ->
+password flow, close enough to test the part that was actually missing.
+
+WHY THIS EXISTS
+---------------
+His audit log, 2026-08-24T06:33:42, shows Jalen asked to sign in and having
+no tool that signs in. The fix drives the flow through the DOM. The thing
+most likely to be wrong about that fix is NOT chatgpt.com's markup - it is
+the state machine:
+
+    does it click Log in, then Continue with Google, in that order
+    does it pick HIS account off the chooser rather than the first tile
+    does it type his address when the chooser does not offer him
+    does it STOP at the password box instead of blundering past it
+    does it notice, by itself, when the human is through
+
+All five are testable offline, and all five are where the bugs live. The
+real sites cannot be used here: they need his account, they rate-limit, and
+a test that types into a real password box is a test nobody should write.
+
+It deliberately uses the same hooks the real code looks for
+(data-testid=login-button, "Continue with Google", div[data-identifier],
+input[type=email], #identifierNext, input[type=password]) so the test
+exercises the REAL selector lists rather than a special case.
+
+Query flags:
+    ?stage=signedout   where to start (signedout|auth|chooser|email|password)
+    ?account=a@b.com   which address the chooser offers
+    ?known=0           chooser does not list the account (forces "use another")
+    ?nopw=1            picking the account signs straight in (a live session)
+
+The test drives the human step by calling  finish()  from the page, which is
+what a person typing their password amounts to as far as this code can see.
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  .stage { display: none; }
+  .stage.on { display: block; }
+  button, div[role="link"] { padding: .5rem .8rem; margin: .3rem 0; display: block;
+    border: 1px solid #999; background: #fff; cursor: pointer; text-align: left; }
+  input { padding: .5rem; font-size: 1rem; width: 20rem; }
+  #prompt-textarea { border: 1px solid #999; min-height: 3rem; padding: .5rem; }
+</style>
+
+<!-- 1. The site, signed out. -->
+<section id="signedout" class="stage">
+  <h1>ChatGPT</h1>
+  <button data-testid="login-button">Log in</button>
+  <button>Sign up</button>
+</section>
+
+<!-- 2. The site's auth screen. -->
+<section id="auth" class="stage">
+  <h1>Welcome back</h1>
+  <button id="google-btn">Continue with Google</button>
+  <button>Continue with Microsoft Account</button>
+</section>
+
+<!-- 3. Google's account chooser. -->
+<section id="chooser" class="stage">
+  <h1>Choose an account</h1>
+  <div id="tiles"></div>
+  <div role="link" id="other">Use another account</div>
+</section>
+
+<!-- 4. Google's email box. -->
+<section id="email" class="stage">
+  <h1>Sign in</h1>
+  <input type="email" id="identifierId" name="identifier" placeholder="Email">
+  <div id="identifierNext"><button>Next</button></div>
+</section>
+
+<!-- 5. Google's password box. The wall. Jalen stops here, always. -->
+<section id="password" class="stage">
+  <h1>Welcome</h1>
+  <input type="password" name="Passwd" placeholder="Enter your password">
+  <div id="passwordNext"><button>Next</button></div>
+</section>
+
+<!-- 6. Signed in: the real chat surface. -->
+<section id="ready" class="stage">
+  <h1>ChatGPT</h1>
+  <div id="prompt-textarea" contenteditable="true"></div>
+  <button data-testid="send-button">Send</button>
+</section>
+
+<script>
+  var params = new URLSearchParams(location.search);
+  var account = params.get("account") || "someone@example.com";
+  var known = params.get("known") !== "0";
+  var noPassword = params.get("nopw") === "1";
+
+  function show(name) {
+    var all = document.querySelectorAll(".stage");
+    for (var i = 0; i < all.length; i++) { all[i].classList.remove("on"); }
+    var target = document.getElementById(name);
+    if (target) { target.classList.add("on"); }
+    window.__stage = name;
+  }
+
+  // The chooser lists a decoy FIRST, on purpose. Picking the first tile is
+  // the ghost-mode behaviour this whole change exists to stop, and a test
+  // whose chooser holds only the right answer cannot catch it.
+  function buildTiles() {
+    var box = document.getElementById("tiles");
+    box.innerHTML = "";
+    var emails = ["someone.else@example.com"];
+    if (known) { emails.push(account); }
+    emails.forEach(function (address) {
+      var tile = document.createElement("div");
+      tile.setAttribute("role", "link");
+      tile.setAttribute("data-identifier", address);
+      tile.textContent = address;
+      tile.addEventListener("click", function () {
+        window.__picked = address;
+        if (noPassword) {
+          // A live Google session: straight back to the site, signed in.
+          location.href = "https://chatgpt.com/?stage=ready&picked="
+            + encodeURIComponent(address);
+        } else {
+          show("password");
+        }
+      });
+      box.appendChild(tile);
+    });
+  }
+
+  // Carried across the hop to Google, because sessionStorage is per-origin
+  // and these two origins are the whole point of the test.
+  function googleUrl(stage) {
+    var next = new URLSearchParams();
+    next.set("stage", stage);
+    next.set("account", account);
+    next.set("known", known ? "1" : "0");
+    if (noPassword) { next.set("nopw", "1"); }
+    return "https://accounts.google.com/signin?" + next.toString();
+  }
+
+  document.querySelector("[data-testid=login-button]")
+    .addEventListener("click", function () { show("auth"); });
+
+  // A REAL NAVIGATION to a REAL Google hostname. The code under test refuses
+  // to read a Google form until the browser is actually on Google's host -
+  // because chatgpt.com's own login screen carries an email box beside the
+  // Continue with Google button, and reading that one types his address into
+  // the wrong form. A fixture that only swapped <section>s could not tell
+  // those two situations apart, so this one moves house.
+  document.getElementById("google-btn")
+    .addEventListener("click", function () {
+      location.href = googleUrl(known ? "chooser" : "email");
+    });
+
+  document.getElementById("other")
+    .addEventListener("click", function () { show("email"); });
+
+  document.querySelector("#identifierNext button")
+    .addEventListener("click", function () {
+      window.__typed = document.getElementById("identifierId").value;
+      show("password");
+    });
+
+  // What a person typing their password looks like from out here: Google
+  // hands the browser back to the site, signed in.
+  window.finish = function () {
+    location.href = "https://chatgpt.com/?stage=ready&picked="
+      + encodeURIComponent(window.__picked || account);
+  };
+
+  window.__picked = params.get("picked") || null;
+  buildTiles();
+  show(params.get("stage") || "signedout");
+</script>

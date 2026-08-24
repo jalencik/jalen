@@ -693,6 +693,21 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "nothing. Call this when web_delegate reports he is signed out.",
         {"agent": ("string", "chatgpt or gemini", True)},
     ),
+    "web_sign_in": (
+        "ACTUALLY SIGN HIM IN to ChatGPT or Gemini, through his own Google "
+        "account, in Jalen's browser. Use this - not web_sign_in_state, and "
+        "never click_element or read_screen - whenever he says any form of "
+        "'sign me in'. It clicks Log in, then Continue with Google, picks "
+        "his account, and stops at the password box, which is his to type. "
+        "It then WATCHES the page and carries on by itself the moment he is "
+        "through, including re-sending any delegation that was blocked. "
+        "Desktop automation cannot see inside Chrome's page; this can.",
+        {
+            "agent": ("string", "chatgpt or gemini", True),
+            "wait_s": ("number", "seconds to wait at the human step; "
+                                 "0 uses the configured default", False),
+        },
+    ),
     "open_signup": (
         "Open the sign-up page for ChatGPT or Gemini and hand it to him. "
         "Creating an account means agreeing to terms and proving you are "

@@ -591,9 +591,22 @@ def _rules() -> list[Rule]:
         # The DELEGATION itself is deliberately NOT routed here. It needs a
         # structured work order - objective, criteria, constraints - and a
         # regex cannot build one. The brain has the tool and the context.
-        (R(r"^sign (?:me )?(?:in|into) (?:to )?(chat ?gpt|gemini)$"
-           r"|^(?:am i |are you )?signed in(?: to)? (chat ?gpt|gemini)\??$"
-           r"|^log (?:me )?in(?:to)? (?:to )?(chat ?gpt|gemini)$", re.I),
+        #
+        # AN INSTRUCTION AND A QUESTION ARE NOT THE SAME SENTENCE.
+        # These lived on one line and both went to `web_sign_in_state`, which
+        # reports and asks. So "sign me into ChatGPT" - an imperative - got
+        # answered with a question, he answered it, and got the question
+        # again. His log has that loop in it twice. The imperative now
+        # reaches the tool that actually signs in.
+        (R(r"^(?:please )?sign (?:me )?(?:in|into|in to)(?: to)? (chat ?gpt|gemini)"
+           r"(?: (?:account|please))?$"
+           r"|^log (?:me )?(?:in|into|in to)(?: to)? (chat ?gpt|gemini)$"
+           r"|^(?:sign|log) me in(?: to| into)? (chat ?gpt|gemini) "
+           r"(?:with|using|through) (?:my )?google(?: account)?$", re.I),
+         "web_sign_in", lambda m: {"agent": _which_ai(m)}, None),
+        (R(r"^(?:am i |are you |are we )?signed in(?: to)? (chat ?gpt|gemini)\??$"
+           r"|^(?:do (?:i|you) have|is there) a (chat ?gpt|gemini) "
+           r"(?:login|session|account)\??$", re.I),
          "web_sign_in_state",
          lambda m: {"agent": _which_ai(m)}, None),
         (R(r"^(?:sign|register) me up (?:to |for )?(chat ?gpt|gemini)$"
