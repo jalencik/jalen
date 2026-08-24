@@ -161,14 +161,24 @@ def probe_browser() -> list[tuple[str, str, str]]:
     ))
 
     profile = ROOT / "data" / "browser_profile"
-    signed_in = profile.is_dir() and any(profile.rglob("Cookies"))
+    hosts = _cookie_hosts(profile)
+    # Which SITE, specifically. "There is a cookie jar" and "he is signed in
+    # to ChatGPT" are different claims and only the second one is useful.
+    signed_in = any(h.endswith("chatgpt.com") or h.endswith("openai.com")
+                    for h in hosts)
+    google = any(h.endswith("google.com") for h in hosts)
+    if signed_in:
+        note = "chatgpt.com cookies present; delegation can run unattended"
+    elif google:
+        note = ("signed in to Google but not to ChatGPT - "
+                'say "sign me in to ChatGPT" and finish it')
+    else:
+        note = ("you have not signed in inside Jalen's Chrome profile yet - "
+                'say "sign me in to ChatGPT" once and it persists')
     out.append((
         "Signed in to the web chats",
         AVAILABLE if signed_in else PARTIAL,
-        "the profile has a session; delegation can run unattended"
-        if signed_in
-        else "you have not signed in inside Jalen's Chrome profile yet - "
-             'say "sign me in to ChatGPT" once and it persists',
+        note,
     ))
 
     from jarvis.tools import webagent
@@ -297,6 +307,49 @@ def probe_flows() -> list[tuple[str, str, str]]:
 
 
 # ------------------------------------------------------------------ helpers
+def _cookie_hosts(profile) -> set:
+    """
+    Which sites this Chrome profile actually holds cookies for.
+
+    THE CHECK THIS REPLACES WAS `any(profile.rglob("Cookies"))` - does a
+    cookie FILE exist. Chrome creates that on first launch whether or not a
+    human ever signed in, so the readiness report said "the profile has a
+    session; delegation can run unattended" while chatgpt.com was, when
+    actually opened and looked at, signed out. That is the exact failure
+    this project keeps producing: a green line for a thing that does not
+    work, in the report he reads to find out what works.
+
+    Only host_key is read - the names of the sites. Cookie VALUES are
+    encrypted by Chrome and are none of our business; presence of the host
+    is the evidence, and it is enough.
+
+    Returns an empty set on any problem, including Chrome holding the file
+    open, because "I could not tell" must degrade to PARTIAL and never to a
+    confident yes.
+    """
+    import sqlite3
+    import shutil
+    import tempfile
+
+    database = profile / "Default" / "Cookies"
+    if not database.is_file():
+        database = profile / "Cookies"
+    if not database.is_file():
+        return set()
+
+    # Copied first: Chrome holds a lock on the live file, and a readiness
+    # probe must never be the reason a browser misbehaves.
+    with tempfile.TemporaryDirectory() as workspace:
+        copy = Path(workspace) / "cookies.sqlite"
+        try:
+            shutil.copy2(database, copy)
+            with sqlite3.connect(f"file:{copy}?mode=ro", uri=True) as conn:
+                rows = conn.execute("SELECT DISTINCT host_key FROM cookies")
+                return {str(host).lstrip(".").lower() for (host,) in rows}
+        except Exception:
+            return set()
+
+
 def _importable(name: str) -> bool:
     import importlib.util
 

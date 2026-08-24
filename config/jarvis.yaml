@@ -328,7 +328,13 @@ brain:
   # Free-tier offload: send cheap, tool-free questions to Gemini instead of
   # spending Claude allowance on them. Set to false to route everything to Claude.
   use_gemini_for_chitchat: true
-  gemini_model: "gemini-2.5-flash"
+  # AN ALIAS, NOT A PINNED VERSION. Verified against Google on 2026-08-24:
+  #   gemini-2.5-flash    404 "no longer available to new users"
+  #   gemini-flash-latest 403 "your project has been denied access"
+  # The 404 is a retired name and the 403 is an account matter, so pinning a
+  # version is a time bomb that goes off in his hands rather than in a test.
+  # The alias tracks whatever Google currently ships.
+  gemini_model: "gemini-flash-latest"
 
 # ---------------------------------------------------------------------------
 # SAFETY  (spec F45-F52)  — full tier lists live in config/safety.yaml

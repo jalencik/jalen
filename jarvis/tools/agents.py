@@ -70,7 +70,23 @@ MIN_BRIEF_WORDS = 40
 # please update your code" — a pinned name is a time bomb that goes off
 # whenever Google retires a model, and it goes off in HIS hands rather than
 # in a test. The alias tracks whatever is current.
-GEMINI_MODEL = "gemini-flash-latest"
+#
+# READ FROM CONFIG, because config said it was and it was not. jarvis.yaml
+# carried `brain.gemini_model: "gemini-2.5-flash"` - a retired name - and no
+# code read it, while the value that actually shipped lived here. Editing
+# the documented setting did nothing, which is worse than having no setting:
+# the file's own header promises "everything you can change lives in THIS
+# file. No code changes."
+def _gemini_model() -> str:
+    try:
+        from ..config import CONFIG
+        return str(CONFIG.get_path("brain.gemini_model", "") or "").strip() \
+            or "gemini-flash-latest"
+    except Exception:  # noqa: BLE001
+        return "gemini-flash-latest"
+
+
+GEMINI_MODEL = _gemini_model()
 
 # Same reasoning. OpenAI retires model names on the same schedule.
 OPENAI_MODEL = "gpt-4o-mini"
