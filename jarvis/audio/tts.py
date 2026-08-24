@@ -80,6 +80,9 @@ class Speaker:
         # jarvis/timing.py for why that moment, specifically, is the one
         # worth measuring.
         self.on_audio_start = lambda: None
+        # "cache" or "network" for the most recently rendered sentence. Read
+        # by the turn timer; see _render_cached for why it is worth having.
+        self.last_source = ""
         # The stream currently holding _say_lock, if any. say_now() needs to
         # know, because during a streamed reply that thread is the only one
         # that can speak. See say_now() for the deadlock this prevents.
@@ -303,19 +306,31 @@ class Speaker:
             pass
 
     def _render_cached(self, sentence: str) -> tuple[np.ndarray, int] | None:
-        """Render, reusing a previous render of the identical sentence."""
+        """
+        Render, reusing a previous render of the identical sentence.
+
+        `last_source` records which of the three routes answered. It is the
+        single most useful fact about a slow turn: measured on this machine
+        a cache hit is 25ms and a network render is about 3000ms, so a
+        timing line that does not say which one happened cannot be acted on
+        at all. Written on every call, including the miss, so it never
+        describes an earlier sentence.
+        """
         key = self._cache_key(sentence)
         with self._cache_lock:
             hit = self._audio_cache.get(key)
         if hit is not None:
+            self.last_source = "cache"
             return hit
 
         # Then a previous RUN's render. This is what makes startup free.
         on_disk = self._load_from_disk(key)
         if on_disk is not None:
             self._remember(key, on_disk)
+            self.last_source = "cache"
             return on_disk
 
+        self.last_source = "network"
         rendered = self._render(sentence)
         if rendered is not None and len(sentence) <= self.CACHEABLE_MAX_CHARS:
             self._remember(key, rendered)

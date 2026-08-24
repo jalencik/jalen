@@ -566,6 +566,13 @@ class Jalen:
         timer = self._turn_timer
         if timer is not None:
             timer.mark("first_audio")
+            # Captured HERE, at the moment the silence ended, rather than at
+            # the end of the turn: a long reply renders many sentences and
+            # the later ones overwrite last_source, so reading it afterwards
+            # would report how the turn FINISHED speaking, not what he
+            # actually waited for.
+            if not timer.tts_source:
+                timer.tts_source = getattr(self.speaker, "last_source", "") or ""
 
     def _await_playback(self, grace_s: float = 0.5, limit_s: float = 180.0) -> None:
         """
@@ -1526,6 +1533,11 @@ class Jalen:
 
                 timer.mark("transcript")
                 timer.text = text or ""
+                # Which engine actually answered. `last_engine` is set by
+                # Transcriber.transcribe on every call, and a turn that
+                # quietly fell back to the local model is exactly the turn
+                # worth being able to find afterwards.
+                timer.stt_engine = getattr(self.stt, "last_engine", "") or ""
 
                 if not text:
                     self.orb.set_state("idle")

@@ -54,7 +54,35 @@ class TurnTimer:
 
     text: str = ""
     route: str = "?"          # "router" or "brain" — they have different budgets
+    # WHICH ENGINE ANSWERED, AND WHETHER SPEECH CAME OFF THE DISK.
+    #
+    # Added because a timing line without them cannot be acted on. Measured
+    # on this machine, these two facts account for nearly all of the wait:
+    #
+    #     TTS from the phrase cache      25ms
+    #     TTS from edge-tts            ~3000ms
+    #     STT via Groq, healthy        ~1600ms
+    #     STT via Groq, stalled     up to 60000ms before the fallback
+    #
+    # So "thought=2662ms" on its own is a number to stare at, while
+    # "thought=2662ms tts=network" is a diagnosis. Recording them is the
+    # difference between answering "why was that slow" in a second and
+    # re-running the whole investigation that produced these figures.
+    stt_engine: str = ""      # "groq" | "moonshine" | ""
+    tts_source: str = ""      # "cache" | "network" | ""
     _marks: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def turn_id(self) -> str:
+        """
+        A short, stable handle for ONE turn.
+
+        His spec asked for a correlation id so a complaint can be traced to
+        a line rather than to a time of day. Derived from the object's
+        identity and the first mark, so it costs nothing and cannot drift.
+        """
+        seed = self._marks.get("speech_end", 0.0)
+        return f"{(hash((id(self), seed)) & 0xFFFF):04x}"
 
     def mark(self, name: str) -> None:
         """
@@ -101,7 +129,7 @@ class TurnTimer:
 
     def summary(self) -> str:
         """One audit line. Missing marks are omitted, never guessed at."""
-        parts = [f"route={self.route}"]
+        parts = [f"turn={self.turn_id}", f"route={self.route}"]
         for label, value in (
             ("heard", self.hearing_s),
             ("thought", self.thinking_s),
@@ -110,6 +138,12 @@ class TurnTimer:
         ):
             if value is not None:
                 parts.append(f"{label}={value * 1000:.0f}ms")
+        # Omitted rather than written as empty: a turn that never spoke has
+        # no tts source, and "tts=" would read as one that failed.
+        if self.stt_engine:
+            parts.append(f"stt={self.stt_engine}")
+        if self.tts_source:
+            parts.append(f"tts={self.tts_source}")
         return "timing " + " ".join(parts)
 
     def spoken_report(self) -> str:
