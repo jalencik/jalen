@@ -223,6 +223,25 @@ class TestGoogleStageDetection:
         assert wa.google_stage(page, ACCOUNT) == "none"
         assert wa.page_state(page, adapter) == "ready"
 
+    def test_the_password_box_outranks_the_account_chip(self, page):
+        """
+        THE REAL BUG, measured on accounts.google.com/v3/signin/challenge/pwd:
+        the password field is count=1 visible=True, and yet the page also
+        shows his account as a clickable chip at the top - so _account_tile
+        matched it and the stage came back "chooser" over a ready password
+        box. A password field is unambiguous; the chooser screen has none.
+        This builds that exact page - password box AND the account chip - and
+        holds it to reading "password".
+        """
+        page.set_content(
+            f'<div data-identifier="{ACCOUNT}" role="link">{ACCOUNT}</div>'
+            f'<input type="password" name="Passwd" autofocus>'
+        )
+        assert wa.google_stage(page, ACCOUNT) == "password", (
+            "the account chip on the password page fooled it back into "
+            "'chooser' - the bug that made the spoken line go vague"
+        )
+
 
 class TestTheWholeFlow:
 

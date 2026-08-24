@@ -1279,17 +1279,30 @@ def google_stage(page, email: str = "") -> str:
 
     "chooser" | "email" | "password" | "challenge" | "none"
 
-    Checked in the order that matters, not the order they appear: a
-    challenge outranks everything because a 2FA screen also carries a
-    password field on some builds, and treating that as "password" would
-    send Jalen off to fill a box that is not the one being asked about.
+    Checked in the order that matters, not the order they appear:
+
+      1. A challenge outranks everything: a 2FA screen also carries a
+         password field on some builds, and calling that "password" would
+         send Jalen to fill a box that is not the one being asked about.
+
+      2. THE PASSWORD BOX OUTRANKS THE CHOOSER, and this was a real bug.
+         Google's password page shows the chosen account as a chip at the
+         top - his email, in a clickable element - so _account_tile matched
+         it and google_stage returned "chooser" while a visible, ready
+         password field sat right there. Measured: on /challenge/pwd the
+         password input is count=1 visible=True, yet the stage read
+         "chooser". A password box is unambiguous - the chooser screen has
+         none - so its presence settles it. The consequence was only a
+         vaguer spoken line ("I can't tell what it's waiting for" instead of
+         "type your password"), because _await_state waits at the wall
+         either way, but a wrong stage is a wrong stage.
     """
     if _present(page, GOOGLE_CHALLENGE):
         return "challenge"
-    if email and _present(page, _account_tile(email)):
-        return "chooser"
     if _present(page, GOOGLE_PASSWORD_BOX):
         return "password"
+    if email and _present(page, _account_tile(email)):
+        return "chooser"
     if _present(page, GOOGLE_EMAIL_BOX):
         return "email"
     if _present(page, GOOGLE_OTHER_ACCOUNT):
