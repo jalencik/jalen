@@ -17,6 +17,7 @@ module named jarvis" and the extension showed "not connected" forever.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -45,8 +46,22 @@ def _ensure_launcher():
 
 
 @pytest.fixture()
-def server():
-    srv = BridgeServer()
+def bridge_file(tmp_path):
+    return tmp_path / "bridge.json"
+
+
+@pytest.fixture()
+def server(bridge_file):
+    """
+    A real server on an ISOLATED bridge file.
+
+    The host process under test is pointed at the same file through
+    JALEN_BRIDGE_FILE, so this still spawns the real launcher and the real
+    host - what it does NOT do is publish itself over data/bridge.json,
+    where the extension in his live Chrome would reconnect to the test and
+    displace the host it is trying to measure.
+    """
+    srv = BridgeServer(bridge_file=bridge_file)
     srv.start()
     yield srv
     srv.stop()
@@ -61,16 +76,18 @@ class TestTheRealHostProcess:
         assert "cd /d" in text, "the launcher will fail from Chrome's cwd"
         assert str(ROOT) in text
 
-    def test_host_connects_and_relays_from_a_foreign_cwd(self, server):
+    def test_host_connects_and_relays_from_a_foreign_cwd(self, server, bridge_file):
         """
         Spawn the launcher exactly as Chrome does - from a directory that is
         NOT the project - and run one command round trip through its stdio.
         """
         _ensure_launcher()
         foreign = tempfile.mkdtemp(prefix="not-the-project-")
+        env = dict(os.environ, JALEN_BRIDGE_FILE=str(bridge_file))
         proc = subprocess.Popen(
             ["cmd", "/c", str(LAUNCHER)],
             cwd=foreign,                        # the crux: Chrome's cwd, not ours
+            env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

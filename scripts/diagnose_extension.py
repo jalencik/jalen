@@ -149,21 +149,43 @@ def check_extension_loaded() -> bool:
         say(WARN, "Loaded into Chrome", "no Chrome user data found")
         return False
 
-    needle_id, needle_path = PINNED_ID, "browser_extension"
+    # DEFINITIVE FIRST: is Chrome running our native host right now? Chrome
+    # only launches it when the loaded extension calls connectNative, so a
+    # live host process is proof the extension is there and talking.
+    #
+    # This check leads because the Preferences scan below is a FALSE
+    # NEGATIVE waiting to happen - Chrome buffers that file and may record
+    # an extension in "Secure Preferences" instead, so it reported "not
+    # loaded" on a machine where the extension was demonstrably running.
+    try:
+        import psutil
+        for proc in psutil.process_iter(["name", "cmdline"]):
+            cmd = " ".join(proc.info.get("cmdline") or [])
+            if "native_host" in cmd or "jalen_bridge_host" in cmd:
+                say(OK, "Loaded into Chrome",
+                    f"Chrome is running the native host (pid {proc.pid})")
+                return True
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Then the on-disk record, both files, all profiles.
     for prefs in list(user_data.glob("Profile*/Preferences")) + \
-            list(user_data.glob("Default/Preferences")):
+            list(user_data.glob("Profile*/Secure Preferences")) + \
+            list(user_data.glob("Default/Preferences")) + \
+            list(user_data.glob("Default/Secure Preferences")):
         try:
             text = prefs.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if needle_id in text or needle_path in text:
-            say(OK, "Loaded into Chrome", f"found in {prefs.parent.name}")
+        if PINNED_ID in text or "browser_extension" in text:
+            say(OK, "Loaded into Chrome", f"recorded in {prefs.parent.name}")
             return True
 
-    say(BAD, "Loaded into Chrome", "NOT loaded in any Chrome profile")
+    say(WARN, "Loaded into Chrome",
+        "no running host and no record - if Chrome is closed this is normal")
     problems.append(
-        "Load it once: chrome://extensions -> Developer mode -> Load "
-        f"unpacked -> {EXT_DIR}")
+        "If you haven't yet: chrome://extensions -> Developer mode -> Load "
+        f"unpacked -> {EXT_DIR}. If you have, just open Chrome.")
     return False
 
 

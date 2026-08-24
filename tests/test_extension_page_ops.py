@@ -130,3 +130,56 @@ class TestActing:
     def test_a_missing_field_is_an_error_not_a_crash(self, page):
         result = op(page, "fill", {"selector": "#nope", "value": "x"})
         assert result.get("__code") == "NOT_FOUND"
+
+
+class TestContentEditable:
+    """
+    ChatGPT and Gemini type into contenteditable divs, not <textarea>.
+
+    Measured against his real signed-in ChatGPT: scanning only
+    input/textarea/select found two file inputs and MISSED the message box
+    entirely - so the agent could read the page and never send a prompt.
+    And assigning .value to a contenteditable silently does nothing, which
+    is how a "sent" prompt arrives empty.
+    """
+
+    CHAT = """
+      <div id="prompt" contenteditable="true"
+           data-placeholder="Message ChatGPT"></div>
+      <div id="rt" role="textbox" contenteditable="true"
+           aria-label="Ask Gemini"></div>
+      <button id="send">Send</button>
+    """
+
+    @pytest.fixture()
+    def chat(self, browser):
+        page = browser.new_page()
+        page.set_content(self.CHAT)
+        page.add_script_tag(content=PAGE_OP)
+        yield page
+        page.close()
+
+    def test_the_message_box_is_found(self, chat):
+        labels = [f["label"] for f in op(chat, "get_form_fields")["fields"]]
+        assert any("Message ChatGPT" in l for l in labels), labels
+
+    def test_a_role_textbox_is_found(self, chat):
+        labels = [f["label"] for f in op(chat, "get_form_fields")["fields"]]
+        assert any("Ask Gemini" in l for l in labels), labels
+
+    def test_typing_into_it_actually_lands(self, chat):
+        fields = op(chat, "get_form_fields")["fields"]
+        i = next(f["index"] for f in fields if "Message ChatGPT" in f["label"])
+        result = op(chat, "fill", {"index": i, "value": "research PM2.5"})
+        assert result.get("filled") is True
+        assert chat.eval_on_selector("#prompt", "e => e.textContent") \
+            == "research PM2.5", "the prompt never reached the box"
+
+    def test_the_index_points_at_the_right_element(self, chat):
+        """nth() must scan the same set fields() did, or values land wrong."""
+        fields = op(chat, "get_form_fields")["fields"]
+        i = next(f["index"] for f in fields if "Ask Gemini" in f["label"])
+        op(chat, "fill", {"index": i, "value": "hello gemini"})
+        assert chat.eval_on_selector("#rt", "e => e.textContent") == "hello gemini"
+        assert chat.eval_on_selector("#prompt", "e => e.textContent") == "", \
+            "it typed into the wrong box"

@@ -55,7 +55,14 @@ class BridgeServer:
     Chrome restarts the host after a reconnect.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, bridge_file: "Path | None" = None) -> None:
+        # WHICH FILE ADVERTISES THIS SERVER. Overridable because a test that
+        # writes the real data/bridge.json does not merely fail to isolate -
+        # it STEALS HIS BROWSER. Observed exactly that: a unit test started a
+        # server, published itself over the live file, and the extension
+        # running in his Chrome dutifully reconnected to the test. Tests pass
+        # a temp path; only the app uses the real one.
+        self._bridge_file = bridge_file or BRIDGE_FILE
         self._sock: socket.socket | None = None
         self._conn: socket.socket | None = None
         self._token = secrets.token_hex(16)
@@ -88,16 +95,16 @@ class BridgeServer:
         is - anything that can read it can drive his browser - so it is
         written with the same care.
         """
-        BRIDGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self._bridge_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {"port": self._port, "token": self._token,
                    "pid": os.getpid(), "at": time.time()}
-        tmp = BRIDGE_FILE.with_suffix(".tmp")
+        tmp = self._bridge_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
         try:
             os.chmod(tmp, 0o600)
         except OSError:
             pass                              # best effort on Windows
-        tmp.replace(BRIDGE_FILE)
+        tmp.replace(self._bridge_file)
 
     def stop(self) -> None:
         self._running = False
@@ -110,7 +117,7 @@ class BridgeServer:
         self._conn = None
         self._sock = None
         try:
-            BRIDGE_FILE.unlink()
+            self._bridge_file.unlink()
         except OSError:
             pass
 
@@ -200,14 +207,45 @@ class BridgeServer:
                 pass
 
     # ------------------------------------------------------------------ command
+    def wait_connected(self, timeout: float = 12.0) -> bool:
+        """
+        Wait for the extension to be there. True if it is, within timeout.
+
+        WHY THIS EXISTS, measured over four minutes on his machine: the link
+        was up in 20 of 24 samples, with short gaps that healed themselves
+        within about five seconds every time. That is not a fault - it is
+        MV3's service-worker lifecycle. Chrome sleeps an idle worker, the
+        native port closes with it, and the extension's alarm brings it
+        straight back.
+
+        But a caller that happens to land in one of those gaps would get
+        "not connected" for a browser that is, in every meaningful sense,
+        connected. Waiting a few seconds turns an 83%-available link into a
+        reliable one, and costs nothing when the link is already up.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._conn is not None:
+                return True
+            time.sleep(0.25)
+        return self._conn is not None
+
     def send_command(self, command: str, payload: dict | None = None,
                      timeout: float = 20.0) -> Any:
         """
         Send a command and BLOCK for its response. Returns the result, or
         raises BridgeError - including, deliberately, when nothing is
         connected, so a caller never mistakes "no browser" for "empty page".
+
+        Waits through a service-worker gap first; see wait_connected.
         """
         conn = self._conn
+        if conn is None:
+            # Bounded by the CALLER's patience, not a fixed window: someone
+            # who passes timeout=1 wants an answer in about a second, and a
+            # helpful wait that overruns it is just a hang with good manners.
+            self.wait_connected(min(12.0, max(0.0, timeout)))
+            conn = self._conn
         if conn is None:
             raise BridgeError(
                 "Jalen's Chrome extension isn't connected. Open Chrome with "

@@ -64,6 +64,10 @@ COMMANDS = frozenset({
     # App-originated, like every command, so the asymmetry holds - the page
     # cannot make the app say anything; only the app speaks into its panel.
     "show_message",
+    # Ask the extension to reload its own code. Chrome caches what it
+    # loaded, so without this every edit needs a manual click in
+    # chrome://extensions before it takes effect.
+    "reload_extension",
 })
 
 # Events the extension may raise on its own. Also an allowlist.

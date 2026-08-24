@@ -21,6 +21,7 @@ are the raw byte streams; msvcrt.setmode makes doubly sure.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
 import threading
@@ -35,7 +36,14 @@ except ImportError:  # pragma: no cover - only when launched by raw path
     from jarvis.bridge import framing
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-BRIDGE_FILE = ROOT / "data" / "bridge.json"
+
+# Which file names the app to connect to. The env var exists so a test can
+# point a REAL host process at a REAL but isolated server: without it, a test
+# host and the extension running in his live Chrome race for the same
+# bridge.json, and whichever connects second displaces the first. Chrome
+# never sets this, so normal use is unaffected.
+BRIDGE_FILE = Path(os.environ.get("JALEN_BRIDGE_FILE")
+                   or (ROOT / "data" / "bridge.json"))
 
 
 def _binary_stdio():

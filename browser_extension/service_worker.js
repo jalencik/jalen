@@ -12,6 +12,11 @@
 
 const HOST = "com.jalen.bridge";
 const PROTOCOL_VERSION = 1;
+// Bumped whenever this file changes. Chrome CACHES loaded extension code -
+// editing the file does nothing until the extension is reloaded - so a probe
+// that cannot see the build number it expects knows the browser is running
+// stale code, instead of concluding the feature is broken.
+const BUILD = 2;
 
 let port = null;
 let reconnectTimer = null;
@@ -123,7 +128,14 @@ async function activeTab() {
 async function run(command, payload) {
   switch (command) {
     case "ping":
-      return { pong: true, at: Date.now() };
+      return { pong: true, at: Date.now(), build: BUILD };
+
+    case "reload_extension":
+      // Lets Jalen pick up its own code changes without him clicking
+      // Reload in chrome://extensions. The reply is sent first because
+      // reload() tears this worker down immediately.
+      setTimeout(() => chrome.runtime.reload(), 200);
+      return { reloading: true, from: BUILD };
 
     case "show_message":
       // The app is speaking into its own chat panel.
@@ -258,6 +270,7 @@ function pageOp(command, payload) {
     if (!label && el.closest) { const l = el.closest("label"); if (l) label = l.innerText; }
     if (!label) label = el.getAttribute("aria-label") || "";
     if (!label) label = el.getAttribute("placeholder") || "";
+    if (!label) label = el.getAttribute("data-placeholder") || "";
     if (!label) label = el.getAttribute("name") || "";
     label = (label || "").replace(/\s+/g, " ").trim().slice(0, 80);
     return label || ((el.type || el.tagName).toLowerCase() + " field " + (index + 1));
@@ -270,11 +283,19 @@ function pageOp(command, payload) {
     return r.width > 0 && r.height > 0;
   }
 
+  // Modern chat UIs - ChatGPT and Gemini among them - use contenteditable
+  // divs, NOT <textarea>. Measured on his real signed-in ChatGPT: scanning
+  // only input/textarea/select found two file inputs and MISSED the message
+  // box entirely, so the agent could see the page and never type into it.
+  const EDITABLE = 'input, textarea, select, [contenteditable="true"], [role="textbox"]';
+
   function fields() {
-    const els = Array.from(document.querySelectorAll("input, textarea, select"));
+    const els = Array.from(document.querySelectorAll(EDITABLE));
     const out = [];
     els.forEach((el, i) => {
-      const type = (el.type || el.tagName).toLowerCase();
+      const editable = !el.type && (el.isContentEditable ||
+                                    el.getAttribute("role") === "textbox");
+      const type = editable ? "richtext" : (el.type || el.tagName).toLowerCase();
       if (type === "hidden" || type === "submit" || type === "button") return;
       out.push({
         index: i,
@@ -294,7 +315,10 @@ function pageOp(command, payload) {
   }
 
   function nth(i) {
-    return document.querySelectorAll("input, textarea, select")[i] || null;
+    // MUST match fields()'s selector exactly - an index into a different set
+    // is an index into the wrong element, which is how a value lands in a
+    // box nobody asked for.
+    return document.querySelectorAll(EDITABLE)[i] || null;
   }
 
   function pick(p) {
@@ -357,12 +381,34 @@ function pageOp(command, payload) {
             o.text.trim() === payload.value || o.value === payload.value);
           if (!opt) return err("no such option", "NOT_FOUND");
           el.value = opt.value;
+        } else if (el.isContentEditable || el.getAttribute("role") === "textbox") {
+          // A contenteditable has no .value - assigning one silently does
+          // NOTHING, which is how a prompt "sent" to ChatGPT arrives empty.
+          // insertText goes through the browser's own editing pipeline, so
+          // React-style editors see the keystrokes they are listening for;
+          // the textContent path is the fallback for editors that don't.
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          sel.removeAllRanges(); sel.addRange(range);
+          let inserted = false;
+          try { inserted = document.execCommand("insertText", false, payload.value); }
+          catch (e) { inserted = false; }
+          if (!inserted) {
+            el.textContent = payload.value;
+          }
         } else {
-          el.value = payload.value;
+          // Native setter, so frameworks that patch .value still see it.
+          const proto = el.tagName.toLowerCase() === "textarea"
+            ? window.HTMLTextAreaElement.prototype
+            : window.HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value");
+          if (setter && setter.set) { setter.set.call(el, payload.value); }
+          else { el.value = payload.value; }
         }
         el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
-        return { filled: true };
+        return { filled: true, value: el.isContentEditable ? el.textContent : el.value };
       }
       case "select": {
         const el = pick(payload);

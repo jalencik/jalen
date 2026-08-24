@@ -196,8 +196,16 @@ class _Relay:
 
 
 @pytest.fixture()
-def server():
-    srv = BridgeServer()
+def server(tmp_path):
+    """
+    A server that advertises itself in a TEMP file, never data/bridge.json.
+
+    Not fussiness: with the real file, a test server publishes itself to the
+    whole machine and the extension running in his Chrome reconnects to the
+    TEST. Observed exactly that - a unit test quietly stole his browser and
+    then failed because a real extension had answered it.
+    """
+    srv = BridgeServer(bridge_file=tmp_path / "bridge.json")
     srv.start()
     yield srv
     srv.stop()
@@ -255,8 +263,7 @@ class TestServer:
 
     def test_the_bridge_file_carries_the_port_and_token(self, server):
         import json
-        from jarvis.bridge.server import BRIDGE_FILE
-        info = json.loads(BRIDGE_FILE.read_text(encoding="utf-8"))
+        info = json.loads(server._bridge_file.read_text(encoding="utf-8"))
         assert info["port"] == server._port
         assert len(info["token"]) >= 16, "the token is too short to be a secret"
 
@@ -271,6 +278,8 @@ class TestNativeHostConnectsForReal:
 
     def test_the_host_connects_and_authenticates(self):
         from jarvis.bridge import native_host, framing, protocol
+        # The real bridge file here ON PURPOSE: native_host reads that exact
+        # path, so this proves the two halves meet. Restored after.
         srv = BridgeServer()
         srv.start()
         try:
