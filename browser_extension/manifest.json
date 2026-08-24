@@ -33,12 +33,7 @@
     "128": "icons/icon128.png"
   },
   "host_permissions": [
-    "https://chatgpt.com/*",
-    "https://chat.openai.com/*",
-    "https://gemini.google.com/*",
-    "https://accounts.google.com/*"
-  ],
-  "optional_host_permissions": [
-    "https://*/*"
+    "https://*/*",
+    "http://*/*"
   ]
 }

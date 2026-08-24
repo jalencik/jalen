@@ -182,8 +182,34 @@ def _value_for(concept: "_Concept", profile: dict) -> str:
     return ""
 
 
+# WHOSE detail is this field asking for? A form asks for several people:
+# the applicant, a parent, a guardian, an emergency contact, a referee. The
+# label says which, and ignoring that is how his own name ended up in the
+# parent fields of a real Harvard-affiliated application - measured, on the
+# live form, before this existed.
+#
+# The folder describes ONE person: him. So a field belonging to anyone else
+# is left alone and reported, never guessed at from his details.
+_SOMEONE_ELSE = (
+    "parent", "guardian", "mother", "father", "spouse", "partner",
+    "emergency", "next of kin", "referee", "reference", "recommender",
+    "supervisor", "employer", "teacher", "counselor", "counsellor",
+    "sibling", "relative", "contact person", "second ", "2nd ",
+)
+
+
+def belongs_to_someone_else(field: dict) -> bool:
+    """True when the label asks for a person other than him."""
+    hay = f"{field.get('label','')} {field.get('name','')}".lower()
+    return any(word in hay for word in _SOMEONE_ELSE)
+
+
 def _concept_for(field: dict) -> "_Concept | None":
     """Which concept this form field is, by the strongest signal available."""
+    # Whose field it is outranks what kind of field it is. "What is your
+    # parent's first name" is a first-name box, and none of his business.
+    if belongs_to_someone_else(field):
+        return None
     auto = field.get("autocomplete", "")
     if auto:
         for concept in CONCEPTS:

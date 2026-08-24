@@ -99,6 +99,58 @@ class TestFieldRecognition:
         assert P._concept_for(field).key == "email"
 
 
+class TestWhoseFieldIsIt:
+    """
+    A form asks about several people. The folder describes one: him.
+
+    MEASURED ON A REAL APPLICATION - the Horizon Academic form on Airtable,
+    reached from edugrants.uz. Jalen filled "Jaloliddin Musayev" into "What
+    is your parent or guardian's first name" AND into the second guardian's
+    fields, because the matcher saw "first name" and ignored whose. That
+    would have gone to a Harvard-affiliated programme declaring him his own
+    parent. Whose field it is has to outrank what kind of field it is.
+    """
+
+    @pytest.mark.parametrize("label", [
+        "What is your parent or guardian's first name",
+        "What is your parent or guardian's last name?",
+        "What is your second parent or guardian's first name",
+        "What is your parent or guardian's email? *",
+        "What is your parent or guardian's phone number? *",
+        "Mother's full name",
+        "Emergency contact phone",
+        "Referee email address",
+        "Spouse date of birth",
+    ])
+    def test_someone_elses_field_is_left_alone(self, label):
+        field = {"label": label, "name": "", "autocomplete": "", "type": "text"}
+        assert P.belongs_to_someone_else(field)
+        assert P._concept_for(field) is None, (
+            f"{label!r} would be filled with HIS details"
+        )
+
+    @pytest.mark.parametrize("label", [
+        "What is your first name? *",
+        "What is your last name? *",
+        "What is your email address? *",
+        "What is your mobile phone number? *",
+        "What is your date of birth? *",
+    ])
+    def test_his_own_fields_still_fill(self, label):
+        field = {"label": label, "name": "", "autocomplete": "", "type": "text"}
+        assert not P.belongs_to_someone_else(field)
+        assert P._concept_for(field) is not None, f"{label!r} stopped matching"
+
+    def test_a_parent_field_survives_a_strong_autocomplete_hint(self):
+        """
+        autocomplete beats a label for WHAT a field is - but not for WHOSE.
+        A form that tags the guardian's box given-name must still be skipped.
+        """
+        field = {"label": "Parent or guardian's first name",
+                 "name": "", "autocomplete": "given-name", "type": "text"}
+        assert P._concept_for(field) is None
+
+
 class TestPaymentAndSecretsAreOffLimits:
     """His rule, enforced: payment is his to fill, passwords come from vault."""
 

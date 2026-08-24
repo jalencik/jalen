@@ -16,7 +16,7 @@ const PROTOCOL_VERSION = 1;
 // editing the file does nothing until the extension is reloaded - so a probe
 // that cannot see the build number it expects knows the browser is running
 // stale code, instead of concluding the feature is broken.
-const BUILD = 2;
+const BUILD = 4;
 
 let port = null;
 let reconnectTimer = null;
@@ -307,6 +307,18 @@ function pageOp(command, payload) {
         required: el.required === true || el.getAttribute("aria-required") === "true",
         disabled: el.disabled === true,
         visible: visible(el),
+        // WHAT IS IN THE FIELD. Without this the agent cannot VERIFY that
+        // what it typed actually landed - it can only trust the fill call,
+        // which is exactly the "assume it worked" failure this whole design
+        // exists to avoid. A contenteditable holds text, not .value.
+        filled: editable
+          ? (el.textContent || "").trim().length > 0
+          : !!(el.value && String(el.value).length),
+        // A short preview so the agent can compare what it MEANT to type
+        // with what is there. NEVER for a password box: reading one back
+        // would put a secret in the app's context for no benefit.
+        value: (el.type === "password") ? ""
+          : String((editable ? el.textContent : el.value) || "").slice(0, 200),
         options: el.tagName.toLowerCase() === "select"
           ? Array.from(el.options).slice(0, 20).map(o => o.text.trim()) : [],
       });
