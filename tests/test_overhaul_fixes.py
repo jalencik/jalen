@@ -506,15 +506,22 @@ def test_a_noise_blip_cannot_hang_the_collector():
     assert closed_at < collector.max_s * 1000, "still waiting out max_utterance_s"
 
 
-def test_common_replies_are_cached_not_re_synthesised():
+def test_common_replies_are_cached_not_re_synthesised(tmp_path, monkeypatch):
     """
-    "Opening chrome." cost ~1.46s of network round-trip EVERY time — the
-    largest remaining delay on a command whose actual work finishes in
-    ~0.5s. The words never change, so they are rendered once and replayed.
-    Measured after: 1460ms -> 0.02ms.
+    Rendering "Opening chrome." is a NETWORK ROUND TRIP to Microsoft, and on
+    his machine it measures 3.3s median (4.6s worst) for one short sentence.
+    The words never change, so they are rendered once and replayed.
+
+    CACHE_DIR is redirected at a temp folder, deliberately. Without that this
+    test passes or fails depending on whether the real cache happens to hold
+    "Done." already - it started failing with `0 == 1` the moment the disk
+    cache shipped, because the phrase was on disk and nothing synthesised at
+    all. A test whose result depends on machine state is measuring the
+    machine.
     """
     from jarvis.audio.tts import Speaker
 
+    monkeypatch.setattr(Speaker, "CACHE_DIR", tmp_path / "tts_cache")
     speaker = Speaker(CONFIG)
     calls = []
 
@@ -527,6 +534,61 @@ def test_common_replies_are_cached_not_re_synthesised():
     for _ in range(5):
         speaker._render_cached("Done.")
     assert len(calls) == 1, f"re-synthesised a cached phrase {len(calls)} times"
+
+
+def test_the_cache_survives_a_restart(tmp_path, monkeypatch):
+    """
+    THE STARTUP FIX. An in-memory cache dies with the process, so every
+    launch re-rendered the same 18 phrases over the network - 17.9s median
+    in his log, and the front half of "it took me whole 20 seconds after orb
+    appeared to actually speak".
+
+    A second Speaker, standing in for a second run, must synthesise nothing.
+    """
+    from jarvis.audio.tts import Speaker
+
+    monkeypatch.setattr(Speaker, "CACHE_DIR", tmp_path / "tts_cache")
+
+    import numpy as np
+
+    first = Speaker(CONFIG)
+    rendered = []
+    first._render = lambda s: (rendered.append(s),
+                               (np.zeros(10, dtype=np.float32), 24000))[-1]
+    first._render_cached("Shutting down. See you, Boss.")
+    assert len(rendered) == 1
+
+    second = Speaker(CONFIG)          # a fresh process, as far as it knows
+    again = []
+    second._render = lambda s: (again.append(s),
+                                (np.zeros(10, dtype=np.float32), 24000))[-1]
+    got = second._render_cached("Shutting down. See you, Boss.")
+    assert got is not None
+    assert not again, (
+        "the new run re-synthesised a phrase the last run already rendered - "
+        "the cache is not surviving restarts and startup is slow again"
+    )
+
+
+def test_a_full_disk_costs_speed_and_never_a_reply(tmp_path, monkeypatch):
+    """
+    The cache is an optimisation. If it cannot be written, Jalen must still
+    speak - a spoken reply is not allowed to depend on free disk space.
+    """
+    from jarvis.audio.tts import Speaker
+
+    monkeypatch.setattr(Speaker, "CACHE_DIR", tmp_path / "tts_cache")
+    speaker = Speaker(CONFIG)
+
+    import numpy as np
+
+    speaker._render = lambda s: (np.zeros(10, dtype=np.float32), 24000)
+
+    def explode(*a, **k):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(speaker, "_save_to_disk", explode)
+    assert speaker._render_cached("Anything at all.") is not None
 
 
 def test_audio_cache_is_bounded():

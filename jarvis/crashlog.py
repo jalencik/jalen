@@ -151,6 +151,8 @@ class _StderrToCrashLog:
 
     def __init__(self) -> None:
         self._buf: list[str] = []
+        # Opened lazily by fileno(), then kept for the life of the process.
+        self._fd_file = None
 
     def write(self, text: str) -> int:
         if not text:
@@ -171,10 +173,33 @@ class _StderrToCrashLog:
     def isatty(self) -> bool:
         return False
 
-    # Anything that probes for a real file gets an honest, harmless answer
-    # rather than an AttributeError in the middle of reporting a crash.
+    # A REAL FILE DESCRIPTOR, because something needs one.
+    #
+    # This used to raise OSError("crash-log stderr has no file descriptor"),
+    # on the reasoning that an honest refusal beats an AttributeError. It is
+    # honest, and it broke browser delegation completely.
+    #
+    # Playwright launches its driver as a SUBPROCESS and passes it this
+    # stream, and subprocess.Popen asks a stream for .fileno() so the child
+    # can inherit it. The raise propagated out as "the browser automation
+    # layer is down", which is what he was told, four times, while he swore
+    # at it.
+    #
+    # It only ever happened under pythonw - i.e. only when he ran it, and
+    # never when it was run from a terminal with a real stderr. That is the
+    # worst shape a bug can have.
+    #
+    # So: hand back a descriptor pointing at the crash log itself. The child
+    # process's stderr lands where this class was always trying to put it,
+    # and anything that wants a real fd gets one.
     def fileno(self) -> int:
-        raise OSError("crash-log stderr has no file descriptor")
+        if self._fd_file is None:
+            CRASH_LOG.parent.mkdir(parents=True, exist_ok=True)
+            # Line-buffered and kept open for the life of the process: the
+            # descriptor must stay valid as long as any child holds it.
+            self._fd_file = open(CRASH_LOG, "a", buffering=1,
+                                 encoding="utf-8", errors="replace")
+        return self._fd_file.fileno()
 
     def close(self) -> None:
         self.flush()

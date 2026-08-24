@@ -20,6 +20,7 @@ import io
 import queue
 import re
 import threading
+from pathlib import Path
 import time
 
 import numpy as np
@@ -234,10 +235,72 @@ class Speaker:
         # would just move the silence, so it is pre-rendered here.
         "Give me a second.",
         "That's the short version, the full text is on screen.",
+        # Counted in his own audit log. Each of these was costing a ~3.3s
+        # network round trip EVERY time, and each is said verbatim over and
+        # over: "No answer, so I've cancelled it." fifteen times, "Shutting
+        # down" eight, the rating question seven.
+        "No answer, so I've cancelled it.",
+        "Shutting down. See you, Boss.",
+        "Hey boss - how do you rate my work out of ten?",
+        "Morning, Boss.",
+        "Yes, Boss?",
+        "On it.",
+        "Sent.",
+        "Nothing running.",
+        "Thanks - that's noted.",
+        "I'm working on it.",
     )
+
+    # WHERE RENDERED SPEECH LIVES BETWEEN RUNS.
+    #
+    # Measured on his machine: edge-tts takes 3.3 SECONDS (median, 4.6s
+    # worst) to render one short sentence, because it is a network round
+    # trip to Microsoft. That single number explains most of what he has
+    # been complaining about:
+    #
+    #   "it took me whole 20 seconds after orb appeared to actually speak"
+    #       -> the warmup renders 18 phrases: 17.9s median in his log
+    #   "it is taking too much time on that yellow phase"
+    #       -> router turns think for 3.05s p50 while routing takes ~0ms.
+    #          The orb is yellow because TTS is on the network, not because
+    #          anything is being decided.
+    #
+    # An in-memory cache fixed the second occurrence and never the first,
+    # because it died with the process. On disk it is paid once, ever.
+    CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "tts_cache"
+    DISK_CACHE_MAX = 400
 
     def _cache_key(self, text: str) -> str:
         return f"{self.voice}|{self.rate}|{self.pitch}|{text}"
+
+    def _cache_path(self, key: str) -> Path:
+        import hashlib
+
+        return self.CACHE_DIR / f"{hashlib.sha256(key.encode()).hexdigest()[:24]}.npz"
+
+    def _load_from_disk(self, key: str):
+        """A previous run's render, or None. Never raises."""
+        try:
+            path = self._cache_path(key)
+            if not path.exists():
+                return None
+            with np.load(path) as blob:
+                return blob["audio"], int(blob["rate"])
+        except Exception:
+            return None
+
+    def _save_to_disk(self, key: str, audio, rate: int) -> None:
+        """Best effort. A full disk must cost speed, never a spoken reply."""
+        try:
+            self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            existing = list(self.CACHE_DIR.glob("*.npz"))
+            if len(existing) >= self.DISK_CACHE_MAX:
+                # Oldest first. This is a speed cache, not a record.
+                for stale in sorted(existing, key=lambda f: f.stat().st_mtime)[:40]:
+                    stale.unlink(missing_ok=True)
+            np.savez_compressed(self._cache_path(key), audio=audio, rate=rate)
+        except Exception:
+            pass
 
     def _render_cached(self, sentence: str) -> tuple[np.ndarray, int] | None:
         """Render, reusing a previous render of the identical sentence."""
@@ -246,15 +309,37 @@ class Speaker:
             hit = self._audio_cache.get(key)
         if hit is not None:
             return hit
+
+        # Then a previous RUN's render. This is what makes startup free.
+        on_disk = self._load_from_disk(key)
+        if on_disk is not None:
+            self._remember(key, on_disk)
+            return on_disk
+
         rendered = self._render(sentence)
         if rendered is not None and len(sentence) <= self.CACHEABLE_MAX_CHARS:
-            with self._cache_lock:
-                # Bounded: this is a voice assistant on a machine with ~1GB
-                # free, not a CDN. Oldest entry goes when full.
-                if len(self._audio_cache) >= self.CACHE_MAX_ENTRIES:
-                    self._audio_cache.pop(next(iter(self._audio_cache)))
-                self._audio_cache[key] = rendered
+            self._remember(key, rendered)
+            # Never at the cost of a reply. The cache is an optimisation, and
+            # a full disk must cost speed rather than speech - so this is
+            # guarded HERE as well as inside _save_to_disk. Belt and braces
+            # on the one path where the failure would be silent and total.
+            try:
+                self._save_to_disk(key, rendered[0], rendered[1])
+            except Exception:
+                pass
         return rendered
+
+    def _remember(self, key: str, rendered) -> None:
+        """
+        Put it in memory, bounded. ONE place, because the disk-hit path
+        added a second insertion that skipped the bound entirely and let the
+        cache grow past its limit - caught by test_audio_cache_is_bounded,
+        which is exactly what that test is for.
+        """
+        with self._cache_lock:
+            if len(self._audio_cache) >= self.CACHE_MAX_ENTRIES:
+                self._audio_cache.pop(next(iter(self._audio_cache)))
+            self._audio_cache[key] = rendered
 
     def warmup(self) -> None:
         """
@@ -267,7 +352,19 @@ class Speaker:
             import av  # noqa: F401  — import cost paid here, not mid-reply
         except ImportError:
             pass
-        asyncio.run(self._synthesise("ready"))
+        # The connection probe is SKIPPED when the disk cache is already
+        # populated. It exists to pay edge-tts's cold-connection cost up
+        # front, and there is nothing to pay when the first thing Jalen says
+        # will come off the disk anyway. On his machine this was ~4s of every
+        # single startup, spent to warm a connection that then went unused.
+        already_warm = False
+        try:
+            already_warm = len(list(self.CACHE_DIR.glob("*.npz"))) >= max(
+                8, len(self._COMMON_PHRASES) // 2)
+        except Exception:
+            already_warm = False
+        if not already_warm:
+            asyncio.run(self._synthesise("ready"))
         # Pre-render the phrases Jalen says constantly, so the reply to
         # "open chrome" is instant instead of a 1.5s round-trip.
         # In PARALLEL: serially this took 55s (16 phrases x ~1.5s of network
