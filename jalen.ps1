@@ -68,6 +68,7 @@ switch ($Command.ToLower()) {
     "abilities" { & $py (Join-Path $scripts "abilities.py") }
     "disk"      { & $py (Join-Path $scripts "disk_audit.py") }
     "ready"     { & $py (Join-Path $scripts "readiness.py") }
+    "accept"    { & $py (Join-Path $scripts "acceptance.py") }
     "licence"   { & $py (Join-Path $scripts "choose_licence.py") }
     "license"   { & $py (Join-Path $scripts "choose_licence.py") }
     "update"    { & $py (Join-Path $scripts "update.py") }
