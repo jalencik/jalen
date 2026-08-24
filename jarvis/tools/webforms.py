@@ -93,6 +93,12 @@ _SCAN = r"""
       index: i,
       label: label,
       type: type,
+      // The two most reliable machine hints for WHAT a field is - a form
+      // that sets autocomplete="given-name" is telling you outright. Kept
+      // alongside the human label so profile.py can match on the strongest
+      // signal available and fall back to the label when a site omits them.
+      autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
+      name: (el.getAttribute('name') || '').toLowerCase(),
       required: el.required === true || el.getAttribute('aria-required') === 'true',
       filled: !!(el.value && String(el.value).length),
       options: el.tagName.toLowerCase() === 'select'

@@ -604,6 +604,23 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "don't. Never invent a value for a form.",
         {},
     ),
+    "fill_form_from_profile": (
+        "Fill the form on screen from his personal-info folder "
+        "(data/personal_info) in one go - name, age, email, school, and any "
+        "other ordinary field it recognises. Prefer this over filling fields "
+        "one at a time when he says things like 'fill this in' or 'put my "
+        "details in'. It NEVER touches password fields (vault only) or "
+        "payment fields (his by rule), and it tells you exactly what it "
+        "filled, what it still needs from him, and what it left for him. "
+        "After it runs, ask_user only for what it reports as still needed.",
+        {},
+    ),
+    "whats_my": (
+        "Look up one of his own details from the personal-info folder - "
+        "'what's my school', 'what email do I use'. Reads data/personal_info; "
+        "never returns a password or payment detail.",
+        {"query": ("string", "which detail, e.g. 'email' or 'school'", True)},
+    ),
     "fill_form_field": (
         "Type a value into one named field. Use the label exactly as "
         "inspect_form reported it. Refuses password fields - those only ever "

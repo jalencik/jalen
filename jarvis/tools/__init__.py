@@ -31,7 +31,7 @@ from . import (
     gcalendar, gmail,
     handoff,
     interaction,
-    launcher, memory, messaging, repairs, research, selfcontrol, selfeval, sysinfo,
+    launcher, memory, messaging, profile, repairs, research, selfcontrol, selfeval, sysinfo,
     system, technician, vault, voice, web,
 )
 
@@ -72,7 +72,7 @@ for _module in (
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
     technician, repairs, vault, interaction, browsertabs, attachments,
     bulkmail, autofill, drafting, devwork, selfcontrol, agents,
-    webagent, feedback, webforms, tasks,
+    webagent, feedback, webforms, tasks, profile,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:

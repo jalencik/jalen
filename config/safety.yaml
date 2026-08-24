@@ -67,6 +67,7 @@ green:
     # Reading a form. Changes nothing on the page and types nothing.
     - inspect_form         # lists the fields, so it can ASK for what is missing
     - form_errors          # what the page is complaining about
+    - whats_my             # reads one of his own details from the folder
     - what_are_you_doing   # reads its own task list
     - cancel_task          # stops its own work, nothing else
     - what_i_have_learned  # reads its own habit file
@@ -237,6 +238,12 @@ amber:
     # to it. They were reaching AMBER by default already; naming them here
     # makes that a decision instead of an accident.
     - fill_form_field
+    # Fills a whole form from his personal-info folder. AMBER for the same
+    # reason as fill_form_field - it types into a page - and no more than
+    # that: it cannot touch a password (vault only) or a payment field (his
+    # by rule), so the worst it can do is put his own school in the wrong
+    # ordinary box, which he can see and fix.
+    - fill_form_from_profile
     - upload_to_form
     # Same reasoning as delegate_task directly above: this sends his
     # words to a THIRD PARTY and spends money doing it. It was
