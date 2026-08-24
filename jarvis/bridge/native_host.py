@@ -50,11 +50,50 @@ def _binary_stdio():
     return sys.stdin.buffer, sys.stdout.buffer
 
 
+def _app_is_alive(info: dict) -> bool:
+    """
+    Is the process that wrote bridge.json still running?
+
+    THE BUG THIS CLOSES, found while diagnosing a "not connected" report.
+    bridge.json is written when the app starts and deleted when it stops
+    cleanly - but a crash or a kill leaves it behind, pointing at a port
+    nothing owns. Ports get REUSED. So the old code would happily connect to
+    whatever process later grabbed that port and hand it Jalen's token,
+    which is the key to driving his browser.
+
+    Checking the recorded pid is what makes the token safe to send: no live
+    writer, no connection, no token. Verified against a real stale file on
+    his machine (pid 22820, port 2097, both long dead).
+    """
+    pid = info.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        import psutil
+        return bool(psutil.pid_exists(pid))
+    except ImportError:
+        # No psutil: fall back to freshness alone rather than assuming alive.
+        import time
+        try:
+            return (time.time() - float(info.get("at", 0))) < 86400
+        except (TypeError, ValueError):
+            return False
+    except Exception:  # noqa: BLE001
+        # A corrupt file can hold anything - psutil raises OverflowError on a
+        # pid too large for a C long, and this runs in a process whose only
+        # job is to relay. Any doubt means DON'T send the token; the cost is
+        # a reconnect, and the alternative is handing it to a stranger.
+        return False
+
+
 def _connect_to_app() -> "socket.socket | None":
     """Read the app's port+token and open an authenticated loopback link."""
     try:
         info = json.loads(BRIDGE_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        return None
+    # Refuse to speak to a port whose owner is gone. See _app_is_alive.
+    if not _app_is_alive(info):
         return None
     try:
         sock = socket.create_connection(("127.0.0.1", int(info["port"])),

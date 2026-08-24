@@ -110,6 +110,64 @@ class TestTheRealHostProcess:
             except Exception:
                 proc.kill()
 
+class TestStaleBridgeFileIsRefused:
+    """
+    A stale bridge.json must never cause the token to be handed out.
+
+    Found while diagnosing a real "not connected" report: bridge.json is
+    written on start and deleted on a clean stop, so a crash leaves it
+    pointing at a port nothing owns. Ports get REUSED - so the old code
+    would connect to whatever process later grabbed that port and send it
+    Jalen's token, which is the key to driving his browser. His machine had
+    exactly such a file (pid 22820, port 2097, both dead).
+    """
+
+    def test_a_dead_pid_is_refused(self, tmp_path, monkeypatch):
+        from jarvis.bridge import native_host
+        # A pid that cannot be running: max pid + 1 is never live.
+        stale = {"port": 65000, "token": "secret", "pid": 4294967294, "at": 0}
+        assert native_host._app_is_alive(stale) is False
+
+    def test_a_live_pid_is_accepted(self):
+        import os
+        from jarvis.bridge import native_host
+        live = {"port": 1, "token": "t", "pid": os.getpid(), "at": 0}
+        assert native_host._app_is_alive(live) is True
+
+    def test_a_missing_pid_is_refused(self):
+        from jarvis.bridge import native_host
+        assert native_host._app_is_alive({"port": 1, "token": "t"}) is False
+
+    def test_no_token_is_sent_to_a_stale_port(self, tmp_path, monkeypatch):
+        """
+        THE POINT: stand a listener on a port, write a stale bridge.json
+        naming it with a DEAD pid, and prove the host sends it nothing.
+        """
+        import json as _json
+        import socket as _socket
+        from jarvis.bridge import native_host
+
+        listener = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        listener.settimeout(1.0)
+
+        bridge = tmp_path / "bridge.json"
+        bridge.write_text(_json.dumps(
+            {"port": port, "token": "SECRET-TOKEN",
+             "pid": 4294967294, "at": 0}), encoding="utf-8")
+        monkeypatch.setattr(native_host, "BRIDGE_FILE", bridge)
+
+        assert native_host._connect_to_app() is None, "it connected anyway"
+        try:
+            listener.accept()
+            raise AssertionError("the host opened a connection to a stale port")
+        except _socket.timeout:
+            pass          # nothing arrived, which is the whole point
+        finally:
+            listener.close()
+
     def test_host_reports_when_the_app_is_absent(self):
         """
         With no server running, the host must emit a valid framed event

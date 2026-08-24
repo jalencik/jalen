@@ -68,6 +68,8 @@ switch ($Command.ToLower()) {
     "abilities" { & $py (Join-Path $scripts "abilities.py") }
     "disk"      { & $py (Join-Path $scripts "disk_audit.py") }
     "ready"     { & $py (Join-Path $scripts "readiness.py") }
+    "browser"   { & $py (Join-Path $scripts "diagnose_extension.py") }
+    "extension" { & $py (Join-Path $scripts "diagnose_extension.py") }
     "accept"    { & $py (Join-Path $scripts "acceptance.py") }
     "licence"   { & $py (Join-Path $scripts "choose_licence.py") }
     "license"   { & $py (Join-Path $scripts "choose_licence.py") }
@@ -78,6 +80,7 @@ switch ($Command.ToLower()) {
         Write-Host "Unknown command: $Command" -ForegroundColor Red
         Write-Host "Use: start | restart | stop | status | text | telegram | check | why"
         Write-Host "     todo | can | ready | disk | vault | hands | voice"
+        Write-Host "     browser  (why the Chrome extension says not connected)"
         Write-Host "     rehearse | licence | setup | update | hotkeys | uninstall"
         Write-Host ""
         Write-Host "Not sure where to start?  .\jalen.ps1 todo" -ForegroundColor Cyan
