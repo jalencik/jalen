@@ -161,16 +161,23 @@ def probe_browser() -> list[tuple[str, str, str]]:
     ))
 
     profile = ROOT / "data" / "browser_profile"
-    hosts = _cookie_hosts(profile)
-    # Which SITE, specifically. "There is a cookie jar" and "he is signed in
-    # to ChatGPT" are different claims and only the second one is useful.
-    signed_in = any(h.endswith("chatgpt.com") or h.endswith("openai.com")
-                    for h in hosts)
-    google = any(h.endswith("google.com") for h in hosts)
+    cookies = _cookie_pairs(profile)
+    # THE SESSION TOKEN, not merely a cookie for the host. ChatGPT sets
+    # cookies for anonymous visitors too, so "chatgpt.com cookies exist" is
+    # a false positive for "signed in" - which is precisely the false green
+    # this whole line has already produced once. The auth cookie is the only
+    # honest signal: it is set on login and cleared on logout.
+    def has_cookie(host_suffix, *names) -> bool:
+        return any(h.endswith(host_suffix) and n in names
+                   for (h, n) in cookies)
+
+    signed_in = has_cookie("chatgpt.com", "__Secure-next-auth.session-token",
+                           "__Secure-next-auth.session-token.0")
+    google = has_cookie("google.com", "SID", "__Secure-1PSID", "__Secure-3PSID")
     if signed_in:
-        note = "chatgpt.com cookies present; delegation can run unattended"
+        note = "signed in to ChatGPT; delegation can run unattended"
     elif google:
-        note = ("signed in to Google but not to ChatGPT - "
+        note = ("signed in to Google but not yet to ChatGPT - "
                 'say "sign me in to ChatGPT" and finish it')
     else:
         note = ("you have not signed in inside Jalen's Chrome profile yet - "
@@ -309,45 +316,58 @@ def probe_flows() -> list[tuple[str, str, str]]:
 # ------------------------------------------------------------------ helpers
 def _cookie_hosts(profile) -> set:
     """
-    Which sites this Chrome profile actually holds cookies for.
+    Which sites this Chrome profile holds cookies for. Hosts only.
 
-    THE CHECK THIS REPLACES WAS `any(profile.rglob("Cookies"))` - does a
+    THE CHECK THIS REPLACED was `any(profile.rglob("Cookies"))` - does a
     cookie FILE exist. Chrome creates that on first launch whether or not a
-    human ever signed in, so the readiness report said "the profile has a
-    session; delegation can run unattended" while chatgpt.com was, when
-    actually opened and looked at, signed out. That is the exact failure
-    this project keeps producing: a green line for a thing that does not
-    work, in the report he reads to find out what works.
-
-    Only host_key is read - the names of the sites. Cookie VALUES are
-    encrypted by Chrome and are none of our business; presence of the host
-    is the evidence, and it is enough.
-
-    Returns an empty set on any problem, including Chrome holding the file
-    open, because "I could not tell" must degrade to PARTIAL and never to a
-    confident yes.
+    human ever signed in, so the readiness report said delegation could run
+    unattended while ChatGPT was, when actually opened, signed out. Hosts
+    are a truer signal than a file; the session token (see _cookie_pairs'
+    callers) is truer still.
     """
+    return {host for host, _name in _cookie_pairs(profile)}
+
+
+def _read_cookie_rows(database) -> set:
+    """(host, name) for every cookie in the jar. Empty set on any trouble.
+
+    Connection closed EXPLICITLY, in finally - `with sqlite3.connect(...)`
+    manages the transaction, NOT the connection, so it leaves the file open.
+    That left the temp copy locked, TemporaryDirectory cleanup then raised
+    WinError 32, and the readiness probe fell over on the one machine where
+    the cookie jar actually existed."""
     import sqlite3
     import shutil
     import tempfile
 
-    database = profile / "Default" / "Cookies"
-    if not database.is_file():
-        database = profile / "Cookies"
-    if not database.is_file():
-        return set()
-
-    # Copied first: Chrome holds a lock on the live file, and a readiness
-    # probe must never be the reason a browser misbehaves.
-    with tempfile.TemporaryDirectory() as workspace:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as workspace:
         copy = Path(workspace) / "cookies.sqlite"
+        conn = None
         try:
             shutil.copy2(database, copy)
-            with sqlite3.connect(f"file:{copy}?mode=ro", uri=True) as conn:
-                rows = conn.execute("SELECT DISTINCT host_key FROM cookies")
-                return {str(host).lstrip(".").lower() for (host,) in rows}
+            conn = sqlite3.connect(f"file:{copy}?mode=ro", uri=True)
+            rows = conn.execute("SELECT host_key, name FROM cookies")
+            return {(str(h).lstrip(".").lower(), str(n)) for (h, n) in rows}
         except Exception:
             return set()
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+
+def _cookie_pairs(profile) -> set:
+    """(host, name) pairs for a profile, resolving the cookie-jar path."""
+    candidates = (
+        profile / "Default" / "Network" / "Cookies",
+        profile / "Default" / "Cookies",
+        profile / "Network" / "Cookies",
+        profile / "Cookies",
+    )
+    database = next((c for c in candidates if c.is_file()), None)
+    return _read_cookie_rows(database) if database else set()
 
 
 def _importable(name: str) -> bool:
