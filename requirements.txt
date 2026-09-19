@@ -26,7 +26,15 @@ edge-tts>=7.2.8              # a sudden 403 means "upgrade me", not "service is 
 av>=13.0.0                   # decodes edge-tts mp3 without a system ffmpeg
 
 # --- brain ---
-claude-agent-sdk>=0.1.0
+# Ceiling is deliberate. This wheel BUNDLES its own claude.exe and the SDK
+# resolves that bundled copy before PATH, so this line decides which Claude
+# Code the brain actually runs — not whatever npm installed. Tested on
+# 0.2.140 / bundled CLI 2.1.235. tests/test_agent_sdk_configuration.py pins
+# four ClaudeAgentOptions fields as safety decisions (tools, setting_sources,
+# skills, permission_mode) and tests/test_cli_path_override.py depends on
+# bundled-before-PATH resolution; a 0.3 could rename or re-default any of
+# them. Upgrade on purpose, then run those two files.
+claude-agent-sdk>=0.2.140,<0.3.0
 
 # --- desktop control ---
 uiautomation==2.0.29         # UIA tree + input. Replaces pyautogui AND pywinauto.

@@ -16,7 +16,9 @@ SDK would otherwise auto-approve — which is why we use a hook rather than the
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..safety import SafetyEngine, Tier
@@ -55,6 +57,76 @@ def _looks_like_a_dead_client(exc: BaseException) -> bool:
 
 # Windows only. CreateProcess flag meaning "give this child no console".
 _CREATE_NO_WINDOW = 0x08000000
+
+# npm's Windows install of Claude Code is a claude.cmd shim, and the SDK
+# refuses outright to spawn a batch script (_reject_windows_batch_cli in
+# claude_agent_sdk/_internal/transport/subprocess_cli.py). Measured on this
+# machine: shutil.which("claude") returns claude.CMD and which("claude.exe")
+# returns None, so "point it at whatever my terminal uses" resolves to a file
+# the SDK will not run.
+_BATCH_SUFFIXES = (".cmd", ".bat")
+
+
+def _note(message: str) -> None:
+    """
+    Say why an override was ignored, somewhere it can actually be read.
+
+    Under pythonw there is no console and sys.stderr is None, so a print
+    goes nowhere; data/crash.log is what `python run.py --why` prints back.
+    Wrapped because diagnostics may never raise — the rule stated at
+    crashlog.py:46-48. A full disk must not turn a harmless bad setting into
+    a brain that will not start.
+    """
+    try:
+        from .. import crashlog
+
+        crashlog.write(message)
+    except Exception:
+        pass
+
+
+def chosen_cli_path() -> str | None:
+    """
+    Which Claude Code binary to spawn, or None to let the SDK choose.
+
+    The SDK's own resolution order tries its BUNDLED binary first, before
+    PATH is consulted, so the brain runs
+    .venv/Lib/site-packages/claude_agent_sdk/_bundled/claude.exe (v2.1.235
+    here) while the terminal runs whatever npm installed (v2.1.263). That
+    is not a bug — the wheel ships a CLI its own version was tested
+    against — but it is invisible from this file, and there was no way to
+    override it without hardcoding a username-specific path into the repo.
+
+    CLAUDE_CLI_PATH in .env is that override. config.py:78 loads .env into
+    os.environ and the SDK hands the parent environment to the CLI child, so
+    one line in the file nobody commits is enough.
+
+    Two refusals, both returning None so the SDK falls back to the binary
+    that is known to work:
+
+    - a .cmd or .bat, because the SDK will not spawn it and the resulting
+      failure reads like a broken install rather than a bad setting;
+    - a path that is not a file, because a typo should cost this dial and
+      nothing else.
+    """
+    named = os.getenv("CLAUDE_CLI_PATH", "").strip().strip('"').strip("'").strip()
+    if not named:
+        return None
+
+    path = Path(named)
+    if path.suffix.lower() in _BATCH_SUFFIXES:
+        _note(
+            f"CLAUDE_CLI_PATH names {path.name}, a batch script the Agent SDK "
+            "refuses to spawn on Windows. Ignored; using the SDK's bundled binary."
+        )
+        return None
+    if not path.is_file():
+        _note(
+            f"CLAUDE_CLI_PATH points at {named}, which is not a file. "
+            "Ignored; using the SDK's bundled binary."
+        )
+        return None
+    return str(path)
 
 
 def suppress_cli_console_window() -> None:
@@ -491,6 +563,12 @@ class Brain:
         options = ClaudeAgentOptions(
             model=self.model,
             system_prompt=self.system_prompt(),
+            # None by default, which is the same as not passing it at all:
+            # the SDK runs its own _find_cli and picks the binary bundled in
+            # the wheel. Set CLAUDE_CLI_PATH in .env to name a different
+            # claude.exe — see chosen_cli_path() for why a claude.cmd is
+            # refused rather than forwarded.
+            cli_path=chosen_cli_path(),
             # CRITICAL: with `tools` left unset, Claude gets the SDK's full
             # built-in toolset — Bash, PowerShell, Write, Edit, Read, Agent,
             # and more — in addition to (and entirely separate from) the
