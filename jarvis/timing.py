@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 # grow it without limit.
 MAX_HISTORY = 200
 
-MARKS = ("speech_end", "transcript", "first_audio", "done")
+MARKS = ("speech_end", "transcript", "first_audio", "answer_audio", "done")
 
 
 @dataclass
@@ -70,6 +70,38 @@ class TurnTimer:
     # re-running the whole investigation that produced these figures.
     stt_engine: str = ""      # "groq" | "moonshine" | ""
     tts_source: str = ""      # "cache" | "network" | ""
+
+    # THE SILENCE BEFORE THE STOPWATCH STARTS.
+    #
+    # `speech_end` is stamped where run() receives the utterance from the
+    # collector, and the collector only hands it over after the endpoint
+    # threshold of continuous silence has already elapsed. So the mark named
+    # speech_end is not when he stopped talking — it is 1400ms later on the
+    # fast path (vad.fast_silence_ms) and 4000ms later on the patient one.
+    #
+    # He sits through every one of those milliseconds. Leaving them out of
+    # the measurement does not make them shorter; it makes the number
+    # unfalsifiable, because the one figure he can check against a stopwatch
+    # is the only one it does not report.
+    endpoint_ms: float = 0.0
+
+    # WAS THE FIRST SOUND THE ANSWER, OR "GIVE ME A SECOND"?
+    #
+    # brain.ack_after_ms pushes a pre-rendered filler into the same stream
+    # when a turn has produced no text after 1400ms, so on a tool-using turn
+    # the first audio out of the speakers is the filler and `first_audio`
+    # marks that. Measured over the 240 brain turns in data/audit.jsonl: 156
+    # of them — 65% — have a transcript-to-first-audio gap between 1350 and
+    # 1750ms, a single spike on the 1400ms timer. Nothing organic clusters
+    # that tightly. The published median "thinking time" was the
+    # acknowledgement firing.
+    #
+    # The filler is exactly one sentence, so counting audio starts tells the
+    # two apart deterministically: with a filler the SECOND start is the
+    # answer, without one the first is.
+    filler_pushed: bool = False
+    audio_starts: int = 0
+
     _marks: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -117,10 +149,58 @@ class TurnTimer:
     @property
     def wait_s(self) -> float | None:
         """
-        The whole silence he sits through. This is the latency number; if
-        only one figure is ever reported, report this one.
+        Endpoint -> the first sound of ANY kind, filler included.
+
+        KEPT, AND NO LONGER THE HEADLINE. Every timing line ever written to
+        data/audit.jsonl records this one, so renaming or re-anchoring it
+        would silently break comparison against a month of history. What
+        changed is the claim made about it: it used to be documented as "the
+        whole silence he sits through", and it is neither whole (the
+        endpoint silence happens before it starts) nor always silence (on
+        65% of brain turns it ends on "Give me a second"). Use felt_wait_s.
         """
         return self._gap("speech_end", "first_audio")
+
+    @property
+    def endpoint_s(self) -> float | None:
+        """The silence he sat in before the microphone decided he had finished."""
+        return (self.endpoint_ms / 1000.0) if self.endpoint_ms else None
+
+    @property
+    def answer_wait_s(self) -> float | None:
+        """Endpoint -> the first sound of the ANSWER, never the filler."""
+        return self._gap("speech_end", "answer_audio")
+
+    @property
+    def filler_wait_s(self) -> float | None:
+        """
+        Endpoint -> the acknowledgement, when there was one.
+
+        Reported separately rather than folded in, because it is a real
+        improvement to how the wait FEELS and no improvement at all to how
+        long it is. Adding it to the answer figure would let a change that
+        speaks sooner and thinks no faster read as a speed-up.
+        """
+        if not self.filler_pushed:
+            return None
+        return self._gap("speech_end", "first_audio")
+
+    @property
+    def felt_wait_s(self) -> float | None:
+        """
+        THE HONEST NUMBER: he stopped talking -> he hears the answer.
+
+        Endpoint silence plus the wait to real speech. This is the only
+        figure here that corresponds to something he could time with a
+        stopwatch, and it is larger than everything this module used to
+        report. If one number is quoted, quote this one.
+        """
+        answer = self.answer_wait_s
+        if answer is None:
+            answer = self.wait_s
+        if answer is None:
+            return None
+        return answer + (self.endpoint_ms / 1000.0)
 
     @property
     def speaking_s(self) -> float | None:
@@ -131,10 +211,16 @@ class TurnTimer:
         """One audit line. Missing marks are omitted, never guessed at."""
         parts = [f"turn={self.turn_id}", f"route={self.route}"]
         for label, value in (
+            # The four original labels keep their meanings exactly, so a
+            # month of history stays comparable. The three new ones are what
+            # that history could not answer.
             ("heard", self.hearing_s),
             ("thought", self.thinking_s),
             ("wait", self.wait_s),
             ("spoke", self.speaking_s),
+            ("endpoint", self.endpoint_s),
+            ("answer", self.answer_wait_s),
+            ("felt", self.felt_wait_s),
         ):
             if value is not None:
                 parts.append(f"{label}={value * 1000:.0f}ms")
@@ -151,7 +237,9 @@ class TurnTimer:
         Said out loud when he asks how fast that was. Seconds, one decimal,
         because milliseconds mean nothing to a listener.
         """
-        wait = self.wait_s
+        # felt_wait_s, not wait_s. He is the one who was waiting, and the
+        # endpoint silence and the filler both happened to him.
+        wait = self.felt_wait_s
         if wait is None:
             return "I don't have a complete measurement for that turn."
         spoke = self.speaking_s

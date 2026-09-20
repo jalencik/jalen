@@ -780,7 +780,17 @@ class Jalen:
     def _mark_first_audio(self) -> None:
         timer = self._turn_timer
         if timer is not None:
+            timer.audio_starts += 1
             timer.mark("first_audio")
+            # WHICH SOUND WAS THE ANSWER. The acknowledgement pushed by
+            # brain.ack_after_ms is exactly one sentence into the same
+            # stream, so with a filler the SECOND start is the answer and
+            # without one the first is. Counting is deterministic; comparing
+            # against "has real text arrived yet" is not, because the text
+            # can land between the filler being queued and its audio
+            # starting — and that race resolves in the flattering direction.
+            if timer.audio_starts > (1 if timer.filler_pushed else 0):
+                timer.mark("answer_audio")
             # Captured HERE, at the moment the silence ended, rather than at
             # the end of the turn: a long reply renders many sentences and
             # the later ones overwrite last_source, so reading it afterwards
@@ -1212,6 +1222,12 @@ class Jalen:
         def acknowledge() -> None:
             if state["chars"] == 0:
                 stream.push("Give me a second.")
+                # RECORDED, so the stopwatch can tell this sound from the
+                # answer. Without it, 65% of brain turns reported the
+                # acknowledgement firing as their thinking time.
+                timer = self._turn_timer
+                if timer is not None:
+                    timer.filler_pushed = True
 
         ack_timer = threading.Timer(ack_after, acknowledge)
         ack_timer.daemon = True
@@ -1226,6 +1242,15 @@ class Jalen:
             # Nothing streamed: a tool-only turn, or an SDK build that did
             # not emit deltas. Speak the finished string so a reply is never
             # silently dropped.
+            #
+            # The filler goes with it. Anything queued on this stream is
+            # discarded, so a filler that was pushed is now never heard —
+            # and leaving the flag set would make the stopwatch wait for a
+            # second sound that never comes, losing the measurement
+            # entirely on exactly the tool-heavy turns worth measuring.
+            timer = self._turn_timer
+            if timer is not None:
+                timer.filler_pushed = False
             stream.abandon()
             self.say(reply)
             return
@@ -1789,6 +1814,17 @@ class Jalen:
                 # between here and the first sound is silence he sits in.
                 timer = TurnTimer()
                 timer.mark("speech_end")
+                # AND THE SILENCE THAT CAME BEFORE IT. The collector only
+                # hands the utterance over after the endpoint threshold of
+                # continuous quiet has already passed, so this mark is
+                # 1400ms (or 4000ms on the patient path) after he actually
+                # stopped talking. He sits through all of it, and no number
+                # this module reported had ever included it.
+                timer.endpoint_ms = (
+                    self.collector.patient_silence_ms
+                    if self.collector.was_patient
+                    else self.collector.fast_silence_ms
+                )
 
                 self.orb.set_state("thinking")
                 try:
