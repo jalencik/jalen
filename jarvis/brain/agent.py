@@ -129,6 +129,65 @@ def chosen_cli_path() -> str | None:
     return str(path)
 
 
+def resolved_cli_path() -> tuple[str | None, str, bool]:
+    """
+    The binary Brain.start() will ACTUALLY spawn, where it came from, and
+    whether it can be spawned at all. For diagnostics.
+
+    Every diagnostic must call this instead of shutil.which("claude"), and the
+    reason is an incident rather than a preference. On 20 Sept 2026 the brain
+    could not start for twenty minutes -- an SDK upgrade had landed a wheel
+    with no bundled claude.exe, so the SDK fell through to npm's claude.CMD and
+    refused to spawn a batch script. Through all of it, check_env.py printed
+    "authenticated - your Claude plan is working" and readiness.py printed
+    "Claude (the brain) AVAILABLE", because both asked PATH, and PATH was fine.
+    Neither had ever looked at the file the brain runs. `.\\jalen.ps1 check` is
+    the first thing the README tells you to run when something is wrong.
+
+    Returns (path, where_it_came_from, spawnable).
+
+    When CLAUDE_CLI_PATH is set, this reports THAT file and whether it is
+    usable, even though an unusable one is ignored at runtime and the brain
+    falls back -- because a broken override is a thing he needs told, and
+    `where_it_came_from` says the fallback will happen.
+    """
+    raw = os.getenv("CLAUDE_CLI_PATH", "").strip().strip('"').strip("'").strip()
+    if raw:
+        override = Path(raw)
+        fallback = "; the brain falls back to its bundled binary"
+        if override.suffix.lower() in _BATCH_SUFFIXES:
+            return raw, f"CLAUDE_CLI_PATH, a batch script the SDK refuses{fallback}", False
+        if not override.is_file():
+            return raw, f"CLAUDE_CLI_PATH, but that is not a file{fallback}", False
+        return str(override), "CLAUDE_CLI_PATH", True
+
+    # No override: ask the SDK to resolve exactly as it will at runtime, rather
+    # than reimplementing its order and drifting from it. Private API on
+    # purpose -- the honest answer is whatever the SDK itself decides -- so
+    # every failure falls through to a stated "could not resolve" rather than
+    # a guess.
+    try:
+        from claude_agent_sdk._internal.transport.subprocess_cli import (
+            SubprocessCLITransport,
+        )
+
+        probe = SubprocessCLITransport.__new__(SubprocessCLITransport)
+        probe._cli_path = None
+        found = str(probe._find_cli())
+    except Exception as exc:
+        return None, f"the SDK could not resolve any CLI ({type(exc).__name__})", False
+
+    spawnable = not found.lower().endswith(_BATCH_SUFFIXES)
+    where = (
+        "bundled inside the claude-agent-sdk wheel"
+        if "_bundled" in found
+        else "found on PATH"
+    )
+    if not spawnable:
+        where += ", and it is a batch script the SDK refuses to spawn"
+    return found, where, spawnable
+
+
 def suppress_cli_console_window() -> None:
     """
     Stop the Claude CLI subprocess opening a console window.
@@ -597,6 +656,36 @@ class Brain:
             # designed for. [] is the SDK's isolation mode.
             setting_sources=[],
             skills=[],
+            # setting_sources=[] closes the FILESYSTEM door. This closes the
+            # ACCOUNT one, which is separate, arrives over the network, and
+            # was wide open.
+            #
+            # VERIFIED HERE, 20 Sept 2026. `claude mcp list` shows seven
+            # account-level connectors live on this login (Composio, Gmail,
+            # Google Drive, Netlify, Claude Docs, Canva, a scraper). They did
+            # not stay theoretical: data/audit.db holds 41 foreign-MCP rows
+            # that reached this very hook across four days —
+            #   2026-08-19  AMBER  COMPOSIO_REMOTE_BASH_TOOL        x2
+            #   2026-08-20  AMBER  COMPOSIO_MULTI_EXECUTE_TOOL      x9
+            #   2026-09-01  AMBER  COMPOSIO_MANAGE_CONNECTIONS      x3
+            #   2026-09-03  AMBER  COMPOSIO_MULTI_EXECUTE_TOOL      x2
+            # An arbitrary remote shell, classified unclassified-AMBER, twice:
+            # announced, then auto-proceeded. safety.yaml has never heard of
+            # those names, so no tier ever applied to them.
+            #
+            # NOT verified here, stated so it is not mistaken for measured: an
+            # investigation on SDK 0.2.140 put the prefix cost of these
+            # connectors at 46,419 tokens, 62% of a 75,007-token prefix, with
+            # three injection waves each invalidating the prompt cache. On
+            # 0.2.156 a single-turn probe measured 28,582 tokens with this flag
+            # both true and false — the connectors arrive in waves, so one
+            # short turn cannot observe them. Treat the token saving as
+            # unconfirmed on this SDK; the safety boundary above is the reason
+            # this is set, and it holds regardless.
+            #
+            # Jalen's own server is passed explicitly below, so nothing he
+            # uses is lost.
+            strict_mcp_config=True,
             # "default" prompts interactively for "dangerous" operations —
             # there is no interactive terminal here to answer that prompt, so
             # every non-trivial tool call just hung/denied forever. Confirmed

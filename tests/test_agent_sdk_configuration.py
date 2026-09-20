@@ -128,3 +128,37 @@ def test_jarvis_does_not_inherit_the_machines_claude_code_setup(started_brain):
     """
     assert started_brain.setting_sources == []
     assert started_brain.skills == []
+
+
+def test_account_level_connectors_are_refused(started_brain):
+    """
+    setting_sources=[] stops the machine's FILESYSTEM config leaking in. It
+    does nothing about the connectors the CLI fetches from the signed-in
+    ACCOUNT, which arrive over the network and are a separate door.
+
+    This one is not hypothetical and not a latency argument. data/audit.db
+    holds 41 foreign-MCP rows that reached the PreToolUse hook across four
+    separate days, classified unclassified-AMBER because safety.yaml has never
+    heard of those names -- announce, then auto-proceed:
+
+        2026-08-19  AMBER  COMPOSIO_REMOTE_BASH_TOOL      x2
+        2026-08-20  AMBER  COMPOSIO_MULTI_EXECUTE_TOOL    x9
+        2026-09-01  AMBER  COMPOSIO_MANAGE_CONNECTIONS    x3
+        2026-09-03  AMBER  COMPOSIO_MULTI_EXECUTE_TOOL    x2
+
+    An arbitrary remote shell ran behind a four-second announce window, twice.
+    `claude mcp list` confirms seven such connectors are live on this login.
+
+    Same class of defect as the setting_sources one above, so the same
+    treatment: a pinned safety decision rather than a preference.
+
+    On the token cost, which is NOT what this test defends: an investigation on
+    SDK 0.2.140 measured 46,419 connector tokens, 62% of a 75,007-token prefix.
+    A single-turn probe on 0.2.156 showed 28,582 either way, because the
+    connectors arrive in waves a short turn never sees. Unconfirmed on this
+    SDK; the safety boundary is the reason.
+
+    Jalen's own MCP server is passed explicitly in the same options block, so
+    nothing it actually uses is lost.
+    """
+    assert started_brain.strict_mcp_config is True

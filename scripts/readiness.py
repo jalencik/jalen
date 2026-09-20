@@ -79,15 +79,27 @@ def probe_speech() -> list[tuple[str, str, str]]:
 
 def probe_brain() -> list[tuple[str, str, str]]:
     out = []
-    claude = shutil.which("claude")
+    # The BRAIN's binary is not the one on PATH, and "a file exists" is not
+    # readiness. This entry used to report AVAILABLE from shutil.which() alone
+    # — no spawn, no auth check — and so read AVAILABLE through a twenty-minute
+    # outage on 20 Sept 2026 while the brain could not start at all.
+    from jarvis.brain.agent import resolved_cli_path
+
+    brain_cli, where, spawnable = resolved_cli_path()
     out.append((
-        "Claude (the brain)", AVAILABLE if claude else BLOCKED,
-        "CLI on PATH" if claude else "claude CLI not installed",
+        "Claude (the brain)",
+        AVAILABLE if (brain_cli and spawnable) else BLOCKED,
+        where if (brain_cli and spawnable) else f"not runnable — {where}",
     ))
+
+    # The handoff is a genuinely different binary: jarvis/tools/coding.py
+    # launches the PATH install interactively (claude.cmd first, by design), so
+    # PATH is the correct source for THIS line and only this one.
+    handoff = shutil.which("claude")
     out.append((
-        "Claude Code handoff", AVAILABLE if claude else BLOCKED,
-        "headless jobs, reviewed against the git diff" if claude
-        else "needs the claude CLI",
+        "Claude Code handoff", AVAILABLE if handoff else BLOCKED,
+        "headless jobs, reviewed against the git diff" if handoff
+        else "needs the claude CLI on PATH",
     ))
     out.append((
         "Claude desktop (cowork)",

@@ -126,18 +126,35 @@ def main() -> int:
     import shutil
     import subprocess
 
-    claude_path = shutil.which("claude")
-    if claude_path:
-        print(f"{OK}claude CLI found")
+    # NOT shutil.which("claude"). That probes npm's shim on PATH, which is not
+    # the binary the brain spawns, and it once reported a healthy plan through
+    # a twenty-minute outage. resolved_cli_path() is the brain's own answer.
+    from jarvis.brain.agent import resolved_cli_path
+
+    claude_path, where, spawnable = resolved_cli_path()
+    if claude_path and not spawnable:
+        print(f"{BAD}the brain cannot start: {where}")
+        print(f"      it would use: {claude_path}")
+        print("      fix: reinstall the SDK with a real wheel --")
+        print("        .venv\\Scripts\\python.exe -m pip install --force-reinstall \\")
+        print("          --only-binary claude-agent-sdk 'claude-agent-sdk>=0.2.140,<0.3.0'")
+        problems += 1
+    elif claude_path:
+        print(f"{OK}claude CLI found ({where})")
         try:
-            # Windows: "claude" resolves to an npm-installed claude.CMD shim.
-            # subprocess.run(["claude", ...], shell=False) can't launch a bare
-            # name with an implicit .CMD extension — it raises FileNotFoundError
-            # (WinError 2), silently swallowed below as "couldn't verify" even
-            # though auth is fine. Passing the already-resolved full path (which
-            # includes the extension) works on every platform.
+            # The full resolved path, never a bare name: subprocess.run with
+            # shell=False cannot launch "claude" with an implicit .CMD
+            # extension, and that raised FileNotFoundError which this swallowed
+            # as "couldn't verify" while auth was in fact fine.
+            #
+            # --setting-sources "" for the same reason Brain.start() passes
+            # setting_sources=[]: without it the probe loads this machine's
+            # Claude Code settings and every MCP server in them, so a
+            # diagnostic meant to answer one question about auth waits on
+            # unrelated servers (two of which currently time out at 30s each).
             result = subprocess.run(
-                [claude_path, "-p", "reply with the single word: ok"],
+                [claude_path, "-p", "reply with the single word: ok",
+                 "--setting-sources", ""],
                 capture_output=True, text=True, timeout=60,
             )
             if result.returncode == 0 and "ok" in result.stdout.lower():
@@ -147,8 +164,14 @@ def main() -> int:
         except Exception as exc:
             print(f"{WARN}couldn't verify ({type(exc).__name__}: {exc}) — run `claude setup-token` if the brain fails")
     else:
-        print(f"{WARN}claude CLI not on PATH. Install from https://claude.com/download,")
-        print("      then run: claude setup-token")
+        # Not "not on PATH" — PATH is irrelevant to the brain. This means the
+        # SDK could resolve nothing at all, which on Windows usually means the
+        # bundled binary is missing from the wheel.
+        print(f"{BAD}the brain has no runnable Claude CLI: {where}")
+        print("      most likely the SDK installed without its bundled binary:")
+        print("        .venv\\Scripts\\python.exe -m pip install --force-reinstall \\")
+        print("          --only-binary claude-agent-sdk 'claude-agent-sdk>=0.2.140,<0.3.0'")
+        problems += 1
 
     print("\nConfig")
     try:
