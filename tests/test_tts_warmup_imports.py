@@ -113,7 +113,8 @@ def test_there_is_still_exactly_one_place_that_imports_edge_tts():
     source = inspect.getsource(tts)
     bare = [
         line for line in source.splitlines()
-        if line.strip().startswith("import edge_tts")
+        if (line.strip().startswith("import edge_tts")
+            or line.strip().startswith("from edge_tts import"))
         and "def _import_edge_tts" not in line
     ]
     assert len(bare) == 1, (

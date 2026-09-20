@@ -66,6 +66,9 @@ class _Gate:
         # rather than the deliberate one.
         self._expecting = None
         self._last_reply_text = ""
+        self._last_reply_at = 0.0
+        self._answer_window_s = float(
+            CONFIG.get_path("conversation.answer_window_s", 30))
         self.cfg = CONFIG
         # The real list, not a stand-in. The emergency stop is exempt from
         # the gate (see tests/test_stop_and_quit.py), and a fake list here

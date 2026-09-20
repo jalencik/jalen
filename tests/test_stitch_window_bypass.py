@@ -78,6 +78,9 @@ class _Gate:
         # real path breaks while these stay green.
         self._expecting = None
         self._last_reply_text = ""
+        self._last_reply_at = 0.0
+        self._answer_window_s = float(
+            CONFIG.get_path("conversation.answer_window_s", 30))
         self._last_user_text = last_text
         self._last_user_at = time.monotonic() - stale_s
         self.cfg = CONFIG

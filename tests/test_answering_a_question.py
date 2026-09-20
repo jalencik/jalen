@@ -89,6 +89,9 @@ class _Gate:
         self._last_user_text = ""
         self._last_user_at = 0.0
         self._last_reply_text = ""
+        self._last_reply_at = 0.0
+        self._answer_window_s = float(
+            CONFIG.get_path("conversation.answer_window_s", 30))
         self._expecting = None
         self.cfg = CONFIG
         self.kill_phrases = set(CONFIG.get_path("safety.kill_phrases"))
@@ -295,10 +298,12 @@ def test_a_short_answer_that_appears_in_the_question_is_not_echo():
     question, and an over-eager echo filter would reject the one answer the
     question invited. Two words or fewer are never treated as echo.
     """
-    gate = _Gate().asked("Which one did you mean, boss - ChatGPT or Gemini?")
-    assert gate.should_act_on("ChatGPT", wake_initiated=False)
-    assert gate.should_act_on("Gemini", wake_initiated=False)
-    assert gate.should_act_on("the second", wake_initiated=False)
+    question = "Which one did you mean, boss - ChatGPT or Gemini?"
+    for answer in ("ChatGPT", "Gemini", "the second"):
+        # A FRESH GATE EACH. The window is one-shot now: the first accepted
+        # utterance closes it, so reusing one gate would test the close
+        # rather than the echo floor.
+        assert _Gate().asked(question).should_act_on(answer, wake_initiated=False), answer
 
 
 def test_real_user_answers_are_not_mistaken_for_echo():
@@ -307,17 +312,15 @@ def test_real_user_answers_are_not_mistaken_for_echo():
     data/audit.jsonl paired against real Jalen replies. A sample of them
     lives here so a change to the detector has to face it.
     """
-    gate = _Gate().asked(
-        "I'm here, Boss - just waiting on one thing from you. Do you want "
-        "this posted to the channel or to Saved Messages?"
-    )
+    question = ("I'm here, Boss - just waiting on one thing from you. Do you "
+                "want this posted to the channel or to Saved Messages?")
     for answer in (
         "just make the post and send it to my saved messages.",
         "post it to the channel please",
         "neither, leave it as a draft for now",
         "I would like you to send it.",
     ):
-        assert gate.should_act_on(answer, wake_initiated=False), answer
+        assert _Gate().asked(question).should_act_on(answer, wake_initiated=False), answer
 
 
 # ---------------------------------------------------------------------------
@@ -330,11 +333,28 @@ def test_the_window_expires():
     assert not gate.should_act_on("the second one", wake_initiated=False)
 
 
-def test_an_expired_window_is_cleared_rather_than_re_tested_forever():
+def test_checking_the_window_never_writes_to_it():
+    """
+    THE RACE, and why _expectation_open no longer clears an expired window.
+
+    It runs on the microphone loop; _expect_an_answer writes the same
+    attribute from a turn thread. Clearing here is a read-then-write with a
+    time.monotonic() and a comparison in between, so a turn thread
+    installing a fresh window in that gap had it destroyed by an
+    unconditional `= None`. And the interleaving is likeliest exactly when
+    it hurts: the turn thread reaches the tail the instant _await_playback
+    returns, which is the instant the mic loop starts seeing frames again.
+    The symptom would be indistinguishable from the original bug.
+    """
     gate = _Gate().asked("Which one did you mean, boss?", window_s=0.01)
     time.sleep(0.03)
     assert not gate._expectation_open()
-    assert gate._expecting is None
+    assert gate._expecting is not None, (
+        "the microphone loop wrote to state a turn thread owns"
+    )
+    # Expired is expired, however many times it is asked.
+    assert not gate._expectation_open()
+    assert not gate.should_act_on("the second one", wake_initiated=False)
 
 
 def test_a_new_wake_word_turn_works_regardless_of_the_window():
@@ -449,7 +469,7 @@ def test_a_reply_that_asks_nothing_closes_the_previous_window():
 
     source = inspect.getsource(Jalen.run)
     tail = source[source.index("follow_up_until = time.monotonic()"):]
-    assert "_forget_expectation" in tail[:1200], (
+    assert "_forget_expectation" in tail[:2600], (
         "a turn that asked nothing leaves the previous question's window "
         "open"
     )
@@ -469,3 +489,224 @@ def test_rejection_is_still_silent():
     after = source[start:start + 700]
     assert "self.say(" not in after
     assert "not addressed to Jalen" in after
+
+
+# ---------------------------------------------------------------------------
+# WHAT AN INDEPENDENT REVIEW OF THE FIRST VERSION FOUND
+#
+# The feature shipped, five fresh agents attacked the final state, and the
+# conversation reviewer found a self-triggering loop on the ORDINARY path -
+# no race, no second speaker, no unusual timing. Everything below is a
+# reproduction of something that was really there.
+# ---------------------------------------------------------------------------
+def test_jalens_reply_to_the_answer_is_not_taken_as_a_second_answer():
+    """
+    THE CRITICAL ONE.
+
+        turn 7   Jalen: "...Changes.md and Changes.pdf. Which one did you
+                 mean?"      -> window opens on THAT question
+        turn 7   he:    "changes dot pdf"     -> accepted, correctly
+        turn 8   Jalen: "Opening Changes.pdf on your desktop now, Boss."
+
+    Turn 8's reply comes back through the microphone into a window that is
+    still open and still comparing against turn 7's QUESTION - which turn
+    8's reply does not match. So Jalen answered itself, dispatched a real
+    turn on its own sentence, and spoke again into the same open window.
+
+    Two things fix it and both are kept: the window is ONE-SHOT, so
+    accepting his answer closes it; and the echo test compares against
+    whatever Jalen last said, not only against the question.
+    """
+    question = ("I see two matches on your Desktop, Boss - Changes.md and "
+                "Changes.pdf. Which one did you mean?")
+    gate = _Gate().asked(question, turn_id=7)
+    assert gate.should_act_on("changes dot pdf", wake_initiated=False)
+    assert gate._expecting is None, "the window stayed open after his answer"
+
+    for own in ("Opening Changes.pdf on your desktop now, Boss.",
+                "opening changes pdf on your desktop now boss",
+                "Opening Changes.pdf on your desktop now"):
+        assert not gate.should_act_on(own, wake_initiated=False), (
+            f"Jalen answered its own reply: {own!r}"
+        )
+
+
+def test_the_window_closes_on_the_first_answer():
+    gate = _Gate().asked("Which one did you mean, boss?")
+    assert gate.should_act_on("the second one", wake_initiated=False)
+    assert gate._expecting is None
+    # The cost, stated: a two-part answer needs his name for the second half.
+    assert not gate.should_act_on("actually the first one", wake_initiated=False)
+
+
+def test_a_pending_rating_does_not_switch_the_echo_defence_off():
+    """
+    _rating_is_pending returned True with no echo test at all, for five
+    minutes, starting from a question Jalen had just said out loud - so the
+    moment most likely to produce an echo was the moment the defence was
+    off. Unlike the three _awaiting_* flags, nothing is blocked on a queue
+    here: a non-numeric utterance falls through to the router and the brain
+    as a command.
+    """
+    import time as _time
+
+    rating_question = "Hey boss - how do you rate my work out of ten?"
+    gate = _Gate().asked(rating_question)
+    gate._pending_rating = {"about": "x", "did": "", "asked_at": _time.time()}
+
+    for own in (rating_question, "how do you rate my work out of ten"):
+        assert not gate.should_act_on(own, wake_initiated=False), (
+            f"Jalen's own rating question came back and was acted on: {own!r}"
+        )
+    # A real rating still gets through.
+    assert gate.should_act_on("eight out of ten", wake_initiated=False)
+
+
+@pytest.mark.parametrize("echo", [
+    "which one did you mean",
+    "um which one did you mean",
+    "so which one did you mean",
+    "witch one did you mean",          # as speech recognition writes it
+    "which one did you main",
+])
+def test_one_stray_word_no_longer_defeats_the_echo_detector(echo):
+    """
+    The leaky rule was "85% of the words appear", which at four, five and
+    six words rounds to ALL of them - so a single "um" from the transcriber
+    got through, and the tail of the question is the single most likely
+    thing the microphone hears. One word of slack, not a percentage.
+    """
+    gate = _Gate().asked(
+        "I see two matches on your Desktop, Boss - Changes.md and "
+        "Changes.pdf. Which one did you mean?"
+    )
+    assert not gate.should_act_on(echo, wake_initiated=False), echo
+
+
+def test_naming_one_of_the_options_is_an_answer_not_an_echo():
+    """
+    THE OTHER HALF, and the one a text-only test cannot get right.
+
+    "Do you want the whole thread read out, or just the last message?" -
+    the natural answer is one of those phrases, so the answer IS a
+    contiguous run inside the question by construction, and the first
+    version dropped all of them in silence. That is the bug this whole
+    feature exists to fix, reintroduced for the answers most worth having.
+
+    Echo is acoustic and cannot arrive more than a moment after Jalen
+    stopped, so time is the gate and text is only the test.
+    """
+    from jarvis.app import ECHO_TAIL_S, Expectation
+
+    question = ("Gmail's live now, Boss. Do you want the whole thread read "
+                "out, or just the last message?")
+    for answer in ("just the last message", "the whole thread",
+                   "read out the whole thread"):
+        gate = _Gate()
+        gate._last_reply_text = question
+        # He answered after thinking about it, which is what people do.
+        long_ago = time.monotonic() - (ECHO_TAIL_S + 1)
+        gate._last_reply_at = long_ago
+        gate._expecting = Expectation(question=question, turn_id=1,
+                                      opened_at=long_ago,
+                                      expires_at=time.monotonic() + 30)
+        assert gate.should_act_on(answer, wake_initiated=False), (
+            f"{answer!r} is the answer the question asked for"
+        )
+
+
+def test_the_same_words_a_moment_after_jalen_stopped_are_still_echo():
+    """The other side of the same clock, so the bound is a bound."""
+    gate = _Gate().asked(
+        "Gmail's live now, Boss. Do you want the whole thread read out, "
+        "or just the last message?"
+    )
+    assert not gate.should_act_on("just the last message", wake_initiated=False)
+
+
+def test_a_cyrillic_reply_is_still_defended():
+    """
+    _SPOKEN_WORD was [a-z0-9']+, so for a Russian reply the word list came
+    back empty and the detector returned False for a perfect verbatim echo -
+    while the window itself still opened, because the question mark is
+    ASCII. He speaks Russian and Uzbek, so the defence has to survive the
+    alphabet. Written as escapes rather than typed, per CLAUDE.md.
+    """
+    question = ("Шеф, какой "
+                "из двух "
+                "файлов вы "
+                "имели в виду?")
+    gate = _Gate().asked(question)
+    assert not gate.should_act_on(question, wake_initiated=False), (
+        "a verbatim Cyrillic echo was not detected at all"
+    )
+
+
+def test_a_turn_that_said_nothing_does_not_re_arm_the_last_question():
+    """
+    The tail decides from _last_reply_text, which say() only sets AFTER its
+    muted early-return - so a muted turn, or an intent that returns no
+    line, left the previous question's text in place and stamped a fresh
+    thirty seconds onto a question minutes old. Muted, that never stopped.
+    """
+    import inspect
+
+    source = inspect.getsource(Jalen.run)
+    tail = source[source.index("follow_up_until = time.monotonic()"):]
+    assert "spoke_this_turn" in tail[:2600], (
+        "a turn that spoke nothing still re-arms the previous question"
+    )
+
+
+def test_the_window_is_settled_even_when_the_turn_raised():
+    """
+    dispatch_turn re-raises, so anything after its finally is unreachable on
+    a brain failure, a tool failure or a cancellation - and
+    _forget_expectation has exactly one call site in the loop. The previous
+    question's window was left open for the rest of its thirty seconds with
+    no reply ever spoken, which is the unbounded exemption arriving exactly
+    when Jalen is least able to notice.
+    """
+    import inspect
+
+    source = inspect.getsource(Jalen.run)
+    body = source[source.index("def dispatch_turn"):source.index("self.prewarm()")]
+    finally_at = body.index("finally:")
+    assert body.index("_expect_an_answer") > finally_at
+    assert body.index("_forget_expectation") > finally_at, (
+        "the window is settled outside the finally, so an exception skips it"
+    )
+
+
+def test_the_echo_guard_in_the_continuation_branch_is_load_bearing():
+    """
+    DEAD TO THE WHOLE SUITE UNTIL NOW. deb01ef put
+    _sounds_like_its_own_voice at the top of _continues_last_utterance and
+    called it the fix for Jalen self-triggering through the dangling-tail
+    branch. But every _Gate stub leaves _last_reply_text empty, so the
+    detector returned False at the `not said_words` line on every call from
+    that branch - and a reviewer deleted the two lines and ran the entire
+    suite: 3174 passed, nothing failed.
+
+    Here the stub says what Jalen actually just said, which is the only
+    state in which those lines can do anything.
+    """
+    own_words = "I have opened Chrome and sent it to your saved messages."
+    gate = _Gate()
+    gate._last_user_text = "send it to"          # a dangling tail
+    gate._last_user_at = time.monotonic()
+    gate._last_reply_text = own_words
+    gate._last_reply_at = time.monotonic()
+
+    # "to your saved messages" opens like a fragment, so the dangling-tail
+    # branch would admit it on the words alone. The echo guard is the only
+    # thing that can refuse it.
+    assert not gate.should_act_on("to your saved messages", wake_initiated=False), (
+        "Jalen's own words came back through the microphone during the "
+        "stitch window and were acted on"
+    )
+    # A real continuation, which is what the branch exists for, still lands.
+    gate2 = _Gate()
+    gate2._last_user_text = "send it to"
+    gate2._last_user_at = time.monotonic()
+    assert gate2.should_act_on("to my channel", wake_initiated=False)

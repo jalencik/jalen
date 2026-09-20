@@ -288,3 +288,58 @@ def test_the_real_hook_survives_having_no_timer():
     """A turn can start audio before a timer is published; it must not raise."""
     jalen = _Jalen(None)
     jalen._mark_first_audio()
+
+
+# ---------------------------------------------------------------------------
+# WHAT A REVERT PROBE FOUND
+#
+# An independent reviewer patched each change back to its pre-commit form
+# before collection and re-ran. Two things here survived that, which means
+# they were not pinned at all.
+# ---------------------------------------------------------------------------
+def test_the_spoken_number_is_the_felt_one_and_not_the_logged_one():
+    """
+    UNPINNED UNTIL NOW. spoken_report was changed from wait_s to
+    felt_wait_s - the headline claim of the commit, that what Jalen says
+    out loud is the number he could time himself. The test named for it
+    asserted only that the string contains "waited" and that felt >= wait,
+    neither of which inspects what spoken_report used. The reviewer reverted
+    the line and the whole timing suite stayed green.
+
+    So: read the number back out of the sentence.
+    """
+    t = TurnTimer()
+    t.endpoint_ms = 1400
+    t.mark("speech_end")
+    t.filler_pushed = True
+    t.mark("first_audio")
+    t.mark("answer_audio")
+    t.mark("done")
+
+    spoken = t.spoken_report()
+    said = float(spoken.split("waited ")[1].split(" second")[0])
+    assert said == pytest.approx(t.felt_wait_s, abs=0.05), (
+        f"said {said}s out loud, felt_wait_s is {t.felt_wait_s}s - the "
+        "endpoint silence is missing from what he is told"
+    )
+    assert said != pytest.approx(t.wait_s, abs=0.001), (
+        "the spoken number is still the log number"
+    )
+
+
+def test_the_filler_arithmetic_lives_in_the_app_not_in_this_file():
+    """
+    Two tests above reimplement _mark_first_audio's counting inline and so
+    assert only that the test's own arithmetic is self-consistent. They are
+    kept because they document the rule, but the rule itself is pinned by
+    test_the_real_hook_* below, which call the shipped method. This test
+    exists so that pairing cannot be quietly broken.
+    """
+    import inspect
+
+    from jarvis.app import Jalen
+
+    source = inspect.getsource(Jalen._mark_first_audio)
+    assert "audio_starts" in source
+    assert "answer_audio" in source
+    assert "filler_pushed" in source

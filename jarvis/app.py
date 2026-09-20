@@ -237,7 +237,23 @@ SPOKEN_CHARS_PER_SECOND = 22.4
 # said. Apostrophes are kept so "don't" is one word rather than two, and
 # everything else — punctuation, the em dashes the model likes, the stray
 # unicode speech recognition emits — is a separator.
-_SPOKEN_WORD = re.compile(r"[a-z0-9']+")
+_SPOKEN_WORD = re.compile(r"[\w']+", re.UNICODE)
+
+# HOW LONG JALEN'S OWN VOICE CAN STILL BE ARRIVING.
+#
+# Echo is an ACOUSTIC event with a physical bound, and that bound is the
+# only thing that reliably separates it from an answer. Text cannot: when
+# Jalen asks "the whole thread read out, or just the last message?", the
+# natural answer is one of those phrases, so the answer IS a substring of
+# the question by construction. Measured against the real log, that is
+# invisible — before the question window existed nobody could answer
+# without saying the name, so the corpus contains almost no bare
+# option-answers to be wrong about.
+#
+# Three seconds covers the tail of playback plus whatever the microphone
+# had buffered. A person answering a question takes longer than that
+# essentially always; a speaker bleeding into a microphone never does.
+ECHO_TAIL_S = 3.0
 
 
 @dataclass(frozen=True)
@@ -365,6 +381,12 @@ class Jalen:
         # whether it was a question, and telling his answer apart from
         # Jalen's own voice coming back through the microphone.
         self._last_reply_text = ""
+        # WHEN he last said it, because the echo test is a question about
+        # time before it is a question about words. See ECHO_TAIL_S.
+        self._last_reply_at = 0.0
+        # Read once, here, not on the gate path - the file's own rule.
+        self._answer_window_s = float(
+            cfg.get_path("conversation.answer_window_s", 30))
         # The action + destination he named this turn, if he named them.
         self._plan = planning.Plan()
         # Last thing he said, for re-attaching a continuation fragment —
@@ -521,7 +543,7 @@ class Jalen:
             self.transcript.show("Full answer", full)
             self._last_full_text = full
         self.audit.utterance(text, who="jarvis")
-        self._last_reply_text = text
+        self._note_said(text)
         threading.Thread(target=self.speaker.say, args=(spoken,), daemon=True).start()
 
     def say_blocking(self, text: str) -> None:
@@ -541,7 +563,7 @@ class Jalen:
         if not text:
             return
         self.audit.utterance(text, who="jarvis")
-        self._last_reply_text = text
+        self._note_said(text)
         self.speaker.say_now(text)
 
     # ------------------------------------------------------------ confirmations
@@ -633,21 +655,34 @@ class Jalen:
         if not low.strip():
             return None
 
-        # --- AGREEMENT THAT IS SPELLED WITH A NEGATIVE WORD ---
+        # --- ONE AGREEMENT THAT IS SPELLED WITH A NEGATIVE WORD ---
         #
         # Neutralised BEFORE either list is searched, because the bare-negation
-        # rule below would otherwise read every one of them as a refusal.
-        # "why not" is already in the YES list and means yes; "no problem" is
-        # the commonest way there is of saying yes to a favour.
+        # rule below would otherwise read it as a refusal. "why not" is already
+        # in the YES list and has always returned True; without this line the
+        # new rule would silently take that away.
         #
-        # A closed list, and short on purpose. Anything not on it that mixes a
-        # negation with an agreement is treated as a refusal, which is the
-        # direction that costs a sentence rather than an email.
-        for idiom in (
-            " why not ", " no problem ", " not a problem ", " no worries ",
-            " no rush ", " no doubt ", " no objection ", " nothing wrong ",
-        ):
-            low = low.replace(idiom, " yes ")
+        # EXACTLY ONE ENTRY, and it used to be eight. An independent review of
+        # the first version measured the other seven against HEAD and every one
+        # of them flipped:
+        #
+        #     no problem      False -> True        no doubt      False -> True
+        #     no worries      False -> True        no objection  False -> True
+        #     no rush         False -> True        nothing wrong  None -> True
+        #     not a problem    None -> True
+        #
+        # That is a NO-to-YES flip on the last gate before a RED action runs,
+        # which is the exact direction this function was rewritten to close.
+        # "No rush" is not permission to send an email. The colloquial reading
+        # of "no problem" as agreement is real, and it is still not worth
+        # buying with six other phrases that are not agreement at all — so all
+        # seven go back to what they did before, which is refuse.
+        #
+        # The cost is the false NO, stated rather than hidden: "yes, no
+        # problem" reads as a refusal. That is unchanged from before this
+        # function was touched, it costs him a sentence, and it is the
+        # direction that cannot send anything.
+        low = low.replace(" why not ", " yes ")
 
         # --- A BARE NEGATION, which the phrase list below never had ---
         #
@@ -669,7 +704,11 @@ class Jalen:
         #
         # The contraction half covers won't, can't, isn't, didn't, shouldn't
         # and the rest, none of which were on the NO list either.
-        if " not " in low or " never " in low or re.search(r"[a-z]+n't ", low):
+        # " cannot " is one word, so none of the other three see it, and it
+        # was not on the phrase list either - "I cannot" returned None and
+        # cost a twenty-second confirm() timeout instead of an answer.
+        if (" not " in low or " cannot " in low or " never " in low
+                or re.search(r"[a-z]+n't ", low)):
             return False
 
         # --- NO, and first, because a refusal usually mentions the action ---
@@ -1267,7 +1306,7 @@ class Jalen:
             self._last_full_text = reply
         stream.close()
         self.audit.utterance(reply, who="jarvis")
-        self._last_reply_text = reply
+        self._note_said(reply)
 
     def process(self, text: str) -> None:
         text = (text or "").strip()
@@ -1515,6 +1554,14 @@ class Jalen:
             """
             nonlocal follow_up_until
             started_at = time.time()
+            # Monotonic, and captured before anything speaks: the tail below
+            # has to know whether THIS turn said something, or a turn that
+            # spoke nothing re-stamps a brand-new window on a question that
+            # is minutes old. say() returns early when muted, before it
+            # records the text, so "muted" and "said nothing" look identical
+            # from _last_reply_text alone - and muted, that re-arming never
+            # stops.
+            began_at = time.monotonic()
             task_id = conversation.start_task(text[:80], conversation.THINKING)
             try:
                 with systools.com_initialized():
@@ -1531,29 +1578,45 @@ class Jalen:
                     self._active_turns.discard(turn_id)
                 self._check_the_plan(started_at)
                 self._maybe_ask_for_a_rating(text, started_at)
-            # Only the newest turn owns the UI state and the follow-up window.
-            # Without this, a slow turn finishing late would reopen the
-            # follow-up window and reset the orb long after the user moved on.
-            if turn_id == self._turn_seq:
-                if self.cfg.get_path("conversation.follow_up", True):
-                    follow_up_until = time.monotonic() + follow_up_s
-                # DID IT ASK HIM SOMETHING? Decided here, after
-                # _await_playback() above has returned, so the clock starts
-                # when Jalen stopped talking rather than when the model
-                # stopped generating — see _expect_an_answer.
+                # INSIDE THE finally, not after it. Everything below closes
+                # or re-opens a window that waives his name, and the branch
+                # above re-raises - so on a brain failure, a tool failure or
+                # a cancellation the old code skipped all of it and left the
+                # previous question's window open for the rest of its thirty
+                # seconds, with no reply ever spoken. That is the unbounded
+                # exemption this feature was built to avoid, arriving
+                # precisely when Jalen is least able to notice.
                 #
-                # Replaced every turn, never accumulated: the newest
-                # question is the only one he can be answering, and a reply
-                # that asks nothing CLOSES the window rather than leaving
-                # the last question's open.
-                if solicits_an_answer(self._last_reply_text):
-                    self._expect_an_answer(self._last_reply_text, turn_id)
-                else:
-                    self._forget_expectation()
-                # Recomputed, not assumed: another turn may still be working,
-                # and telling him it is idle while it is not is the same lie
-                # in the other direction.
-                self._refresh_orb()
+                # Only the newest turn owns the UI state and the follow-up
+                # window: a slow turn finishing late must not reopen it and
+                # reset the orb long after he moved on.
+                if turn_id == self._turn_seq:
+                    if self.cfg.get_path("conversation.follow_up", True):
+                        follow_up_until = time.monotonic() + follow_up_s
+                    # DID IT ASK HIM SOMETHING? Decided here, after
+                    # _await_playback() above has returned, so the clock
+                    # starts when Jalen stopped talking rather than when the
+                    # model stopped generating — see _expect_an_answer.
+                    #
+                    # Replaced every turn, never accumulated: the newest
+                    # question is the only one he can be answering, and a
+                    # reply that asks nothing CLOSES the window rather than
+                    # leaving the last question's open.
+                    #
+                    # And only when THIS turn actually spoke. A turn that
+                    # said nothing - muted, or an intent that returns no
+                    # line - leaves _last_reply_text holding the previous
+                    # turn's question, and re-stamping from that renews the
+                    # exemption forever instead of closing it.
+                    spoke_this_turn = self._last_reply_at > began_at
+                    if spoke_this_turn and solicits_an_answer(self._last_reply_text):
+                        self._expect_an_answer(self._last_reply_text, turn_id)
+                    elif spoke_this_turn:
+                        self._forget_expectation()
+                    # Recomputed, not assumed: another turn may still be
+                    # working, and telling him it is idle while it is not is
+                    # the same lie in the other direction.
+                    self._refresh_orb()
 
         self.prewarm()
 
@@ -1978,6 +2041,17 @@ class Jalen:
             return True
         if self._awaiting_confirmation or self._awaiting_stop or self._awaiting_reply:
             return True
+        # NEVER ITS OWN VOICE, whatever comes below. Checked before the two
+        # remaining exemptions rather than inside one of them, because the
+        # review found the rating branch was the hole: it returned True with
+        # no echo test at all, for five minutes, starting from a question
+        # Jalen had just said out loud. The three flags above are different -
+        # each has a coroutine blocked on a queue that swallows the text -
+        # whereas a non-numeric utterance here falls straight through to the
+        # router and the brain as a command.
+        if (self._rating_is_pending() or self._expectation_open()) \
+                and self._sounds_like_its_own_voice(text):
+            return False
         if self._rating_is_pending():
             return True
         # AN ORDINARY QUESTION HE IS ANSWERING.
@@ -1993,7 +2067,16 @@ class Jalen:
         # defence, because Jalen's own sentences do not begin with his name,
         # and a free window opens at the exact moment the microphone is most
         # likely to be hearing the tail of the question just asked.
-        if self._expectation_open() and not self._sounds_like_its_own_voice(text):
+        if self._expectation_open():
+            # ONE ANSWER, THEN CLOSED. Leaving it open is what made this a
+            # self-triggering loop: the answer is accepted, the next turn
+            # runs, and its reply comes back through the microphone into a
+            # window that is still open and still comparing against the OLD
+            # question. Closing here breaks that at the first step, and the
+            # next reply opens its own window at its own tail if it asks
+            # anything. The cost is a two-part answer - "yeah." then "the
+            # second one" - where the second half now needs his name.
+            self._forget_expectation()
             return True
         # STILL THE SAME SENTENCE.
         #
@@ -2058,12 +2141,24 @@ class Jalen:
         arrive "late".
         """
         if window_s is None:
-            window_s = float(self.cfg.get_path("conversation.answer_window_s", 30))
+            window_s = self._answer_window_s
         now = time.monotonic()
         self._expecting = Expectation(
             question=question, turn_id=turn_id,
             opened_at=now, expires_at=now + window_s,
         )
+
+    def _note_said(self, text: str) -> None:
+        """
+        Record what Jalen just said, and WHEN.
+
+        The when is load-bearing: echo is an acoustic event with a physical
+        time bound, and that bound is the only thing that reliably tells it
+        from a person answering with the words the question offered. See
+        ECHO_TAIL_S and _sounds_like_its_own_voice.
+        """
+        self._last_reply_text = text
+        self._last_reply_at = time.monotonic()
 
     def _forget_expectation(self) -> None:
         self._expecting = None
@@ -2090,17 +2185,23 @@ class Jalen:
         return time.time() - pending.get("asked_at", 0) <= self.RATING_EXPIRES_S
 
     def _expectation_open(self) -> bool:
-        """True while an answer to Jalen's own question is still welcome."""
+        """
+        True while an answer to Jalen's own question is still welcome.
+
+        READ-ONLY, and that is a fix rather than an omission. This runs on
+        the microphone loop and _expect_an_answer writes the same attribute
+        from a turn thread. The first version cleared an expired window
+        here, which is a read-then-write with `time.monotonic()` and a
+        comparison in between: a turn thread installing a fresh window in
+        that gap had it destroyed by the mic loop's unconditional `= None`.
+        The window is most likely to open at exactly that moment, because
+        the turn thread reaches the tail the instant _await_playback
+        returns, which is the instant the mic loop starts seeing frames
+        again. Leaving the stale object costs one comparison per frame -
+        measured at 0.09 microseconds against a 32ms frame.
+        """
         pending = self._expecting
-        if pending is None:
-            return False
-        if time.monotonic() >= pending.expires_at:
-            # Cleared rather than left to be re-tested forever: a stale
-            # window is a fact about the past, and keeping it costs a
-            # comparison on every microphone frame.
-            self._expecting = None
-            return False
-        return True
+        return pending is not None and time.monotonic() < pending.expires_at
 
     # ------------------------------------------------- is that him, or us?
     def _sounds_like_its_own_voice(self, text: str) -> bool:
@@ -2132,24 +2233,63 @@ class Jalen:
         Measured against the real corpus in data/audit.jsonl: 978 of 978
         simulated echoes caught, and 0 of 853 genuine user utterances
         wrongly refused.
+
+        TIME IS THE GATE, AND TEXT IS ONLY THE TEST. An independent review
+        of the first version of this found both halves of that wrong:
+
+          - it compared against pending.question only, so while turn N's
+            window was open, JALEN'S OWN REPLY TO TURN N+1 matched nothing
+            and was accepted as the user. A self-triggering loop inside the
+            gate whose entire purpose is refusing exactly that, on the
+            ordinary path, needing no race and no second speaker.
+          - and with no time bound, "just the last message" — the natural
+            answer to "...read out, or just the last message?" — is a
+            contiguous run inside the question and was silently dropped.
+            That is the bug this whole feature exists to fix, reintroduced
+            for the answers most worth having.
+
+        So: only what Jalen said in the last ECHO_TAIL_S is a candidate,
+        and BOTH the question and whatever he last said are compared. Past
+        that window his voice is not in the room any more and a text match
+        is the user using his words, which is what answering a question is.
         """
+        now = time.monotonic()
+        candidates = []
+        if now - self._last_reply_at <= ECHO_TAIL_S:
+            candidates.append(self._last_reply_text)
         pending = self._expecting
-        said = pending.question if pending is not None else self._last_reply_text
+        if pending is not None and now - pending.opened_at <= ECHO_TAIL_S:
+            candidates.append(pending.question)
+
         heard_words = _SPOKEN_WORD.findall((text or "").lower())
-        said_words = _SPOKEN_WORD.findall((said or "").lower())
-        if len(heard_words) < 3 or not said_words:
+        if len(heard_words) < 3:
             return False
-
         span = len(heard_words)
-        for start in range(len(said_words) - span + 1):
-            if said_words[start:start + span] == heard_words:
-                return True
 
-        if span >= 4:
-            vocabulary = set(said_words)
-            hits = sum(1 for word in heard_words if word in vocabulary)
-            if hits / span >= 0.85:
-                return True
+        for said in candidates:
+            said_words = _SPOKEN_WORD.findall((said or "").lower())
+            if not said_words:
+                continue
+            for start in range(len(said_words) - span + 1):
+                if said_words[start:start + span] == heard_words:
+                    return True
+            # EIGHTY PERCENT, AND THE TWO DECIMAL PLACES ARE THE WHOLE
+            # POINT. At 85% a five-word echo with one mangled word scores
+            # 0.83 and got through — "um which one did you mean" was not
+            # caught, which is precisely the case the rule exists for. At
+            # "one word of slack" a genuine four-word answer gets caught:
+            # "eight out of ten" shares out/of/ten with "how do you rate my
+            # work out of ten?", scores 3 of 4, and would have been refused
+            # as Jalen's own voice. 0.80 separates them:
+            #
+            #     um which one did you mean      5/6 = 0.83   echo
+            #     witch one did you mean         4/5 = 0.80   echo
+            #     eight out of ten               3/4 = 0.75   his answer
+            if span >= 4:
+                vocabulary = set(said_words)
+                hits = sum(1 for word in heard_words if word in vocabulary)
+                if hits / span >= 0.80:
+                    return True
         return False
 
     # -------------------------------------------------------- what's going on

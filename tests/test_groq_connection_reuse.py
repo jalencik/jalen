@@ -116,13 +116,26 @@ def test_the_connection_pool_is_closed_on_shutdown(transcriber):
     transcriber.close()
 
 
-def test_closing_lets_the_next_call_rebuild(transcriber):
-    first = transcriber._groq_client()
+def test_a_closed_transcriber_refuses_loudly_rather_than_handing_back_a_dead_client(
+        transcriber):
+    """
+    THE FIRST VERSION OF THIS TEST ASSERTED THE OPPOSITE, and the review was
+    right. It required close() to let the next call rebuild, reasoning that
+    reusing a client with a shut transport would send every later turn to
+    the offline model in silence. True, but rebuilding is worse: close() is
+    the LAST step of Jalen.shutdown and warmup() runs on its own thread, so
+    a prewarm still in flight would open a fresh socket and thread after
+    teardown - and one more of each on every pass of run.py's restart loop.
+
+    Raising is the honest third option. transcribe() catches Exception and
+    falls back with last_fallback_reason recorded, so a call after shutdown
+    degrades visibly instead of either leaking or lying.
+    """
+    transcriber._groq_client()
     transcriber.close()
-    assert transcriber._groq_client() is not first, (
-        "after close() the client is reused while its transport is shut - "
-        "every later turn would fail and fall back to moonshine forever"
-    )
+    with pytest.raises(RuntimeError):
+        transcriber._groq_client()
+    assert transcriber._groq is None
 
 
 # ---------------------------------------------------------------------------
@@ -187,3 +200,56 @@ def test_the_api_key_still_comes_from_secrets(transcriber):
 def test_a_custom_http_client_does_not_disable_the_base_url(transcriber):
     client = transcriber._groq_client()
     assert str(client.base_url).startswith("https://")
+
+
+def test_a_prewarm_still_in_flight_cannot_rebuild_the_pool_after_shutdown():
+    """
+    close() is the LAST step of Jalen.shutdown and warmup() runs on its own
+    thread, taking 330ms warm and 3988ms cold by its own docstring. Without
+    a terminal flag, a prewarm still in flight rebuilt the pool after
+    teardown - a socket and its thread outliving the process's own shutdown,
+    and one more of each on every pass of run.py's restart loop.
+    """
+    t = stt.Transcriber(CONFIG, _Secrets())
+    t._groq_client()
+    t.close()
+    with pytest.raises(RuntimeError):
+        t._groq_client()
+    assert t._groq is None
+
+
+def test_shutdown_actually_calls_close(transcriber):
+    """
+    UNPINNED UNTIL NOW. The close test called transcriber.close() directly,
+    so the wiring in Jalen.shutdown could be deleted and the suite would
+    stay green while the pool, its sockets and its threads outlived every
+    run. Nothing in tests/ mentioned _close_stt at all.
+    """
+    import inspect
+
+    from jarvis.app import Jalen
+
+    source = inspect.getsource(Jalen.shutdown)
+    assert "self._close_stt" in source, (
+        "the transcriber is no longer closed on shutdown"
+    )
+    # And via a method, not self.stt.close - the tuple is built before the
+    # loop's try/except, so an attribute that does not exist yet would raise
+    # out of shutdown instead of being caught like every other step.
+    #
+    # CODE ONLY. The comment in shutdown explains that distinction and so
+    # contains the string it is warning against; a naive substring search
+    # over the whole source fails on the explanation rather than on the
+    # code, which is the same class of mistake as testing a comment.
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "self.stt.close" not in code
+    assert hasattr(Jalen, "_close_stt")
+
+
+def test_close_stt_survives_a_half_built_jalen():
+    """The thing the method form buys, asserted rather than assumed."""
+    from jarvis.app import Jalen
+
+    bare = Jalen.__new__(Jalen)
+    Jalen._close_stt(bare)          # no self.stt at all - must not raise

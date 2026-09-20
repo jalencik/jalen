@@ -184,11 +184,37 @@ AGREEMENTS = [
     # AN IDIOM THAT CONTAINS A NEGATION AND MEANS YES. The one a blunt
     # "any 'not' is a no" rule destroys, and it is in the YES list today.
     "why not",
-    # Same shape: the negative word is not the answer.
+]
+
+
+# ---------------------------------------------------------------------------
+# THE KNOWN FALSE NOs, written down rather than left to be rediscovered.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("text", [
     "yes, no problem",
     "sure, no worries",
     "yes, no rush",
-]
+    "no problem",
+    "no worries",
+])
+def test_agreement_wrapped_around_a_negative_word_is_refused(text):
+    """
+    NOT A YES, and deliberately so. A first version of this fix neutralised
+    eight "negative-sounding but affirmative" idioms before the NO list ran.
+    An independent review measured the result against HEAD: seven of the
+    eight flipped False (or None) to True, including "no rush", "no doubt"
+    and "no objection" - none of which is permission to send an email, on
+    the last gate before a RED action runs.
+
+    So they went back to refusing. The colloquial reading of "no problem" as
+    agreement is real and this loses it; that costs him a sentence, and the
+    alternative cost six other phrases becoming approvals. "why not" is the
+    single exception, because it was already True before any of this and
+    taking it away would have been its own regression.
+    """
+    assert parse(text) is not True, (
+        f"{text!r} approves a RED action on the strength of an idiom"
+    )
 
 
 @pytest.mark.parametrize("text", AGREEMENTS)

@@ -41,6 +41,8 @@ class Transcriber:
         self.groq_max_retries = int(cfg.get_path("stt.groq_max_retries", 1))
         self._groq = None
         self._groq_http = None
+        # Terminal. See _groq_client and close().
+        self._closed = False
         self._moonshine = None
         self.last_engine = ""
         # Why the primary was skipped, when it was. Empty on a clean
@@ -81,6 +83,14 @@ class Transcriber:
         all that first failed write is a silent drop to the offline model -
         a worse outcome than the 301ms being saved.
         """
+        if self._closed:
+            # SHUT MEANS SHUT. close() is the last step of Jalen.shutdown and
+            # warmup() runs on its own thread, so without this a prewarm that
+            # was still in flight rebuilt the pool after teardown - a socket
+            # and its thread outliving the process's own shutdown, and on the
+            # restart path (run.py re-execs on _restart_requested) one more of
+            # each every time round.
+            raise RuntimeError("the transcriber has been shut down")
         if self._groq is None:
             import httpx
             from groq import Groq
@@ -109,6 +119,7 @@ class Transcriber:
         transport is closed fails every later call and would send every
         remaining turn to the offline model in silence.
         """
+        self._closed = True
         http, self._groq_http, self._groq = self._groq_http, None, None
         if http is not None:
             try:

@@ -404,9 +404,18 @@ class Speaker:
         try:
             _import_edge_tts()
         except Exception:
-            # Warmup is best-effort by definition. A missing or broken
-            # edge-tts must surface on the real call, with its real error,
-            # rather than taking startup down.
+            # Warmup is best-effort by definition and must not take startup
+            # down.
+            #
+            # AN EARLIER VERSION OF THIS COMMENT SAID the failure "must
+            # surface on the real call, with its real error". A review
+            # checked, and it does not: _render catches bare Exception and
+            # returns None, _render_cached passes that None on, and
+            # _speak_sentences catches again - and there is no logging call
+            # anywhere in this file. A broken edge-tts is silent on every
+            # path, which is a real gap and is NOT fixed here; it is
+            # pre-existing, it is bigger than this line, and pretending
+            # otherwise in a comment is worse than the gap.
             pass
         # The connection probe is SKIPPED when the disk cache is already
         # populated. It exists to pay edge-tts's cold-connection cost up
