@@ -70,7 +70,8 @@ def _import_edge_tts():
             asyncio.run(self._synthesise("ready"))
 
     so on every run after the first - when data/tts_cache holds 260 files
-    against a threshold of 8 - warmup finished without ever importing it. The
+    against a threshold of 14 (max(8, len(_COMMON_PHRASES) // 2), and
+    _COMMON_PHRASES has 28 entries) - warmup finished without importing it. The
     remaining warmup work renders the common phrases, and those all come off
     the disk, so they did not import it either.
 

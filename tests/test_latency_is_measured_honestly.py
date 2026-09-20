@@ -32,6 +32,7 @@ MEASURED over the 240 brain turns in data/audit.jsonl:
       1250-1499ms   33
       1500-1749ms  123      <-- 156 of 240, 65%, on a 1400ms timer
       1750-1999ms    2
+      the other 84  spread from 0 to 30433ms, 36 of them over 6000ms
 
 Nothing organic clusters that tightly. That spike IS brain.ack_after_ms.
 
@@ -177,9 +178,11 @@ def test_the_spoken_report_quotes_the_figure_he_could_time_himself():
 # ---------------------------------------------------------------------------
 def test_the_four_original_labels_keep_their_exact_meanings():
     """
-    Every timing line in data/audit.jsonl carries heard/thought/wait/spoke.
-    Re-anchoring or renaming any of them silently invalidates the only
-    before-and-after evidence there is.
+    316 of the 332 timing lines in data/audit.jsonl carry all four of
+    heard/thought/wait/spoke; the other 16 carry only heard= and are
+    route=? turns that never reached audio. Re-anchoring or renaming any of
+    the four silently invalidates the only before-and-after evidence there
+    is.
     """
     t = _timer()
     t.endpoint_ms = 1400

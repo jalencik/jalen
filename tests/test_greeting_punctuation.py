@@ -17,7 +17,15 @@ VERBATIM FROM data/audit.jsonl, 2026-08-31T15:43:00Z, session 7b3bcee850cb:
 
     "Hey, Jalen, could you please play Hurtless Dean Lewis?"   -> discarded
 
-He repeated himself twelve seconds later without the comma and it worked.
+CORRECTED. This line used to read "He repeated himself twelve seconds later
+without the comma and it worked." A review checked the log and it is false.
+The next thing he says, at 15:43:12, is
+
+    "Hey Jalen, could you please play Shape of You?"   -> served
+
+- a DIFFERENT song. He never asked for the Dean Lewis track again and never
+got it. That is a worse outcome than the sentence it replaces, not a better
+one: the comma did not cost him a repeat, it cost him the request.
 
 MEASURED against the real corpora before writing this (853 user utterances,
 804 jarvis utterances, 1661 jarvis sentences, 97 gate discards):

@@ -282,12 +282,19 @@ conversation:
   # gate dropped it for not starting with his name. 45 real answers went
   # that way in data/audit.jsonl.
   #
-  # THIRTY SECONDS, MEASURED. Of the 41 answers that DID land because he
-  # repeated the name, 27 arrived more than twelve seconds after the
+  # THIRTY SECONDS, MEASURED. Of the 49 answers that DID land because he
+  # repeated the name, 31 arrived more than twelve seconds after the
   # question — saying the name again is what you do when the window has
-  # shut. Thirty covers 71% of them; forty-five covers 90%. Thirty is the
+  # shut. Thirty covers 73% of them; forty-five covers 92%. Thirty is the
   # conservative end of that range because this is the one window in which
   # a television in the room is a user.
+  #
+  # CORRECTED. The first version of this comment said 41 / 27 / 71% / 90%,
+  # from a forensics script whose own name regex was narrower than the
+  # shipped addressed_to_jalen and so missed the Jaris/Jaros/Joris
+  # spellings. Re-derived with the shipped predicate, by a reviewer and
+  # then again independently. The conclusion did not move; the numbers
+  # did, and a number in a comment is there to be checked.
   #
   # The clock starts when Jalen STOPS TALKING, not when the model finished
   # generating — see Jalen._expect_an_answer. Anchored the other way, a

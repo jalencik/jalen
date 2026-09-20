@@ -1801,7 +1801,7 @@ class Jalen:
                     # recorded at all and the gate never gets to accept it.
                     #
                     # Measured over the answers that DID get through by
-                    # repeating his name: 27 of 41 arrived more than twelve
+                    # repeating his name: 31 of 49 arrived more than twelve
                     # seconds after the question. Saying the name again is
                     # what you do when the window has shut.
                     if ((in_follow_up or awaiting_reply or self._expectation_open())
@@ -2230,9 +2230,14 @@ class Jalen:
         invites the answer "ChatGPT", and a filter eager enough to catch a
         two-word echo would reject the one answer the question asked for.
 
-        Measured against the real corpus in data/audit.jsonl: 978 of 978
-        simulated echoes caught, and 0 of 853 genuine user utterances
-        wrongly refused.
+        Measured against the real corpus in data/audit.jsonl: 0 of the 853
+        genuine user utterances is refused when paired with the reply that
+        actually preceded it, and every one of the 725 question-shaped
+        replies is refused when fed back whole, from its midpoint, and as
+        its last five words. That second figure is reproducible from the
+        log; an earlier version of this docstring cited "978 of 978" from a
+        scratch script that is not in the repository, which a review
+        correctly called unauditable.
 
         TIME IS THE GATE, AND TEXT IS ONLY THE TEST. An independent review
         of the first version of this found both halves of that wrong:

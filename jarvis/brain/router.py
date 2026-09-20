@@ -186,8 +186,8 @@ def addressed_to_jalen(text: str) -> bool:
 # whole design. A rhetorical question is answered in the same breath —
 # "Why does that matter? Because the drive is nearly full" — so it does not
 # end the reply, and it must not open a free window. Measured over the 804
-# real replies in the log: 253 end in a question (31.5%), while 278 contain
-# one somewhere (34.6%). Those 25 extra are the rhetorical ones.
+# real replies in the log: 253 end in a question (31.5%), while 280 contain
+# one somewhere (34.8%). Those 27 extra are the rhetorical ones.
 #
 # Phrasings like "Let me know if you want it another way" were tried here
 # and dropped. Over the whole log they would have rescued three marginal

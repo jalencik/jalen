@@ -56,7 +56,9 @@ Not "Jalen spoke" - that is an always-listening assistant, and a television
 in the room becomes a user. The exemption opens only when the reply
 SOLICITED an answer, which for model-written text means its final sentence
 ends in a question mark. Measured over the 804 real replies in the log that
-is 31.5% of them, and it caught 100% of the genuine dropped answers.
+is 31.5% of them - 280 contain a question SOMEWHERE (34.8%), and those
+27 extra are the rhetorical ones - and it caught 100% of the genuine
+dropped answers.
 
 The echo defence has to be rebuilt at the same time, because the address
 gate WAS the echo defence: Jalen's own sentences do not start with his

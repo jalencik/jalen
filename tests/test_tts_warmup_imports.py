@@ -21,7 +21,10 @@ so they do not import it either.
 
 MEASURED ON THIS MACHINE
 ------------------------
-    data/tts_cache/*.npz          260 files  (threshold is 8)
+    data/tts_cache/*.npz          260 files
+    the threshold                 14, which is max(8, 28 // 2) - the
+                                  earlier note here said 8, reading only
+                                  the first argument of the max()
     import edge_tts, cold         2919ms / 2637ms / 2181ms across three
                                   fresh interpreters
 
