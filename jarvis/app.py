@@ -620,10 +620,57 @@ class Jalen:
         matters more than the lists do - "no, don't send it" contains "send
         it", and a yes-first search would send the email he just refused.
         """
-        low = " " + re.sub(r"[^a-z0-9' ]", " ", text.strip().lower()) + " "
+        # THE APOSTROPHE SPEECH RECOGNITION ACTUALLY EMITS is U+2019, not
+        # U+0027, and the character class below keeps only the straight one.
+        # So "don't send it" was scrubbed to " don t send it ", the NO list's
+        # " don't " never matched, and what remained was " send it " - which
+        # is in the YES list. The refusal sent it.
+        flattened = (text or "").strip().lower()
+        for curly in ("’", "ʼ", "‘", "`"):
+            flattened = flattened.replace(curly, "'")
+        low = " " + re.sub(r"[^a-z0-9' ]", " ", flattened) + " "
         low = re.sub(r"\s+", " ", low)
         if not low.strip():
             return None
+
+        # --- AGREEMENT THAT IS SPELLED WITH A NEGATIVE WORD ---
+        #
+        # Neutralised BEFORE either list is searched, because the bare-negation
+        # rule below would otherwise read every one of them as a refusal.
+        # "why not" is already in the YES list and means yes; "no problem" is
+        # the commonest way there is of saying yes to a favour.
+        #
+        # A closed list, and short on purpose. Anything not on it that mixes a
+        # negation with an agreement is treated as a refusal, which is the
+        # direction that costs a sentence rather than an email.
+        for idiom in (
+            " why not ", " no problem ", " not a problem ", " no worries ",
+            " no rush ", " no doubt ", " no objection ", " nothing wrong ",
+        ):
+            low = low.replace(idiom, " yes ")
+
+        # --- A BARE NEGATION, which the phrase list below never had ---
+        #
+        # THE WORST BUG IN THIS FILE. The NO list is phrases, so a refusal
+        # built out of "not" plus any agreement word skipped it entirely and
+        # landed on the YES list. Reproduced against the real function:
+        #
+        #     "of course not"       -> True   (" of course " matched)
+        #     "I'm not sure"        -> True   (" sure " matched)
+        #     "not right now"       -> True   (" right " matched)
+        #     "that's not right"    -> True   (" that's right " matched)
+        #     "certainly not"       -> True   (" certainly " matched)
+        #     "not okay with that"  -> True   (" okay " matched)
+        #
+        # Each of those is a person refusing a RED action and getting it done.
+        # "As long as I am showing any kind of agreement, it should confirm"
+        # was a request about "Of course", not a licence to read "of course
+        # not" the same way.
+        #
+        # The contraction half covers won't, can't, isn't, didn't, shouldn't
+        # and the rest, none of which were on the NO list either.
+        if " not " in low or " never " in low or re.search(r"[a-z]+n't ", low):
+            return False
 
         # --- NO, and first, because a refusal usually mentions the action ---
         for phrase in (
