@@ -44,6 +44,11 @@ class _Gate:
         self._awaiting_stop = False
         self._awaiting_reply = False
         self._pending_rating = None
+        # Jalen grew a question window (tests/test_answering_a_question.py).
+        # Nothing asked here: the emergency stop must work with no
+        # conversational state open at all, which is the whole point.
+        self._expecting = None
+        self._last_reply_text = ""
         self._last_user_text = ""
         self._last_user_at = 0.0
         self.cfg = CONFIG
@@ -51,6 +56,8 @@ class _Gate:
 
     should_act_on = Jalen.should_act_on
     _continues_last_utterance = Jalen._continues_last_utterance
+    _expectation_open = Jalen._expectation_open
+    _sounds_like_its_own_voice = Jalen._sounds_like_its_own_voice
 
 
 def _reaches_something(router, phrase: str) -> str:

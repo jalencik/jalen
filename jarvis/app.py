@@ -101,6 +101,72 @@ _CONTINUATION_OPENER = re.compile(
     r"^(?:and then|after that|as well as|followed by|and|then|also|plus|or|next)\b"
 )
 
+# ---------------------------------------------------------------------------
+# A DANGLING TAIL IS NOT A BLANK CHEQUE.
+#
+# _continues_last_utterance used to end on
+#
+#     return is_continuation(text) or looks_unfinished(self._last_user_text)
+#
+# and the second half never looks at `text` at all. So for the whole of
+# conversation.stitch_window_s — eight seconds — after any utterance ending
+# on a word in _UNFINISHED_TAIL, the address gate admitted ANYTHING.
+# Reproduced against the real predicate with _last_user_text="send it to"
+# and nothing pending; every one of these returned True:
+#
+#     "transfer the funds"                  "empty the recycle bin"
+#     "Julian said he'd call back"          "asdf qwerty zxcv"
+#     ""                                    <- the empty string
+#     "Sure, I can open that for you."      <- and this one is the problem
+#
+# That last string is pinned in tests/test_address_gate.py as JALEN'S OWN
+# VOICE coming back through the speakers, so this was a live self-triggering
+# path inside the gate whose entire purpose is refusing it.
+#
+# TWO CLASSES OF DANGLING WORD, and only one of them can be made safe by
+# looking at the fragment. A tail ending on a PREPOSITION or a DETERMINER is
+# waiting for a noun — "send it to ..." can only be followed by a noun
+# phrase, and a noun phrase has a small, recognisable set of openers. A tail
+# ending on a CONJUNCTION or an auxiliary ("open chrome and ...") is waiting
+# for a verb phrase, which looks exactly like a new command and cannot be
+# told from one. So the clause now fires only for the first class.
+#
+# The cost is the second class: "open chrome and" [pause] "go to youtube"
+# now needs his name. That case is already caught an entire layer earlier,
+# acoustically — run() sees looks_unfinished() on the fast transcript and
+# calls collector.resume() to keep listening on the patient endpoint, so the
+# two halves arrive as ONE utterance and never reach this predicate. This
+# clause is the backstop for when that fails, and a backstop that admits the
+# assistant's own voice is worse than no backstop.
+_NOUN_EXPECTING_TAIL = re.compile(
+    r"(?:^|\s)(?:to|for|with|from|into|onto|at|in|on|of|about|by|as|"
+    r"the|a|an|my|your|his|her|their|its|this|these)$"
+)
+
+# What the rest of a noun phrase can start with. Deliberately closed and
+# deliberately small: every word here is one that cannot begin a command.
+# "you" is absent although "your" is present, because "You have four unread
+# emails" is Jalen talking.
+_FRAGMENT_OPENER = re.compile(
+    r"^(?:the|a|an|my|your|his|her|its|our|their|this|that|these|those|"
+    r"to|for|with|from|into|onto|at|in|on|of|about|by|as|"
+    r"it|them|him|us|me|"
+    r"one|two|three|four|five|first|second|third|both|either|neither)\b"
+)
+
+
+def opens_like_a_fragment(text: str) -> bool:
+    """True when `text` reads as the rest of a noun phrase, not a new command."""
+    return bool(_FRAGMENT_OPENER.match((text or "").strip().lower()))
+
+
+def expects_a_noun(text: str) -> bool:
+    """True when the transcript breaks off waiting for a noun phrase."""
+    cleaned = (text or "").strip().lower().rstrip(".,!?;:")
+    if not cleaned:
+        return False
+    return bool(_NOUN_EXPECTING_TAIL.search(cleaned))
+
 
 # Did he ask to HEAR the whole thing?
 #
@@ -1883,7 +1949,18 @@ class Jalen:
             return False
         if time.monotonic() - self._last_user_at > window:
             return False
-        return is_continuation(text) or looks_unfinished(self._last_user_text)
+        # NEVER ITS OWN VOICE, whatever else is true. Checked first because
+        # the dangling-tail branch below is the one place a sentence can get
+        # through without opening like a continuation at all, and the echo
+        # is the failure that feeds itself.
+        if self._sounds_like_its_own_voice(text):
+            return False
+        if is_continuation(text):
+            return True
+        # See the comment on _NOUN_EXPECTING_TAIL above: a tail waiting for a
+        # noun admits a noun phrase, and nothing else. It used to admit
+        # everything, because this line did not look at `text`.
+        return expects_a_noun(self._last_user_text) and opens_like_a_fragment(text)
 
     # --------------------------------------------------- an open question
     def _expect_an_answer(self, question: str, turn_id: int,
