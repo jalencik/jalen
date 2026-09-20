@@ -24,7 +24,7 @@ python run.py --why    # why the last run stopped
 .venv\Scripts\python.exe -m pytest tests\ -q --ignore=tests\benchmark_latency.py --ignore=tests\benchmark_open.py --ignore=tests\benchmark_phrasing.py
 ```
 
-2,957 tests collect under that gate; 3,182 if the benchmarks are included,
+3,249 tests collect under that gate; 3,474 if the benchmarks are included,
 because `pytest.ini` sets `python_files = test_*.py *_test.py benchmark_*.py`.
 
 Always `python -m pytest`, never the bare `pytest.exe` — 61 of 86 test files
@@ -66,6 +66,35 @@ There is no linter, no type checker, no CI and no git remote.
   call sites violate this today: research.py:194 and attachments.py:57. Both
   only act on a BLACK verdict, so the blast radius is small, but do not copy
   the pattern.)
+- **Two gates decide whether you are heard, and they must agree.** The
+  microphone gate (`follow_up_until`, and now `_expectation_open()`, in the
+  `not listening` branch of `Jalen.run`) decides whether a sound opens a
+  window; the address gate (`should_act_on`, app.py) decides whether the
+  words are acted on. For a year the first was a *local variable inside
+  run()* that the second could not see, so Jalen opened the microphone for
+  your answer, transcribed it, and dropped it for not starting with his
+  name — 45 real answers in `data/audit.jsonl`. Anything that widens one
+  must widen the other, and `tests/test_answering_a_question.py` pins both.
+  The same shape has now bitten three times in this file: a piece of
+  conversational state whose lifetime one reader enforces and another does
+  not (`_pending_rating` had a 300s expiry in `process()` and none in the
+  gate). Grep for it before adding a fourth.
+- **The address gate is also the echo defence**, because Jalen's own
+  sentences do not begin with his name. Any exemption you add has to call
+  `_sounds_like_its_own_voice()` or it is a self-triggering loop — the
+  microphone cannot tell his voice from the speakers, and there is no
+  acoustic echo cancellation on this machine.
+- **`timing.wait_s` is not the wait.** It starts *after* the endpointer's
+  1400ms of silence and it stops on the "Give me a second." filler, which
+  fires on 65% of brain turns. `felt_wait_s` is the number a stopwatch in
+  the room would give. The four original labels in the audit line
+  (heard/thought/wait/spoke) are load-bearing for a month of history —
+  add, never re-anchor.
+- **Never pass user text as an argument to a `.cmd`.** `shutil.which
+  ("claude")` returns npm's `claude.CMD`, Windows runs it through cmd.exe,
+  and cmd.exe truncates at the first newline, flattens em dashes, strips
+  accents to the console codepage and expands `%VAR%`. Prefer a real
+  executable — `claude-agent-sdk` bundles one. Same family as the next rule.
 - **Never write a regex, backslash or non-ASCII text through a shell heredoc.**
   `\b` arrives as a literal 0x08 byte that still compiles, so the guard never
   fires and every surrounding test keeps passing. Use the Edit tool.
