@@ -1,0 +1,469 @@
+"""
+He answers the question Jalen just asked him, and Jalen throws it away.
+
+THE BUG, AND WHY EVERY BEHAVIOURAL TEST STILL PASSED
+----------------------------------------------------
+There are two gates, and only one of them had ever heard of the follow-up
+window.
+
+    the MICROPHONE gate   `follow_up_until` in Jalen.run() decides whether a
+                          sound opens a listening window at all. It is a
+                          LOCAL VARIABLE inside the loop.
+    the ADDRESS gate      should_act_on() decides whether the words that
+                          came out of that window are acted on. It is a
+                          method, and it could not see the local.
+
+So the window opened, the microphone recorded, Whisper transcribed, and
+then the address gate dropped the sentence for not starting with his name.
+Its own docstring says the opposite -
+
+    Jalen just asked    "which file did you mean?" - requiring the name
+                        to answer a question he was this moment asked
+                        would be absurd, and it is the only reason the
+                        follow-up window still exists
+
+- but the only thing implementing that was `_awaiting_reply`, which is set
+by the ask_user TOOL. An ordinary reply that happens to end in a question
+sets no flag at all, and 31.5% of what Jalen says ends in a question mark.
+
+MEASURED IN data/audit.jsonl
+----------------------------
+97 utterances were logged as "ignored - not addressed to Jalen". 59 of them
+arrived after a Jalen line ending in "?"; 45 of those were four words or
+more. Read a few and there is no ambiguity about what they are:
+
+    Jalen:  "Which one did you mean, boss - ChatGPT or Gemini?"
+    He:     "and sign me in to chat GPG using my authentication."   DROPPED
+
+    Jalen:  "I see two matches on your Desktop, Boss - Changes.md and Cha..."
+    He:     "in changes.pdf"                                        DROPPED
+
+THE TIMER WAS NOT THE PROBLEM
+-----------------------------
+An earlier reading of this evidence concluded that 35 of 43 answers arrived
+after the 12-second window and that the window therefore had to grow. That
+was a measurement artefact. The "ignored" line is written when the
+utterance ENDS, and the window is tested when it BEGINS - so a twenty-second
+answer that started three seconds into the window logs as a twenty-three
+second gap. Every one of those 97 utterances reached speech recognition,
+and the only paths that open the microphone are the wake word (which is
+accepted), barge-in, and the follow-up window. The window was open for all
+of them. Lengthening it would have fixed nothing.
+
+WHAT OPENS THE EXEMPTION, AND WHAT DOES NOT
+-------------------------------------------
+Not "Jalen spoke" - that is an always-listening assistant, and a television
+in the room becomes a user. The exemption opens only when the reply
+SOLICITED an answer, which for model-written text means its final sentence
+ends in a question mark. Measured over the 804 real replies in the log that
+is 31.5% of them, and it caught 100% of the genuine dropped answers.
+
+The echo defence has to be rebuilt at the same time, because the address
+gate WAS the echo defence: Jalen's own sentences do not start with his
+name. See test_jalen_still_cannot_talk_itself_into_a_new_turn below.
+"""
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from jarvis.app import Jalen
+from jarvis.brain.router import solicits_an_answer
+from jarvis.config import CONFIG
+
+
+class _Gate:
+    """
+    Just enough Jalen to answer "would you act on this?".
+
+    Constructing a real one opens a microphone, a speaker and a Tk window.
+    The predicate reads a few booleans, a deadline and two strings.
+    """
+
+    def __init__(self, *, confirmation=False, stop=False, reply=False):
+        self._awaiting_confirmation = confirmation
+        self._awaiting_stop = stop
+        self._awaiting_reply = reply
+        self._pending_rating = None
+        self._last_user_text = ""
+        self._last_user_at = 0.0
+        self._last_reply_text = ""
+        self._expecting = None
+        self.cfg = CONFIG
+        self.kill_phrases = set(CONFIG.get_path("safety.kill_phrases"))
+
+    # the real implementations, not stand-ins
+    should_act_on = Jalen.should_act_on
+    _continues_last_utterance = Jalen._continues_last_utterance
+    _expectation_open = Jalen._expectation_open
+    _expect_an_answer = Jalen._expect_an_answer
+    _forget_expectation = Jalen._forget_expectation
+    _sounds_like_its_own_voice = Jalen._sounds_like_its_own_voice
+
+    def asked(self, question: str, *, window_s: float = 30.0, turn_id: int = 1):
+        """Jalen finished saying `question` just now."""
+        self._last_reply_text = question
+        self._expect_an_answer(question, turn_id=turn_id, window_s=window_s)
+        return self
+
+
+# ---------------------------------------------------------------------------
+# WHAT COUNTS AS ASKING. A pure predicate over the text Jalen produced.
+# ---------------------------------------------------------------------------
+SOLICITS = [
+    # Verbatim from data/audit.jsonl.
+    "Which one did you mean, boss - ChatGPT or Gemini?",
+    "Yes, Boss?",
+    "Not much, boss - just sitting here ready. What do you need?",
+    "I see two matches on your Desktop, Boss - Changes.md and Changes.pdf. "
+    "Which one did you mean?",
+    "close app: notepad. Confirm?",
+    "Hey boss - how do you rate my work out of ten?",
+    # The question is the last sentence of a longer answer.
+    "Gmail's live now, Boss. Pulling up your full thread with Andres. "
+    "Do you want the whole thread read out, or just the last message?",
+]
+
+DOES_NOT_SOLICIT = [
+    # Ordinary statements. The overwhelming majority of what it says.
+    "Sure, I can open that for you.",
+    "You have four unread emails.",
+    "Done. I verified the result against your requirements.",
+    "YouTube's open, Boss.",
+    "Any time.",
+    "Playing that DJ Vismay VRz mashup on YouTube now, Boss.",
+    # A RHETORICAL question, answered in the same breath. This is the case a
+    # naive `"?" in text` would get wrong, and it is why the test is on the
+    # FINAL sentence rather than on the string.
+    "Why does that matter? Because the drive is nearly full, Boss.",
+    "What happened? Groq timed out, so I used the local model instead.",
+    # A question mark buried mid-answer, with the answer continuing past it.
+    "You asked what's eating the disk? Temp files, 197MB of them, and the "
+    "recycle bin. I've cleared the temp files.",
+    # Ends on an invitation, but is not a question and must not open the
+    # gate - measured on the real log this phrasing buys three marginal
+    # cases and costs 53 extra open windows.
+    "Alright, leaving it alone then, Boss. Let me know if you want it "
+    "opened another way.",
+    "I'm only reporting sizes; nothing gets deleted unless you tell me to.",
+    "",
+    "   ",
+]
+
+
+@pytest.mark.parametrize("text", SOLICITS)
+def test_a_reply_that_asks_him_something_is_recognised(text):
+    assert solicits_an_answer(text), f"{text!r} is Jalen asking for an answer"
+
+
+@pytest.mark.parametrize("text", DOES_NOT_SOLICIT)
+def test_a_reply_that_asks_nothing_opens_no_window(text):
+    assert not solicits_an_answer(text), (
+        f"{text!r} would open a free-speech window after an ordinary "
+        "statement - that is the always-listening assistant"
+    )
+
+
+def test_trailing_punctuation_after_the_question_mark_still_counts():
+    """
+    Speech synthesis and the model both produce these. A closing quote or
+    bracket after the "?" must not hide the question.
+    """
+    for text in ('Did you mean "Changes.pdf"?', "Which one (of the two)?",
+                 'He asked "which file?"', "Which one? "):
+        assert solicits_an_answer(text), text
+
+
+# ---------------------------------------------------------------------------
+# THE BUG ITSELF
+# ---------------------------------------------------------------------------
+# Verbatim pairs from data/audit.jsonl. Every one of these was recorded as
+# "ignored - not addressed to Jalen" while the microphone window Jalen
+# itself had opened was still running.
+DROPPED_FOR_REAL = [
+    ("Which one did you mean, boss - ChatGPT or Gemini?",
+     "and sign me in to chat GPG using my authentication."),
+    ("I see two matches on your Desktop, Boss - Changes.md and Changes.pdf. "
+     "Which one did you mean?",
+     "in changes.pdf"),
+    ("Storage Settings is open on screen so you can see the full breakdown "
+     "yourself. What did you want me to clear?",
+     "what do you mean by old Windows cleanups?"),
+    ("I'm here, Boss - just waiting on one thing from you. Do you want this "
+     "posted to the channel or to Saved Messages?",
+     "Could you please repeat?"),
+    ("I want to make sure I send GPT a sensible brief, boss - "
+     '"top 10 most powerful men" by what measure?',
+     "Yeah, the most powerful man on the earth. I mean, 10 of them."),
+    ("Not much, boss - just sitting here ready. What do you need?",
+     "Could you please research the top 10 richest men on earth and their "
+     "net worth currently by September 20."),
+]
+
+
+@pytest.mark.parametrize("question,answer", DROPPED_FOR_REAL)
+def test_the_answer_to_its_own_question_is_acted_on(question, answer):
+    gate = _Gate().asked(question)
+    assert gate.should_act_on(answer, wake_initiated=False), (
+        f"Jalen asked {question!r} and then discarded {answer!r} - this is "
+        "the bug, replayed from the audit log"
+    )
+
+
+@pytest.mark.parametrize("answer", [
+    "yes", "no", "yeah", "correct", "the second one", "that one",
+    "continue", "do it", "changes.pdf", "ChatGPT",
+])
+def test_a_one_word_answer_counts_when_a_question_is_open(answer):
+    """
+    Short answers were the worst-affected: "the second one" carries no name,
+    no verb and nothing the router matches, so without the question open it
+    is indistinguishable from noise - and correctly rejected.
+    """
+    gate = _Gate().asked("I see two matches, Boss. Which one did you mean?")
+    assert gate.should_act_on(answer, wake_initiated=False)
+
+
+def test_after_an_ordinary_statement_the_name_is_still_required():
+    """
+    The line that keeps this from becoming an always-listening assistant.
+    Jalen said something; it did not ask anything; the room is not a user.
+    """
+    gate = _Gate()
+    gate._last_reply_text = "YouTube's open, Boss."
+    assert not gate.should_act_on("the second one", wake_initiated=False)
+    assert not gate.should_act_on("so anyway the weather is nice", wake_initiated=False)
+    assert gate.should_act_on("Jalen, the second one", wake_initiated=False)
+
+
+def test_unrelated_room_speech_during_an_open_question_is_the_known_cost():
+    """
+    HONEST ABOUT THE TRADE, rather than pretending there isn't one.
+
+    While a question is open, a sentence from the room IS acted on. That is
+    the same trade the follow-up window already made acoustically, now made
+    where it has consequences, and it is bounded three ways: it opens only
+    after the 31.5% of replies that end in a question, it expires, and
+    anything that sounds like Jalen's own voice is still refused.
+
+    If this test ever has to be deleted, the exemption has grown too wide.
+    """
+    gate = _Gate().asked("Which one did you mean, boss?")
+    assert gate.should_act_on("no I told him that already", wake_initiated=False)
+    gate._forget_expectation()
+    assert not gate.should_act_on("no I told him that already", wake_initiated=False)
+
+
+# ---------------------------------------------------------------------------
+# THE ECHO DEFENCE, REBUILT
+#
+# The address gate WAS the echo defence - Jalen's own sentences do not start
+# with his name. Opening a free window after a question removes that defence
+# exactly when the microphone is most likely to be hearing the tail of the
+# question it just asked.
+# ---------------------------------------------------------------------------
+def test_jalen_still_cannot_talk_itself_into_a_new_turn():
+    """
+    THE REGRESSION THIS FIX COULD CAUSE, stated directly.
+
+    Playback ends, the window opens, and what arrives at the microphone is
+    the last second of the question Jalen just asked. Before the echo check
+    that is now a free, un-named, accepted turn - a strictly worse bug than
+    the one being fixed, because it is a loop.
+    """
+    question = ("I see two matches on your Desktop, Boss - Changes.md and "
+                "Changes.pdf. Which one did you mean?")
+    gate = _Gate().asked(question)
+    for echo in (
+        question,                                   # the whole thing
+        "Changes.md and Changes.pdf. Which one did you mean?",
+        "which one did you mean",
+        "I see two matches on your Desktop",
+        "two matches on your desktop boss",         # no punctuation, as STT writes it
+    ):
+        assert not gate.should_act_on(echo, wake_initiated=False), (
+            f"Jalen answered its own question: {echo!r}"
+        )
+
+
+def test_a_short_answer_that_appears_in_the_question_is_not_echo():
+    """
+    "ChatGPT or Gemini?" - and he says "ChatGPT". The word IS in the
+    question, and an over-eager echo filter would reject the one answer the
+    question invited. Two words or fewer are never treated as echo.
+    """
+    gate = _Gate().asked("Which one did you mean, boss - ChatGPT or Gemini?")
+    assert gate.should_act_on("ChatGPT", wake_initiated=False)
+    assert gate.should_act_on("Gemini", wake_initiated=False)
+    assert gate.should_act_on("the second", wake_initiated=False)
+
+
+def test_real_user_answers_are_not_mistaken_for_echo():
+    """
+    Measured: zero false positives across the 853 real user utterances in
+    data/audit.jsonl paired against real Jalen replies. A sample of them
+    lives here so a change to the detector has to face it.
+    """
+    gate = _Gate().asked(
+        "I'm here, Boss - just waiting on one thing from you. Do you want "
+        "this posted to the channel or to Saved Messages?"
+    )
+    for answer in (
+        "just make the post and send it to my saved messages.",
+        "post it to the channel please",
+        "neither, leave it as a draft for now",
+        "I would like you to send it.",
+    ):
+        assert gate.should_act_on(answer, wake_initiated=False), answer
+
+
+# ---------------------------------------------------------------------------
+# IT HAS TO END
+# ---------------------------------------------------------------------------
+def test_the_window_expires():
+    gate = _Gate().asked("Which one did you mean, boss?", window_s=0.05)
+    assert gate.should_act_on("the second one", wake_initiated=False)
+    time.sleep(0.08)
+    assert not gate.should_act_on("the second one", wake_initiated=False)
+
+
+def test_an_expired_window_is_cleared_rather_than_re_tested_forever():
+    gate = _Gate().asked("Which one did you mean, boss?", window_s=0.01)
+    time.sleep(0.03)
+    assert not gate._expectation_open()
+    assert gate._expecting is None
+
+
+def test_a_new_wake_word_turn_works_regardless_of_the_window():
+    gate = _Gate().asked("Which one did you mean, boss?")
+    assert gate.should_act_on("open chrome", wake_initiated=True)
+    gate._forget_expectation()
+    assert gate.should_act_on("open chrome", wake_initiated=True)
+
+
+def test_the_kill_phrase_is_still_exempt_either_way():
+    for gate in (_Gate(), _Gate().asked("Which one, boss?")):
+        assert gate.should_act_on("stop", wake_initiated=False)
+        assert gate.should_act_on("cancel", wake_initiated=False)
+
+
+def test_the_existing_pending_states_are_untouched():
+    """
+    ask_user, the RED confirmation and the AMBER stop-window each already
+    had their own exemption, and each is answered by a queue a coroutine is
+    sitting on. The new window must not replace, weaken or shadow them.
+    """
+    for pending in ("confirmation", "stop", "reply"):
+        gate = _Gate(**{pending: True})
+        assert gate._expecting is None, "no free window is needed - the flag is the exemption"
+        assert gate.should_act_on("the notes one", wake_initiated=False)
+
+
+# ---------------------------------------------------------------------------
+# SAFETY. A conversational window must not become a way to approve things.
+# ---------------------------------------------------------------------------
+def test_an_open_question_does_not_approve_anything_by_itself():
+    """
+    The window decides ONE thing: whether a sentence is heard as addressed
+    to Jalen. It is not consulted when a RED action asks for confirmation -
+    that is `_awaiting_confirmation` plus the answer queue, and this window
+    neither sets nor satisfies it.
+    """
+    gate = _Gate().asked("Which file did you mean, boss?")
+    assert gate._expecting is not None
+    assert gate._awaiting_confirmation is False
+    assert gate._awaiting_stop is False
+    assert gate._awaiting_reply is False
+
+
+def test_the_window_records_which_turn_opened_it():
+    """
+    Bound to a turn, not floating. A stale window from three turns ago must
+    be identifiable as stale rather than silently answering for the newest
+    question.
+    """
+    gate = _Gate().asked("Which one, boss?", turn_id=7)
+    assert gate._expecting.turn_id == 7
+    assert gate._expecting.question.startswith("Which one")
+
+
+def test_a_second_question_replaces_the_first():
+    gate = _Gate().asked("Which file, boss?", turn_id=1)
+    gate.asked("Actually - which folder, boss?", turn_id=2)
+    assert gate._expecting.turn_id == 2
+    # The OLD question's text is no longer what echo is measured against.
+    assert "folder" in gate._expecting.question
+
+
+# ---------------------------------------------------------------------------
+# WIRING. The predicate being right is worth nothing if the loop never asks.
+# ---------------------------------------------------------------------------
+def test_the_microphone_opens_for_the_whole_window_not_just_the_follow_up():
+    """
+    The window is longer than the ordinary follow-up, and the microphone
+    branch is a SEPARATE test from the address gate. If run() still only
+    consults `follow_up_until`, an answer given after 12 seconds never
+    reaches the gate at all and the fix is invisible.
+    """
+    import inspect
+
+    source = inspect.getsource(Jalen.run)
+    branch = source[source.index("in_follow_up = "):source.index("elif self.wake.feed")]
+    assert "_expectation_open" in branch, (
+        "the microphone branch does not know about the open question - the "
+        "address gate will never see the answer"
+    )
+
+
+def test_the_window_opens_only_after_playback_has_finished():
+    """
+    THE ANCHOR, and the reason 12 seconds looked too short.
+
+    The clock starts when Jalen STOPS TALKING, not when the model finished
+    generating. dispatch_turn already blocks on _await_playback() before it
+    touches the follow-up window; the question window is opened in the same
+    place for the same reason. Anchored at generation time instead, a
+    forty-second answer would spend its whole window being spoken.
+    """
+    import inspect
+
+    source = inspect.getsource(Jalen.run)
+    playback = source.index("self._await_playback()")
+    opened = source.index("_expect_an_answer")
+    assert playback < opened, (
+        "the question window starts before the reply has finished playing - "
+        "it is counting Jalen's own speech as the user's thinking time"
+    )
+
+
+def test_a_reply_that_asks_nothing_closes_the_previous_window():
+    """
+    Otherwise the last question ever asked stays open behind every
+    subsequent statement, and the bound becomes "thirty seconds after
+    anything" instead of "thirty seconds after a question".
+    """
+    import inspect
+
+    source = inspect.getsource(Jalen.run)
+    tail = source[source.index("follow_up_until = time.monotonic()"):]
+    assert "_forget_expectation" in tail[:1200], (
+        "a turn that asked nothing leaves the previous question's window "
+        "open"
+    )
+
+
+def test_rejection_is_still_silent():
+    """
+    Unchanged and load-bearing. Announcing "I didn't catch that" at a room
+    that was not talking to him is the self-inflicted interruption the
+    address gate exists to end, and the announcement is itself speech the
+    microphone can hear.
+    """
+    import inspect
+
+    source = inspect.getsource(Jalen.run)
+    start = source.index("if not self.should_act_on(")
+    after = source[start:start + 700]
+    assert "self.say(" not in after
+    assert "not addressed to Jalen" in after

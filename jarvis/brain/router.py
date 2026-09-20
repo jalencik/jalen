@@ -157,10 +157,64 @@ def addressed_to_jalen(text: str) -> bool:
     global _ADDRESSED
     if _ADDRESSED is None:
         _ADDRESSED = re.compile(
-            r"^\s*(?:hey |hi |yo |ok |okay )?" + _NAME + r"(?:[.,!?;:\s]|$)",
+            r"^\s*(?:(?:hey|hi|yo|ok|okay)[.,!?;:\s]+)?" + _NAME
+            + r"(?:[.,!?;:\s]|$)",
             re.I,
         )
     return bool(_ADDRESSED.match(text or ""))
+
+
+# ----------------------------------------------------------------------------
+# DID JALEN JUST ASK HIM SOMETHING?
+#
+# The other half of addressed_to_jalen. The name is required to START a
+# conversation; an ANSWER to a question Jalen this moment asked is free —
+# "Name to start; answers to its own questions are free" were his words when
+# asked to choose. Until this existed the only thing implementing that was
+# the ask_user tool's flag, so an ordinary reply ending in a question opened
+# a microphone window, recorded the answer, and then the address gate threw
+# the words away. Measured in data/audit.jsonl: 45 real answers discarded.
+#
+# WHY THE QUESTION MARK, WHEN THE QUESTION MARK IS UNRELIABLE.
+#
+# It is unreliable in a TRANSCRIPT — speech recognition punctuates however it
+# likes. This predicate never sees a transcript. It reads what the MODEL
+# wrote, which is ordinary written English with ordinary punctuation, and a
+# model that wants an answer writes a question mark.
+#
+# It is tested on the FINAL SENTENCE, not on the string, and that is the
+# whole design. A rhetorical question is answered in the same breath —
+# "Why does that matter? Because the drive is nearly full" — so it does not
+# end the reply, and it must not open a free window. Measured over the 804
+# real replies in the log: 253 end in a question (31.5%), while 278 contain
+# one somewhere (34.6%). Those 25 extra are the rhetorical ones.
+#
+# Phrasings like "Let me know if you want it another way" were tried here
+# and dropped. Over the whole log they would have rescued three marginal
+# utterances ("Thank you", twice) at the cost of 53 more open windows.
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+# What may sit AFTER the question mark and still leave it the last thing
+# said: a closing quote or bracket. 'Did you mean "Changes.pdf"?' and
+# 'He asked "which file?"' both end on a question either way.
+_TRAILING_MARKS = " \t\r\n\"')]}”’»"
+
+
+def solicits_an_answer(text: str) -> bool:
+    """
+    True when Jalen's reply asked him for something back.
+
+    Not "contains a question" and not "Jalen spoke" — either of those turns
+    a room with a television in it into a second user. Only: the last thing
+    said was a question.
+    """
+    body = (text or "").strip()
+    if not body:
+        return False
+    parts = [p for p in _SENTENCE_END.split(body) if p.strip()]
+    if not parts:
+        return False
+    return parts[-1].rstrip(_TRAILING_MARKS).endswith("?")
 
 
 # What may follow the name and still count as "he was addressing me".
@@ -171,6 +225,26 @@ def addressed_to_jalen(text: str) -> bool:
 # boundary after someone's name is the most natural thing in the world and
 # it made every name-prefixed command fail.
 _AFTER_NAME = r"[.,!?;:\s]+"
+
+# THE SAME FIX BELONGED ON BOTH SIDES OF THE NAME, and the prefix side was
+# missed. _AFTER_NAME above was widened to this class for the reason its own
+# comment gives; addressed_to_jalen's greeting prefix kept a literal space, so
+# "Hey Jalen, play it" matched and "Hey, Jalen, play it" did not. Verbatim from
+# data/audit.jsonl 2026-08-31T15:43:00Z, session 7b3bcee850cb:
+#
+#   "Hey, Jalen, could you please play Hurtless Dean Lewis?"   -> discarded
+#
+# He said it again twelve seconds later without the comma and it worked.
+#
+# Measured over the real corpora before changing it (853 user utterances, 804
+# jarvis utterances, 97 gate discards): recovers 1 discard, admits 0 new
+# self-echoes, regresses 0 user utterances. The self-echo zero is structural
+# rather than lucky - every pinned negative dies on _NAME's own deny-list
+# lookahead, which a greeting prefix cannot reach.
+#
+# The five greeting WORDS stay frozen. Adding _normalise's so|well|actually
+# would admit third-person sentences about him ("So Jalen is my assistant");
+# tests/test_greeting_punctuation.py pins that shut.
 
 # Commands that END in a word the dangling-preposition guard watches for, but
 # which are complete as they stand — the trailing word is a phrasal-verb

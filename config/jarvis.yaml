@@ -241,6 +241,27 @@ stt:
 conversation:
   follow_up: true                  # C19 keep listening after it answers
   follow_up_timeout_s: 12
+  # ANSWERING A QUESTION JALEN ASKED. A separate, longer window, and the
+  # only state in which a sentence without his name is acted on.
+  #
+  # follow_up_timeout_s above governs the MICROPHONE after every reply.
+  # This one governs the ADDRESS GATE, and only after the 31.5% of replies
+  # that end in a question mark. Until it existed the two disagreed: the
+  # window opened, the answer was recorded and transcribed, and then the
+  # gate dropped it for not starting with his name. 45 real answers went
+  # that way in data/audit.jsonl.
+  #
+  # THIRTY SECONDS, MEASURED. Of the 41 answers that DID land because he
+  # repeated the name, 27 arrived more than twelve seconds after the
+  # question — saying the name again is what you do when the window has
+  # shut. Thirty covers 71% of them; forty-five covers 90%. Thirty is the
+  # conservative end of that range because this is the one window in which
+  # a television in the room is a user.
+  #
+  # The clock starts when Jalen STOPS TALKING, not when the model finished
+  # generating — see Jalen._expect_an_answer. Anchored the other way, a
+  # forty-second answer spends its whole window being read out loud.
+  answer_window_s: 30
   # If a fast endpoint split one instruction in two, the second half opens
   # on a connector ("and go to youtube") and means nothing alone. Within
   # this many seconds it is re-attached to what it continues. Beyond it, a

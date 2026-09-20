@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -35,7 +36,9 @@ from .audio.wake import WakeWord
 from .audit import AuditLog
 from . import conversation, habits, plan as planning
 from . import taint
-from .brain.router import Intent, IntentRouter, addressed_to_jalen
+from .brain.router import (
+    Intent, IntentRouter, addressed_to_jalen, solicits_an_answer,
+)
 from .config import CONFIG, SECRETS
 from . import crashlog
 from . import runtime
@@ -164,6 +167,48 @@ JOB_POLL_FRAMES = 150
 # answer he was not warned about.
 SPOKEN_CHARS_PER_SECOND = 22.4
 
+# Words, for comparing what the microphone heard against what Jalen just
+# said. Apostrophes are kept so "don't" is one word rather than two, and
+# everything else — punctuation, the em dashes the model likes, the stray
+# unicode speech recognition emits — is a separator.
+_SPOKEN_WORD = re.compile(r"[a-z0-9']+")
+
+
+@dataclass(frozen=True)
+class Expectation:
+    """
+    Jalen asked him something and is waiting for the answer.
+
+    THE THING THAT WAS MISSING. There were two gates and only one of them
+    had ever heard of the follow-up window: `follow_up_until` is a local
+    inside run() that decides whether a sound OPENS a microphone window,
+    while should_act_on() decides whether the words that came out of it are
+    acted on — and being a method, it could not see the local. So the window
+    opened, Whisper transcribed, and the address gate dropped the sentence
+    for not starting with his name. 45 real answers went that way in
+    data/audit.jsonl; see tests/test_answering_a_question.py.
+
+    A flag would not have been enough. This carries what the answer has to
+    be checked against:
+
+        question   the exact words Jalen said, so its own voice arriving
+                   back through the microphone can be told from his answer.
+                   The address gate USED to be the echo defence — Jalen's
+                   sentences do not start with his name — and opening a free
+                   window removes it exactly when the echo is loudest.
+        turn_id    which turn asked. A window left over from three turns ago
+                   is identifiable as stale rather than silently answering
+                   for the newest question.
+        expires_at monotonic, and stamped AFTER playback finished rather
+                   than when the model produced the text — otherwise a
+                   forty-second answer spends its whole window being spoken.
+    """
+
+    question: str
+    turn_id: int
+    opened_at: float
+    expires_at: float
+
 
 class Jalen:
     def __init__(self, cfg=CONFIG, secrets=SECRETS, mode: str = "voice") -> None:
@@ -245,6 +290,15 @@ class Jalen:
         # that routes into a queue a waiting coroutine sits on, and nothing
         # is waiting here - the question is asked after the turn is over.
         self._pending_rating: dict | None = None
+        # An ordinary question Jalen asked and is waiting on — see the
+        # Expectation docstring above. Distinct from _awaiting_reply, which
+        # is the ask_user TOOL and has a coroutine sitting on a queue: this
+        # one has nobody waiting, because the turn that asked has finished.
+        self._expecting: Expectation | None = None
+        # The last thing Jalen actually said, kept for two jobs: deciding
+        # whether it was a question, and telling his answer apart from
+        # Jalen's own voice coming back through the microphone.
+        self._last_reply_text = ""
         # The action + destination he named this turn, if he named them.
         self._plan = planning.Plan()
         # Last thing he said, for re-attaching a continuation fragment —
@@ -401,6 +455,7 @@ class Jalen:
             self.transcript.show("Full answer", full)
             self._last_full_text = full
         self.audit.utterance(text, who="jarvis")
+        self._last_reply_text = text
         threading.Thread(target=self.speaker.say, args=(spoken,), daemon=True).start()
 
     def say_blocking(self, text: str) -> None:
@@ -420,6 +475,7 @@ class Jalen:
         if not text:
             return
         self.audit.utterance(text, who="jarvis")
+        self._last_reply_text = text
         self.speaker.say_now(text)
 
     # ------------------------------------------------------------ confirmations
@@ -1073,6 +1129,7 @@ class Jalen:
             self._last_full_text = reply
         stream.close()
         self.audit.utterance(reply, who="jarvis")
+        self._last_reply_text = reply
 
     def process(self, text: str) -> None:
         text = (text or "").strip()
@@ -1342,6 +1399,19 @@ class Jalen:
             if turn_id == self._turn_seq:
                 if self.cfg.get_path("conversation.follow_up", True):
                     follow_up_until = time.monotonic() + follow_up_s
+                # DID IT ASK HIM SOMETHING? Decided here, after
+                # _await_playback() above has returned, so the clock starts
+                # when Jalen stopped talking rather than when the model
+                # stopped generating — see _expect_an_answer.
+                #
+                # Replaced every turn, never accumulated: the newest
+                # question is the only one he can be answering, and a reply
+                # that asks nothing CLOSES the window rather than leaving
+                # the last question's open.
+                if solicits_an_answer(self._last_reply_text):
+                    self._expect_an_answer(self._last_reply_text, turn_id)
+                else:
+                    self._forget_expectation()
                 # Recomputed, not assumed: another turn may still be working,
                 # and telling him it is idle while it is not is the same lie
                 # in the other direction.
@@ -1521,7 +1591,20 @@ class Jalen:
                         self._awaiting_confirmation or self._awaiting_stop
                         or self._awaiting_reply
                     )
-                    if (in_follow_up or awaiting_reply) and self.vad.probability(frame) >= self.vad.threshold:
+                    # A QUESTION JALEN ASKED IS ALSO A LISTENING WINDOW, and
+                    # a longer one than the ordinary follow-up. Two gates
+                    # have to agree for an answer to land: this one opens
+                    # the microphone, and the address gate below decides
+                    # whether the words are his. Without the same condition
+                    # in both, an answer given after twelve seconds is never
+                    # recorded at all and the gate never gets to accept it.
+                    #
+                    # Measured over the answers that DID get through by
+                    # repeating his name: 27 of 41 arrived more than twelve
+                    # seconds after the question. Saying the name again is
+                    # what you do when the window has shut.
+                    if ((in_follow_up or awaiting_reply or self._expectation_open())
+                            and self.vad.probability(frame) >= self.vad.threshold):
                         listening = True
                         wake_initiated = False   # a sound opened this, not him
                         # _refresh_orb, NOT set_state("listening"). This is
@@ -1748,6 +1831,21 @@ class Jalen:
             return True
         if self._pending_rating is not None:
             return True
+        # AN ORDINARY QUESTION HE IS ANSWERING.
+        #
+        # The three flags above are the ask_user tool, the RED confirmation
+        # and the AMBER stop-window: all three are set by code that then
+        # BLOCKS on a queue. None of them is set when Jalen simply ends a
+        # reply with a question, which is 31.5% of everything it says — so
+        # until this branch existed, the docstring above was describing
+        # behaviour the code did not have, and the answer was dropped.
+        #
+        # The echo test is not optional here. This gate WAS the echo
+        # defence, because Jalen's own sentences do not begin with his name,
+        # and a free window opens at the exact moment the microphone is most
+        # likely to be hearing the tail of the question just asked.
+        if self._expectation_open() and not self._sounds_like_its_own_voice(text):
+            return True
         # STILL THE SAME SENTENCE.
         #
         # He gets cut off at the fast endpoint, keeps talking, and the rest
@@ -1786,6 +1884,92 @@ class Jalen:
         if time.monotonic() - self._last_user_at > window:
             return False
         return is_continuation(text) or looks_unfinished(self._last_user_text)
+
+    # --------------------------------------------------- an open question
+    def _expect_an_answer(self, question: str, turn_id: int,
+                          window_s: float | None = None) -> None:
+        """
+        Jalen has just finished ASKING him something. Open the window.
+
+        Called from dispatch_turn AFTER _await_playback(), which is the
+        whole reason twelve seconds ever looked too short: anchored at
+        generation time instead, a forty-second answer would spend its
+        entire window being read out loud, and every answer to it would
+        arrive "late".
+        """
+        if window_s is None:
+            window_s = float(self.cfg.get_path("conversation.answer_window_s", 30))
+        now = time.monotonic()
+        self._expecting = Expectation(
+            question=question, turn_id=turn_id,
+            opened_at=now, expires_at=now + window_s,
+        )
+
+    def _forget_expectation(self) -> None:
+        self._expecting = None
+
+    def _expectation_open(self) -> bool:
+        """True while an answer to Jalen's own question is still welcome."""
+        pending = self._expecting
+        if pending is None:
+            return False
+        if time.monotonic() >= pending.expires_at:
+            # Cleared rather than left to be re-tested forever: a stale
+            # window is a fact about the past, and keeping it costs a
+            # comparison on every microphone frame.
+            self._expecting = None
+            return False
+        return True
+
+    # ------------------------------------------------- is that him, or us?
+    def _sounds_like_its_own_voice(self, text: str) -> bool:
+        """
+        Is this the question coming back through the microphone?
+
+        There is no acoustic echo cancellation on this machine, so the
+        microphone cannot tell Jalen's voice from his. Until now it never
+        had to: a sentence that did not start with his name was refused
+        whoever said it, and Jalen never says its own name. Opening a free
+        window after a question removes that defence at the worst possible
+        moment, so it is replaced here by comparing the WORDS against what
+        was just said.
+
+        TWO RULES, AND THE THREE-WORD FLOOR IS THE IMPORTANT PART.
+
+            contiguous  three or more words appearing in that order inside
+                        the reply. Catches both the whole sentence and any
+                        tail of it.
+            leaky       four or more words of which 85% appear in the reply
+                        at all. Speech recognition of a speaker bleeding
+                        through a microphone drops and mangles words, so an
+                        exact run is not always there to find.
+
+        Under three words, nothing is treated as echo. "ChatGPT or Gemini?"
+        invites the answer "ChatGPT", and a filter eager enough to catch a
+        two-word echo would reject the one answer the question asked for.
+
+        Measured against the real corpus in data/audit.jsonl: 978 of 978
+        simulated echoes caught, and 0 of 853 genuine user utterances
+        wrongly refused.
+        """
+        pending = self._expecting
+        said = pending.question if pending is not None else self._last_reply_text
+        heard_words = _SPOKEN_WORD.findall((text or "").lower())
+        said_words = _SPOKEN_WORD.findall((said or "").lower())
+        if len(heard_words) < 3 or not said_words:
+            return False
+
+        span = len(heard_words)
+        for start in range(len(said_words) - span + 1):
+            if said_words[start:start + span] == heard_words:
+                return True
+
+        if span >= 4:
+            vocabulary = set(said_words)
+            hits = sum(1 for word in heard_words if word in vocabulary)
+            if hits / span >= 0.85:
+                return True
+        return False
 
     # -------------------------------------------------------- what's going on
     def _resume_something(self) -> "str | None":

@@ -58,6 +58,14 @@ class _Gate:
         self._pending_rating = None
         self._last_user_text = ""
         self._last_user_at = 0.0
+        # NOTHING ASKED. Every test in this file is about the gate with no
+        # question open, which is why they can all say "the name is
+        # required" and mean it. The case where Jalen HAS just asked him
+        # something lives in tests/test_answering_a_question.py, and
+        # leaving these unset here would make that the untested state
+        # rather than the deliberate one.
+        self._expecting = None
+        self._last_reply_text = ""
         self.cfg = CONFIG
         # The real list, not a stand-in. The emergency stop is exempt from
         # the gate (see tests/test_stop_and_quit.py), and a fake list here
@@ -66,6 +74,8 @@ class _Gate:
 
     should_act_on = Jalen.should_act_on
     _continues_last_utterance = Jalen._continues_last_utterance
+    _expectation_open = Jalen._expectation_open
+    _sounds_like_its_own_voice = Jalen._sounds_like_its_own_voice
 
 
 # ---------------------------------------------------------------------------
