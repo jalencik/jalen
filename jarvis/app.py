@@ -1942,7 +1942,7 @@ class Jalen:
             return True
         if self._awaiting_confirmation or self._awaiting_stop or self._awaiting_reply:
             return True
-        if self._pending_rating is not None:
+        if self._rating_is_pending():
             return True
         # AN ORDINARY QUESTION HE IS ANSWERING.
         #
@@ -2031,6 +2031,27 @@ class Jalen:
 
     def _forget_expectation(self) -> None:
         self._expecting = None
+
+    def _rating_is_pending(self) -> bool:
+        """
+        Is he still being asked how that went?
+
+        THE EXPIRY HAS TO BE HERE TOO. process() has always aged this out at
+        RATING_EXPIRES_S, but the address gate only ever asked
+        `_pending_rating is not None` - so from the moment Jalen said "how do
+        you rate my work out of ten?" the name was not required again for as
+        long as nobody answered. Five minutes was the documented bound and
+        the gate did not know about it; the real bound was "until somebody
+        next speaks", which is not a bound.
+
+        Read-only on purpose. This runs on the microphone loop and the field
+        belongs to the turn threads; process() and _take_rating do the
+        clearing, and a stale entry expiring twice is not worth a lock.
+        """
+        pending = self._pending_rating
+        if pending is None:
+            return False
+        return time.time() - pending.get("asked_at", 0) <= self.RATING_EXPIRES_S
 
     def _expectation_open(self) -> bool:
         """True while an answer to Jalen's own question is still welcome."""

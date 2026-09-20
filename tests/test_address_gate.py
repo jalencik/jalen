@@ -75,6 +75,8 @@ class _Gate:
     should_act_on = Jalen.should_act_on
     _continues_last_utterance = Jalen._continues_last_utterance
     _expectation_open = Jalen._expectation_open
+    _rating_is_pending = Jalen._rating_is_pending
+    RATING_EXPIRES_S = Jalen.RATING_EXPIRES_S
     _sounds_like_its_own_voice = Jalen._sounds_like_its_own_voice
 
 
@@ -244,3 +246,35 @@ def test_rejection_is_silent():
         "the rejection should still be recorded, so 'it ignored me' is "
         "answerable from the audit log rather than a guess"
     )
+
+
+# ---------------------------------------------------------------------------
+# THE RATING QUESTION, WHICH HAD NO CLOCK ON THIS SIDE
+# ---------------------------------------------------------------------------
+def test_a_pending_rating_stops_being_a_free_pass_after_it_expires():
+    """
+    process() has always aged a pending rating out at RATING_EXPIRES_S. This
+    gate only ever asked `_pending_rating is not None`, so from the moment
+    Jalen said "how do you rate my work out of ten?" the name was not
+    required again for as long as nobody answered. Five minutes was the
+    documented bound; the real bound was "until somebody next speaks".
+    """
+    import time as _time
+
+    gate = _Gate()
+    gate._pending_rating = {"about": "x", "did": "", "asked_at": _time.time()}
+    assert gate.should_act_on("eight out of ten", wake_initiated=False)
+
+    gate._pending_rating["asked_at"] = _time.time() - (Jalen.RATING_EXPIRES_S + 1)
+    assert not gate.should_act_on("eight out of ten", wake_initiated=False), (
+        "an unanswered rating question still waives his name long after it "
+        "expired"
+    )
+    assert not gate.should_act_on("so anyway the weather is nice", wake_initiated=False)
+
+
+def test_a_rating_with_no_timestamp_is_treated_as_expired():
+    """Belt and braces: a malformed entry must fail closed, not open."""
+    gate = _Gate()
+    gate._pending_rating = {"about": "x", "did": ""}
+    assert not gate.should_act_on("eight out of ten", wake_initiated=False)

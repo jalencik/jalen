@@ -57,6 +57,8 @@ class _Gate:
     should_act_on = Jalen.should_act_on
     _continues_last_utterance = Jalen._continues_last_utterance
     _expectation_open = Jalen._expectation_open
+    _rating_is_pending = Jalen._rating_is_pending
+    RATING_EXPIRES_S = Jalen.RATING_EXPIRES_S
     _sounds_like_its_own_voice = Jalen._sounds_like_its_own_voice
 
 
