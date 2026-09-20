@@ -887,7 +887,33 @@ class Jalen:
 
     async def handle_with_brain(self, text: str, on_text=None) -> str:
         if self.brain is None:
-            await self._start_brain()
+            try:
+                await self._start_brain()
+            except Exception as exc:
+                # A brain that cannot START is a different failure from one
+                # that breaks mid-answer, and it used to be the worst kind:
+                # this call sat OUTSIDE the try below, so the exception flew
+                # past the handler that turns a brain error into a spoken
+                # sentence, past process(), and into dispatch_turn — which
+                # records the task FAILED, re-raises into a daemon thread
+                # nobody joins, and says nothing. The traceback reached
+                # data/crash.log and the room stayed silent. Observed for
+                # real on 20 Sept: a claude-agent-sdk upgrade installed a
+                # source-built wheel with no bundled claude.exe, the SDK fell
+                # through to npm's claude.CMD and refused to spawn a batch
+                # script, and every turn produced nothing at all.
+                #
+                # It also must not say "try again". The causes here are
+                # configuration — binary missing, unauthenticated,
+                # unspawnable — so repeating the question loops forever.
+                # Point at the diagnostic instead.
+                self.audit.error("brain-start", exc)
+                self.brain = None
+                return (
+                    f"I couldn't start my brain — {type(exc).__name__}. "
+                    "That's a setup problem rather than a bad moment, so "
+                    "asking again won't help: run jalen check."
+                )
         try:
             return await self.brain.ask(text, on_text=on_text)
         except Exception as exc:
