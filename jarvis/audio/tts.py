@@ -57,6 +57,35 @@ def clean_for_speech(text: str) -> str:
     return text.strip()
 
 
+def _import_edge_tts():
+    """
+    The 2.6-second import, in ONE place so warmup and synthesis cannot
+    disagree about whether it has been paid.
+
+    Measured cold, three fresh interpreters on this machine: 2919ms, 2637ms,
+    2181ms. It used to live inside _synthesise and nowhere else, and
+    Speaker.warmup() reaches _synthesise only through
+
+        if not already_warm:
+            asyncio.run(self._synthesise("ready"))
+
+    so on every run after the first - when data/tts_cache holds 260 files
+    against a threshold of 8 - warmup finished without ever importing it. The
+    remaining warmup work renders the common phrases, and those all come off
+    the disk, so they did not import it either.
+
+    Two and a half seconds were therefore moved off startup, where nobody is
+    waiting, and onto the first sentence Jalen says that is not a canned
+    phrase: the first real answer of the session, with him sitting in the
+    silence. Eliminating exactly that is what prewarm() is for.
+
+    Python caches the module, so calling this twice costs a dict lookup.
+    """
+    import edge_tts
+
+    return edge_tts
+
+
 class Speaker:
     def __init__(self, cfg) -> None:
         self.voice = cfg.get_path("tts.voice", "en-US-AndrewNeural")
@@ -141,7 +170,7 @@ class Speaker:
 
     # ----------------------------------------------------------------- synth
     async def _synthesise(self, text: str) -> bytes:
-        import edge_tts
+        edge_tts = _import_edge_tts()
 
         last: Exception | None = None
         for _ in range(max(1, self.retries)):
@@ -366,6 +395,18 @@ class Speaker:
         try:
             import av  # noqa: F401  — import cost paid here, not mid-reply
         except ImportError:
+            pass
+        # UNCONDITIONAL, unlike the probe below. The short-circuit is about a
+        # network round-trip there is no point making when the first thing
+        # Jalen says comes off the disk; the import is paid in-process
+        # whatever the cache holds, and skipping it moved 2.6 seconds onto
+        # his first real answer. See _import_edge_tts.
+        try:
+            _import_edge_tts()
+        except Exception:
+            # Warmup is best-effort by definition. A missing or broken
+            # edge-tts must surface on the real call, with its real error,
+            # rather than taking startup down.
             pass
         # The connection probe is SKIPPED when the disk cache is already
         # populated. It exists to pay edge-tts's cold-connection cost up
