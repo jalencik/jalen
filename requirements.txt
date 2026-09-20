@@ -26,14 +26,28 @@ edge-tts>=7.2.8              # a sudden 403 means "upgrade me", not "service is 
 av>=13.0.0                   # decodes edge-tts mp3 without a system ffmpeg
 
 # --- brain ---
-# Ceiling is deliberate. This wheel BUNDLES its own claude.exe and the SDK
-# resolves that bundled copy before PATH, so this line decides which Claude
-# Code the brain actually runs — not whatever npm installed. Tested on
-# 0.2.140 / bundled CLI 2.1.235. tests/test_agent_sdk_configuration.py pins
-# four ClaudeAgentOptions fields as safety decisions (tools, setting_sources,
+# BOTH constraints below are load-bearing, and the --only-binary one was
+# learned the hard way on 20 Sept 2026.
+#
+# This package ships the Claude Code CLI INSIDE the wheel, and the SDK
+# resolves that bundled copy before PATH — so this line, not npm, decides
+# which Claude Code the brain runs. But only the PLATFORM wheels carry the
+# binary (claude_agent_sdk-0.2.156-py3-none-win_amd64.whl, ~105 MB). If no
+# wheel matches, pip silently falls back to the sdist and builds a 152 KB
+# py3-none-any wheel with NO CLI in it. That happened: 0.2.157 publishes no
+# win_amd64 wheel, the upgrade "succeeded", _bundled/claude.exe vanished, the
+# SDK fell through to npm's claude.CMD and refused to spawn a batch script,
+# and the brain stopped answering. A version ceiling cannot express "must
+# arrive with a binary inside"; --only-binary can, and turns that silent
+# breakage into an honest "no matching distribution".
+#
+# The ceiling is separate: tests/test_agent_sdk_configuration.py pins four
+# ClaudeAgentOptions fields as safety decisions (tools, setting_sources,
 # skills, permission_mode) and tests/test_cli_path_override.py depends on
-# bundled-before-PATH resolution; a 0.3 could rename or re-default any of
-# them. Upgrade on purpose, then run those two files.
+# bundled-before-PATH resolution. A 0.3 could rename or re-default any of
+# them. Upgrade on purpose, then run those two files plus
+# tests/test_brain_start_failure_is_spoken.py.
+--only-binary claude-agent-sdk
 claude-agent-sdk>=0.2.140,<0.3.0
 
 # --- desktop control ---
@@ -51,6 +65,14 @@ google-api-python-client>=2.198.0
 google-auth-oauthlib>=1.4.0
 google-auth-httplib2>=0.4.1
 google-genai>=2.18.1
+# Two of the four delegation targets, not one. agents.py speaks the
+# OpenAI-compatible API, so this single package serves BOTH ChatGPT
+# (platform.openai.com) and Hermes/Nous (openrouter.ai) — see HERMES_BASE_URL.
+# It was missing from this file entirely until 20 Sept 2026 while the code that
+# needs it was complete and shipping; it happened to be installed on the
+# author's machine, so nothing ever failed there. The import is function-local,
+# so a rebuilt venv would have lost both delegates silently until someone asked.
+openai>=1.54
 PyGithub>=2.9.1
 notion-client>=3.1.0
 httpx>=0.27.0

@@ -50,6 +50,31 @@ def test_dependencies_come_from_the_one_list():
     ]
 
 
+def test_the_delegation_libraries_are_declared_dependencies():
+    """
+    jarvis/tools/agents.py imports `openai` (Hermes and ChatGPT) and
+    `google.genai` (Gemini) INSIDE the call, per this repo's function-local
+    import convention. That convention keeps startup cheap, and it also means a
+    missing package is completely invisible until the moment someone actually
+    asks Jalen to delegate -- at which point it surfaces as
+    "The openai package isn't installed", one turn too late.
+
+    Found 20 September 2026: `openai` was absent from requirements.txt
+    altogether while agents.py had a complete, working Hermes delegate and
+    scripts/readiness.py reported ChatGPT as "the code and library are ready".
+    It was installed on the author's machine by accident, so nothing failed
+    there and nothing would fail in CI either -- there is no CI. A rebuilt venv
+    would have silently lost two of the four delegation targets.
+    """
+    core = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+
+    assert "openai" in core, (
+        "agents.py imports openai for the Hermes and ChatGPT delegates; "
+        "a fresh venv without it loses both with a runtime message"
+    )
+    assert "google-genai" in core, "agents.py imports google.genai for Gemini"
+
+
 def test_the_camera_dependency_is_gone_entirely():
     """
     It used to be optional. Now there is no camera code to depend on it, so
