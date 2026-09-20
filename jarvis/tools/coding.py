@@ -45,10 +45,56 @@ from .launcher import find_files
 # npm's global bin is not always on the PATH that a GUI-launched Python
 # inherits, so look there explicitly before giving up.
 _NPM_BIN = Path(os.environ.get("APPDATA", "")) / "npm"
-_CANDIDATES = ["claude.cmd", "claude.exe", "claude"]
+_CANDIDATES = ["claude.exe", "claude", "claude.cmd"]
+
+# THE SAME BINARY THE BRAIN ITSELF RUNS. claude-agent-sdk ships the CLI
+# inside the wheel and resolves it before PATH, which is why CLAUDE.md says
+# to verify auth against this path rather than against `where claude`. It is
+# a real executable, so it is the answer to the problem below whenever the
+# SDK is installed - which is always, since the brain will not start without
+# it.
+_BUNDLED_CLI = (
+    Path(__file__).resolve().parent.parent.parent
+    / ".venv" / "Lib" / "site-packages" / "claude_agent_sdk"
+    / "_bundled" / "claude.exe"
+)
+
+_BATCH_SUFFIXES = (".cmd", ".bat")
+
+
+def _is_batch(path: str) -> bool:
+    return str(path).lower().endswith(_BATCH_SUFFIXES)
 
 
 def _claude_cli() -> str | None:
+    """
+    A real executable if one exists, and only then the npm batch shim.
+
+    THE ORDER IS THE FIX. npm's Windows install is a claude.CMD, Windows can
+    only run a .CMD through cmd.exe, and cmd.exe owns the argument before
+    the script ever sees it - it truncates at the first newline, flattens an
+    em dash, strips accented characters to whatever the console codepage
+    carries, and expands %VAR%. The brief handed to Claude Code is a
+    multi-paragraph prompt written by the model, so every line after the
+    first was being discarded in silence.
+
+    jarvis/brain/agent.py has refused a .cmd outright since the CLI-path
+    work ("a batch script the Agent SDK refuses to spawn"). This module
+    never got the message: _CANDIDATES used to list claude.cmd FIRST, and
+    shutil.which finds it on PATH ahead of everything.
+    """
+    for name in ("claude.exe", "claude"):
+        found = shutil.which(name)
+        if found and not _is_batch(found):
+            return found
+    if _BUNDLED_CLI.is_file():
+        return str(_BUNDLED_CLI)
+    for name in _CANDIDATES:
+        candidate = _NPM_BIN / name
+        if candidate.is_file() and not _is_batch(candidate):
+            return str(candidate)
+    # Nothing but a shim. Still returned - "I can't find the CLI" would be a
+    # worse answer than a working launch with the brief delivered by file.
     found = shutil.which("claude")
     if found:
         return found
@@ -57,6 +103,36 @@ def _claude_cli() -> str | None:
         if candidate.is_file():
             return str(candidate)
     return None
+
+
+def _brief_on_disk(text: str) -> Path | None:
+    """
+    Park the brief in a UTF-8 file and return where.
+
+    For the machine that has only the npm shim. cmd.exe cannot carry a
+    newline in an argument at all, so no amount of quoting rescues the
+    payload - the brief has to travel some other way, and the argument
+    becomes a short ASCII sentence naming the file. That sentence survives
+    cmd.exe because there is nothing left in it to mangle.
+
+    The system temp directory, never the working folder: Claude Code is
+    about to start work in a repository, and a scratch file dropped into it
+    is one more thing for him to find in a diff.
+    """
+    import tempfile
+    import uuid
+
+    try:
+        target = Path(tempfile.gettempdir()) / f"jalen-brief-{uuid.uuid4().hex[:8]}.md"
+        if not str(target).isascii():
+            # A non-ASCII temp path would be destroyed on the way in just
+            # like the brief was. Better to say so than to send a path that
+            # will not resolve.
+            return None
+        target.write_text(text, encoding="utf-8")
+        return target
+    except OSError:
+        return None
 
 
 def _resolve_folder(name: str) -> tuple[str | None, str | None]:
@@ -124,6 +200,22 @@ def ask_claude_code(prompt: str, folder: str = "", agent: str = "") -> str:
     slash = (agent or "").strip().lstrip("/")
     initial = f"/{slash} {text}" if slash else text
 
+    # THE SHIM ROUTE. Only when no real executable exists on this machine -
+    # see _claude_cli. The brief goes to a file and the argument becomes
+    # something cmd.exe cannot damage.
+    brief = None
+    if _is_batch(cli):
+        brief = _brief_on_disk(initial)
+        if brief is None:
+            return (
+                "Claude Code is only installed here as an npm batch shim, "
+                "which cannot carry a multi-line brief, and I couldn't park "
+                "the brief in a file either. Install the native binary with "
+                "irm https://claude.ai/install.ps1 | iex and I'll hand it "
+                "over intact."
+            )
+        initial = f"Read the brief at {brief} and carry it out."
+
     # A NEW console window, so Claude Code gets a real terminal to draw its
     # interface in and keeps running after Jalen's call returns. Without
     # CREATE_NEW_CONSOLE it inherits Jalen's (which has no visible window
@@ -141,8 +233,16 @@ def ask_claude_code(prompt: str, folder: str = "", agent: str = "") -> str:
 
     where = Path(path).name or path
     what = f" using {slash}" if slash else ""
+    # SAY WHEN THE DEGRADED ROUTE WAS USED. Silence about it reads as
+    # success, and it is also the only prompt he will get to install the
+    # native binary.
+    via = (
+        f" I sent it as a brief on disk, because Claude Code here is an npm "
+        f"batch shim that would cut the prompt at the first line."
+        if brief is not None else ""
+    )
     return (
-        f"Claude Code is starting in {where}{what}, working on: {text}"
+        f"Claude Code is starting in {where}{what}, working on: {text}{via}"
     )
 
 

@@ -297,12 +297,7 @@ def test_a_missing_cli_is_named_not_swallowed(monkeypatch):
     assert "npm install" in out
 
 
-def test_the_prompt_is_passed_as_an_argument_never_through_a_shell(monkeypatch):
-    """
-    He dictates, so the prompt WILL contain apostrophes and quotes. As an
-    argv entry the shell never parses it; built into a command string, "fix
-    the user's & test" would break the command or be interpreted by it.
-    """
+def _capture_launch(monkeypatch, cli):
     from jarvis.tools import coding
 
     captured = {}
@@ -315,9 +310,36 @@ def test_the_prompt_is_passed_as_an_argument_never_through_a_shell(monkeypatch):
             pid = 1
         return _P()
 
-    monkeypatch.setattr(coding, "_claude_cli", lambda: "C:/npm/claude.cmd")
+    monkeypatch.setattr(coding, "_claude_cli", lambda: cli)
     monkeypatch.setattr(coding, "_resolve_folder", lambda name: ("C:/proj", None))
     monkeypatch.setattr(coding.subprocess, "Popen", _fake_popen)
+    return coding, captured
+
+
+def test_the_prompt_is_passed_as_an_argument_never_through_a_shell(monkeypatch):
+    """
+    He dictates, so the prompt WILL contain apostrophes and quotes. As an
+    argv entry the shell never parses it; built into a command string, "fix
+    the user's & test" would break the command or be interpreted by it.
+
+    THIS USED TO PIN C:/npm/claude.cmd, AND THE GUARANTEE DOES NOT HOLD
+    THERE. Windows cannot run a .CMD without cmd.exe, so the argument is
+    parsed however Popen was called. Measured by sending this exact string
+    through a real .cmd:
+
+        sent  fix the user's "broken" test & the flag --force
+        got   "fix the user's \\"broken\\" test & the flag --force"
+
+    - outer quotes added, inner quotes backslash-escaped. And a newline
+    truncates the rest of the brief entirely. The old test passed only
+    because Popen was mocked, so cmd.exe never ran: it was asserting what
+    Python handed over, not what Claude Code received.
+
+    So the verbatim guarantee is asserted where it is actually true - a real
+    executable - and the shim route is covered separately in
+    tests/test_handoff_payload_survives.py, where the brief travels by file.
+    """
+    coding, captured = _capture_launch(monkeypatch, "C:/Program Files/claude.exe")
 
     tricky = "fix the user's \"broken\" test & the flag --force"
     coding.ask_claude_code(tricky, folder="proj")
@@ -326,6 +348,24 @@ def test_the_prompt_is_passed_as_an_argument_never_through_a_shell(monkeypatch):
     assert captured["argv"][1] == tricky, "the prompt was altered on the way through"
     assert captured["kwargs"]["cwd"] == "C:/proj"
     assert "shell" not in captured["kwargs"] or captured["kwargs"]["shell"] is False
+
+
+def test_even_the_shim_route_is_argv_and_never_a_shell_string(monkeypatch):
+    """
+    The half of the original guarantee that still applies everywhere. What
+    changes on a batch shim is WHAT is in argv[1], never that argv is a
+    list or that shell stays off.
+    """
+    coding, captured = _capture_launch(monkeypatch, "C:/npm/claude.cmd")
+    coding.ask_claude_code("fix the user's \"broken\" test & the flag --force",
+                           folder="proj")
+
+    assert isinstance(captured["argv"], list)
+    assert "shell" not in captured["kwargs"] or captured["kwargs"]["shell"] is False
+    assert captured["kwargs"]["cwd"] == "C:/proj"
+    assert captured["argv"][1].isascii(), (
+        "the shim route still carries what cmd.exe destroys"
+    )
 
 
 def test_an_agent_becomes_a_slash_command(monkeypatch):
