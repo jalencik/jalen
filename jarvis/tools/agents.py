@@ -92,6 +92,41 @@ GEMINI_MODEL = _gemini_model()
 OPENAI_MODEL = "gpt-4o-mini"
 
 
+def _delegate_max_tokens() -> int:
+    """
+    How long a delegated answer may be. Read every call, not frozen at import,
+    so "Jalen, reload config" can eventually mean something here.
+
+    The first real Hermes call ever made from this repo failed on this, 20 Sept
+    2026:
+
+        402 - "This request requires more credits, or fewer max_tokens. You
+               requested up to 117952 tokens, but can only afford 13333."
+
+    The key was fine; 401 is a bad key and 402 means the account was identified
+    and its balance checked. We were sending model and messages only, so the
+    endpoint defaulted max_tokens to the model's whole context window and the
+    provider pre-authorised against all of it. On a pay-as-you-go balance that
+    refuses before generating a single token.
+
+    It is the wrong request even with unlimited credit. Jalen SPEAKS these
+    answers, and at this repo's own SPOKEN_CHARS_PER_SECOND = 22.4, 117,952
+    tokens is roughly 470,000 characters -- about six hours of continuous
+    speech, asked for on behalf of a one-line question.
+
+    4,000 is ~16,000 characters, ~12 minutes spoken: far past anything
+    summarise_if_long would let through, ample for the written drafts
+    delegate_task also produces, and a third of what this account could afford.
+    """
+    try:
+        from ..config import CONFIG
+
+        value = int(CONFIG.get_path("brain.delegate_max_tokens", 0) or 0)
+        return value if value > 0 else 4000
+    except Exception:  # noqa: BLE001
+        return 4000
+
+
 # ---------------------------------------------------------------------------
 # The standard
 # ---------------------------------------------------------------------------
@@ -270,6 +305,9 @@ def _ask_chatgpt(messages: list[dict]) -> tuple[str, str | None]:
         client = OpenAI(api_key=key)
         result = client.chat.completions.create(
             model=OPENAI_MODEL, messages=messages,
+            # Unbounded, this pre-authorises the model's whole context window.
+            # See _delegate_max_tokens() for the live 402 that proved it.
+            max_tokens=_delegate_max_tokens(),
         )
         return (result.choices[0].message.content or "").strip(), None
     except ImportError:
@@ -309,6 +347,9 @@ def _ask_hermes(messages: list[dict]) -> tuple[str, str | None]:
         client = OpenAI(api_key=key, base_url=HERMES_BASE_URL)
         result = client.chat.completions.create(
             model=HERMES_MODEL, messages=messages,
+            # This is the call that produced the 402 on 20 Sept 2026, asking for
+            # up to 117,952 tokens against a 13,333 balance.
+            max_tokens=_delegate_max_tokens(),
         )
         return (result.choices[0].message.content or "").strip(), None
     except ImportError:

@@ -336,6 +336,21 @@ brain:
   # The alias tracks whatever Google currently ships.
   gemini_model: "gemini-flash-latest"
 
+  # How long a DELEGATED answer may be (ask Hermes / ask ChatGPT). Measured,
+  # because leaving it unset is not "no limit" — it is the model's whole
+  # context window, and the provider pre-authorises against all of it. The
+  # first real Hermes call from this repo, 2026-09-20:
+  #   402 "You requested up to 117952 tokens, but can only afford 13333"
+  # The key was correct (401 is a bad key); the request was not.
+  # It is also the wrong size for a thing that gets SPOKEN. At this repo's own
+  # 22.4 chars/second, 117,952 tokens is ~470,000 characters — about six hours
+  # of continuous speech, for a one-line question.
+  # 4000 ≈ 16,000 chars ≈ 12 minutes spoken: past anything summarise_if_long
+  # lets through, ample for a written draft, a third of what was affordable.
+  # NOTE: gemini is deliberately NOT bounded by this yet — it is working and
+  # the defect has never bitten there, so it stays unchanged until measured.
+  delegate_max_tokens: 4000
+
 # ---------------------------------------------------------------------------
 # SAFETY  (spec F45-F52)  — full tier lists live in config/safety.yaml
 # ---------------------------------------------------------------------------
