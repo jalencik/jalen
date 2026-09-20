@@ -37,7 +37,10 @@ class Transcriber:
         self.groq_model = cfg.get_path("stt.groq_model", "whisper-large-v3-turbo")
         self.sample_rate = int(cfg.get_path("audio.sample_rate", 16000))
         self.groq_timeout_s = float(cfg.get_path("stt.groq_timeout_s", 8))
+        self.groq_keepalive_s = float(cfg.get_path("stt.groq_keepalive_s", 300))
+        self.groq_max_retries = int(cfg.get_path("stt.groq_max_retries", 1))
         self._groq = None
+        self._groq_http = None
         self._moonshine = None
         self.last_engine = ""
         # Why the primary was skipped, when it was. Empty on a clean
@@ -46,11 +49,72 @@ class Transcriber:
 
     # ------------------------------------------------------------------ groq
     def _groq_client(self):
+        """
+        One client, and one CONNECTION, for the life of the session.
+
+        The client was always reused. The connection underneath it was not,
+        and nothing in this file said so. From the installed package:
+
+            groq/_constants.py:11
+            DEFAULT_CONNECTION_LIMITS = httpx.Limits(
+                max_connections=100, max_keepalive_connections=20)
+
+        keepalive_expiry is absent, so httpx's own default of 5.0 seconds
+        applies and a pooled connection idle longer than that is closed.
+        Voice turns are never five seconds apart - the wait is seconds,
+        Jalen then talks for a median of 14.8, and he has to think of the
+        next thing to say. So the pool was empty on essentially every turn.
+
+        MEASURED against api.groq.com, six samples, no API call and no
+        quota: TCP connect 142ms and TLS 159ms at the median, 301ms
+        together, worst 951ms. DNS is not the cost - 231ms cold, 1ms warm.
+        That is what every turn was paying to rebuild something it already
+        had.
+
+        AND THE RETRIES, which are the other half of the same story.
+        groq.Groq defaults max_retries to 2, and stt.groq_timeout_s is a
+        PER-ATTEMPT read timeout - so the eight seconds documented below as
+        the bound that "MAKES the fallback real" was really three attempts
+        plus backoff, about thirty seconds, against the 36-second stall it
+        was written to fix. One retry, not two, and not zero: a connection
+        held for minutes can be closed at the far end, and with no retry at
+        all that first failed write is a silent drop to the offline model -
+        a worse outcome than the 301ms being saved.
+        """
         if self._groq is None:
+            import httpx
             from groq import Groq
 
-            self._groq = Groq(api_key=self.secrets.require("groq_api_key"))
+            self._groq_http = httpx.Client(
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                    keepalive_expiry=self.groq_keepalive_s,
+                ),
+            )
+            self._groq = Groq(
+                api_key=self.secrets.require("groq_api_key"),
+                max_retries=self.groq_max_retries,
+                http_client=self._groq_http,
+            )
         return self._groq
+
+    def close(self) -> None:
+        """
+        Release the connection pool. Idempotent.
+
+        Called from Jalen.shutdown, where every teardown step runs in its
+        own try/except - so a second call must not be the thing that
+        raises. The client is dropped with it, because a Groq client whose
+        transport is closed fails every later call and would send every
+        remaining turn to the offline model in silence.
+        """
+        http, self._groq_http, self._groq = self._groq_http, None, None
+        if http is not None:
+            try:
+                http.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _via_groq(self, audio: np.ndarray) -> str:
         """

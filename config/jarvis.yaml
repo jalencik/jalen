@@ -236,7 +236,38 @@ stt:
   # 214 real turns, transcription takes 1.6s at the median and 4.4s at the
   # 95th percentile. 8s is comfortably clear of a healthy call and cuts a
   # stalled one off long before he starts wondering if it heard him.
+  # PER ATTEMPT, not a budget — and that distinction cost most of the fix
+  # above. groq.Groq defaults max_retries to 2, so "8 seconds" was really
+  # three attempts plus backoff, around thirty, against the 36-second stall
+  # this was written to cut off.
   groq_timeout_s: 8
+
+  # How many times the SDK may retry before the offline model gets its turn.
+  #
+  # ONE, and neither two nor zero. Two is the SDK default and makes the
+  # bound above ~30s. Zero would make a single stale socket an immediate,
+  # silent drop to moonshine — worse than the 301ms the keepalive below is
+  # saving. One gives a transient failure its second chance and bounds the
+  # worst case at 2 x groq_timeout_s.
+  groq_max_retries: 1
+
+  # HOW LONG A POOLED CONNECTION IS KEPT.
+  #
+  # groq/_constants.py builds httpx.Limits without keepalive_expiry, so
+  # httpx's own default of 5.0s applied — shorter than any pause in a real
+  # conversation, so the pool was empty on essentially every turn and each
+  # one rebuilt the connection from scratch.
+  #
+  # MEASURED to api.groq.com, six samples, no API call and no quota spent:
+  #   DNS           231ms cold, 1ms warm     (so it is not DNS)
+  #   TCP connect   p50 142ms
+  #   TLS           p50 159ms
+  #   TOTAL         p50 301ms, min 241, max 951
+  #
+  # Five minutes covers the gap between turns in a real session without
+  # holding a socket open all night; groq_max_retries above is what makes a
+  # connection the far end closed a retry rather than a fallback.
+  groq_keepalive_s: 300
 
 conversation:
   follow_up: true                  # C19 keep listening after it answers

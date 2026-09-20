@@ -2357,6 +2357,12 @@ class Jalen:
                              detail={"folder": str(job.get("folder", ""))})
             self.say(line)
 
+    def _close_stt(self) -> None:
+        """Release the transcriber's connection pool, if it ever built one."""
+        transcriber = getattr(self, "stt", None)
+        if transcriber is not None:
+            transcriber.close()
+
     def shutdown(self, reason: str = "") -> None:
         """
         Tear down, recording WHY first and surviving a failure in any step.
@@ -2387,6 +2393,17 @@ class Jalen:
             ("speaker", self.speaker.stop),
             ("orb", self.orb.stop),
             ("mic", self.mic.stop),
+            # The transcriber now owns an httpx connection pool, held open
+            # for five minutes at a time so a voice turn stops paying 301ms
+            # to rebuild it. What we open, we close.
+            #
+            # Via a method, not self.stt.close: the tuple is built BEFORE
+            # the loop's try/except, so an attribute that does not exist
+            # yet raises out of shutdown entirely rather than being caught
+            # and logged like every other failing step. Shutdown has to
+            # survive a half-constructed Jalen — that is the whole point of
+            # tests/test_crash_diagnosis.py.
+            ("stt", self._close_stt),
         ):
             try:
                 step()
