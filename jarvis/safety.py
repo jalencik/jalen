@@ -64,6 +64,32 @@ _LOOKS_LIKE_A_PATH = re.compile(
 _WEB_URL = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]+://")
 
 
+# Argument names that carry a web destination - every one in TOOL_SPECS:
+# open_url/web_read/site_permission(url), search_site/fill_login_field
+# (site), and browse_to(url).
+_SITEISH_KEYS = ("url", "site", "host", "domain", "link", "href")
+
+# A value that IS a web address whatever its argument is called, e.g.
+# remember_alias(target="https://paypal.com"). Whole value, no spaces - a
+# sentence containing a link is prose.
+_WHOLE_URL = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]+://\S+$")
+
+
+def _hostname(address: str) -> str:
+    """
+    The host a browser would actually go to, lowercased, trailing dot gone:
+    https://someone:pw@PayPal.com.:443/x -> paypal.com. A bare "payme.uz"
+    is a host too. Raises ValueError for an address urlsplit cannot read.
+    """
+    from urllib.parse import urlsplit
+
+    s = address.strip()
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", s):
+        s = "//" + s
+    host = urlsplit(s).hostname or ""
+    return host.rstrip(".").lower()
+
+
 def _expanded_path(raw: str) -> str:
     """
     The argument as the tool will read it, before it is made absolute: the
@@ -218,11 +244,60 @@ class SafetyEngine:
         for app in self._never_apps:
             if app in blob:
                 return f"targets a password manager ({app})"
-        for domain in self._never_domains:
-            pattern = domain.lower().replace("*", "")
-            if pattern and pattern in blob:
-                return f"targets a protected domain ({domain})"
+        # Protected sites are matched on the HOSTNAME of a destination, not
+        # as a substring of every argument joined together. The substring
+        # turned "*.paypal.com" into ".paypal.com", so the bare paypal.com
+        # people actually type was never protected - while a message that
+        # merely SAID "I paid with click.uz" was refused. Found by the
+        # adversarial review of browse_to, which lets his signed-in Chrome
+        # go anywhere and makes this list the only hard stop left.
+        for key, value in (args or {}).items():
+            if not isinstance(value, str) or not value.strip():
+                continue
+            v = value.strip()
+            if not (any(hint in key.lower() for hint in _SITEISH_KEYS)
+                    or _WHOLE_URL.match(v)):
+                continue
+            try:
+                host = _hostname(v)
+            except ValueError:
+                return "a web address I couldn't check safely, so I won't open it"
+            if pattern := self._protected_pattern(host):
+                return f"targets a protected domain ({pattern})"
         return None
+
+    def _protected_pattern(self, host: str) -> str | None:
+        """The never-touch domain pattern this host falls under, if any."""
+        if not host:
+            return None
+        for domain in self._never_domains:
+            pattern = str(domain).strip().lower().rstrip(".")
+            if not pattern:
+                continue
+            if any(ch in pattern for ch in "*?["):
+                # "*.paypal.com" means paypal.com AND its subdomains; a glob
+                # alone would only match the subdomains.
+                if fnmatch.fnmatchcase(host, pattern) or (
+                        pattern.startswith("*.")
+                        and fnmatch.fnmatchcase(host, pattern[2:])):
+                    return domain
+            elif host == pattern or host.endswith("." + pattern):
+                return domain
+        return None
+
+    def protected_domain(self, address: str) -> str | None:
+        """
+        Is this web address on the never-touch domain list? For callers that
+        learn a destination AFTER classify ran - browse_to re-checks where a
+        redirect actually landed with this. Returns the matching pattern, or
+        None. An address that cannot be parsed counts as protected: a caller
+        asking "may I stay here?" gets no from something it cannot read.
+        """
+        try:
+            host = _hostname(address or "")
+        except ValueError:
+            return "an address I couldn't read"
+        return self._protected_pattern(host)
 
     def scan_for_injection(self, text: str) -> list[str]:
         """Return the suspicious phrases found in content Jalen has READ."""
