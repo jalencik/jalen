@@ -603,6 +603,13 @@ class Brain:
             "Never answer a research question from memory alone and never "
             "call search_site and then describe what is 'probably' on the "
             "page.\n"
+            "Three ways onto the web, not interchangeable: open_url shows HIM "
+            "a page in his everyday browser; web_read fetches a page's text "
+            "for YOU; browse_to sends your own signed-in Chrome there to DO "
+            "something on it - inspect_form, then fill and submit. "
+            "read_browser_page reads that Chrome's page, and like any page "
+            "you read it stops every fill, submit and browse_to until he "
+            "speaks again, so never read in the middle of a form.\n"
         )
         base += (
             "\n\nWRITING AS HIM. Anything that goes out under his name — an "

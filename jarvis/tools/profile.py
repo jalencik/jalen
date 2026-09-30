@@ -314,7 +314,7 @@ def fill_form_from_profile() -> str:
     or a payment field (his by rule); those are named back, not skipped
     silently, because a silent skip reads as "done" on a form that is not.
     """
-    from .webagent import BrowserUnavailable, _Session
+    from .webagent import BrowserUnavailable, _never_touch, _Session
 
     profile = load_profile()
     if not profile:
@@ -322,12 +322,21 @@ def fill_form_from_profile() -> str:
                 "data/personal_info/profile.md, fill in what you're happy "
                 "for me to use, and say this again.")
 
+    def job(page):
+        return (_never_touch(page.url, "fill your details in")
+                or fill_page(page, profile))
+
+    # tab="same": "fill this in" means the form he is looking at. If he
+    # closed that tab, the session would hand this job whichever tab is still
+    # open - and his details would go to a site nobody chose.
     try:
-        result = _Session.get().do(lambda page: fill_page(page, profile))
+        result = _Session.get().do(job, tab="same")
     except BrowserUnavailable as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"I couldn't read the form: {type(exc).__name__}: {exc}"
+    if isinstance(result, str):
+        return result
 
     parts = []
     if result["filled"]:

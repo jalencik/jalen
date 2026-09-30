@@ -189,9 +189,12 @@ def fill_login_code(service: str = "", within_minutes: float = 10.0) -> str:
     if not code:
         return reason
 
-    from .webagent import BrowserUnavailable, _Session, _first_visible
+    from .webagent import BrowserUnavailable, _Session, _first_visible, _never_touch
 
     def job(page):
+        refusal = _never_touch(page.url, "type a code")
+        if refusal:
+            return "REFUSED:" + refusal
         box = _first_visible(page, _OTP_FIELD, timeout=5.0)
         if box is None:
             return "NOBOX"
@@ -202,13 +205,18 @@ def fill_login_code(service: str = "", within_minutes: float = 10.0) -> str:
         except Exception as exc:  # noqa: BLE001
             return f"ERR:{type(exc).__name__}"
 
+    # tab="same": the code belongs to the sign-in he is in the middle of. If
+    # that tab was closed, the session would hand this job whichever tab is
+    # still open, and a login code would be typed into a site nobody chose.
     try:
-        outcome = _Session.get().do(job, timeout=60)
+        outcome = _Session.get().do(job, timeout=60, tab="same")
     except BrowserUnavailable as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"The browser failed: {type(exc).__name__}: {exc}"
 
+    if outcome.startswith("REFUSED:"):
+        return outcome[8:]
     if outcome == "OK":
         return ("I filled in the code from your email. Check the box and "
                 "submit it - or say 'submit' and I will.")

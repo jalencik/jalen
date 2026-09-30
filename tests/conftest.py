@@ -116,9 +116,24 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     crashlog_module.CRASH_LOG = scratch / "crash.log"
     crashlog_module.EXIT_STATE = scratch / "last_exit.json"
 
+    # --- Jalen's own Chrome: delegations and the profile ------------------
+    # web_delegate saves every completed delegation to CHATS_PATH, and
+    # tests/test_web_sign_in.py completes a fake one. Measured 2026-09-30:
+    # all 68 records in the real data/web_chats.json were that fixture, so
+    # list_web_chats and read_web_result("") told him about a test. The
+    # real-Chrome tests (test_webforms, test_cdp_browser, ...) also ran on
+    # PROFILE_DIR - his signed-in data/browser_profile - and _launch first
+    # ends any chrome.exe holding that profile, which is his live one.
+    from jarvis.tools import webagent as webagent_module
+
+    saved_webagent = (webagent_module.CHATS_PATH, webagent_module.PROFILE_DIR)
+    webagent_module.CHATS_PATH = scratch / "web_chats.json"
+    webagent_module.PROFILE_DIR = scratch / "browser_profile"
+
     try:
         yield scratch
     finally:
+        webagent_module.CHATS_PATH, webagent_module.PROFILE_DIR = saved_webagent
         (
             crashlog_module.DATA_DIR,
             crashlog_module.CRASH_LOG,

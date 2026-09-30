@@ -482,3 +482,19 @@ class TestPendingTaskResumes:
         assert wa.pending_delegation("chatgpt"), (
             "the brief was dropped while waiting for the password"
         )
+
+
+def test_this_file_never_writes_his_real_web_chats_or_profile():
+    """
+    test_sign_in_resends_it completes a FAKE delegation, and web_delegate
+    saves every completed one to CHATS_PATH - which was his real
+    data/web_chats.json. Measured 2026-09-30: all 68 records in that file
+    were this fixture ("Rank the ten most powerful people", url
+    chatgpt.com/c/1), so list_web_chats and read_web_result("") reported a
+    test to him as his latest delegation. And the real-Chrome tests ran on
+    his signed-in data/browser_profile. conftest.py now points both at the
+    session's scratch directory.
+    """
+    real = (wa.ROOT / "data").resolve()
+    for path in (wa.CHATS_PATH, wa.PROFILE_DIR):
+        assert real not in Path(path).resolve().parents, path

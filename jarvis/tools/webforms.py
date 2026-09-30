@@ -46,7 +46,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .webagent import BrowserUnavailable, _Session
+from .webagent import BrowserUnavailable, _host, _never_touch, _Session
 
 # Fields we will describe but NEVER fill from anything except the vault, and
 # then only through fill_login_field. A model that can write into a password
@@ -132,12 +132,19 @@ _ERRORS = r"""
 """
 
 
-def _do(job, *, timeout: float = 120.0):
-    return _Session.get().do(job, timeout=timeout)
+def _do(job, *, tab: str, timeout: float = 120.0):
+    """
+    Run a job on the browser thread. `tab` is required here, not defaulted:
+    "read" for a job that only looks, "same" for one that CONTINUES the work
+    on the tab it was started in - so if he closed that tab, the job is
+    refused rather than run on whichever tab is open instead, which may be a
+    different site. See _Session.do.
+    """
+    return _Session.get().do(job, timeout=timeout, tab=tab)
 
 
-def _host(url: str) -> str:
-    return (url or "").split("//")[-1].split("/")[0].split("@")[-1].lower()
+# The host is webagent's _host: parsed, not split. This module's own copy
+# took "https://x.com:8443" as the host "x.com:8443".
 
 
 # ---------------------------------------------------------------------------
@@ -153,14 +160,20 @@ def inspect_form() -> str:
     which is what it used to say.
     """
     def job(page):
+        refusal = _never_touch(page.url, "read its form")
+        if refusal:
+            return refusal
         return page.url, page.title(), page.evaluate(_SCAN)
 
     try:
-        url, title, fields = _do(job)
+        outcome = _do(job, tab="read")
     except BrowserUnavailable as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"I couldn't read the page: {type(exc).__name__}: {exc}"
+    if isinstance(outcome, str):
+        return outcome
+    url, title, fields = outcome
 
     if not fields:
         return (f"No form fields on {title or url}. If the form is behind a "
@@ -185,10 +198,18 @@ def inspect_form() -> str:
 
 def form_errors() -> str:
     """Validation complaints the page is showing — GREEN."""
+    def job(page):
+        return (_never_touch(page.url, "read its form")
+                or page.evaluate(_ERRORS))
+
     try:
-        problems = _do(lambda page: page.evaluate(_ERRORS))
+        problems = _do(job, tab="read")
+    except BrowserUnavailable as exc:
+        return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"I couldn't read the page: {type(exc).__name__}"
+    if isinstance(problems, str):
+        return problems
     if not problems:
         return "The form isn't showing any errors."
     return "The form is complaining about:\n" + "\n".join(f"  - {p}" for p in problems)
@@ -232,6 +253,9 @@ def fill_form_field(field: str, value: str) -> str:
         return "Which field?"
 
     def job(page):
+        refusal = _never_touch(page.url, "type into it")
+        if refusal:
+            return "REFUSED:" + refusal
         fields = page.evaluate(_SCAN)
         target = _match(fields, field)
         if target is None:
@@ -247,10 +271,14 @@ def fill_form_field(field: str, value: str) -> str:
         return f"OK:{target['label']}"
 
     try:
-        outcome = _do(job)
+        outcome = _do(job, tab="same")
+    except BrowserUnavailable as exc:
+        return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"I couldn't fill that: {type(exc).__name__}: {exc}"
 
+    if outcome.startswith("REFUSED:"):
+        return outcome[8:]
     if outcome.startswith("NOMATCH:"):
         return (f"There's no field called '{field}' on this page. I can see: "
                 f"{outcome[8:]}")
@@ -277,6 +305,9 @@ def upload_to_form(path: str, field: str = "") -> str:
         return f"{target.name} is a folder, not a file."
 
     def job(page):
+        refusal = _never_touch(page.url, "attach anything")
+        if refusal:
+            return "REFUSED:" + refusal
         inputs = page.locator('input[type="file"]')
         count = inputs.count()
         if count == 0:
@@ -294,10 +325,14 @@ def upload_to_form(path: str, field: str = "") -> str:
         return "OK:"
 
     try:
-        outcome = _do(job)
+        outcome = _do(job, tab="same")
+    except BrowserUnavailable as exc:
+        return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"I couldn't attach it: {type(exc).__name__}: {exc}"
 
+    if outcome.startswith("REFUSED:"):
+        return outcome[8:]
     if outcome.startswith("NONE:"):
         return ("There's no file upload on this page. If it's behind an "
                 "'attach' or 'add file' button, tell me and I'll click it.")
@@ -316,6 +351,9 @@ def submit_form() -> str:
     the failure this project keeps having in other forms.
     """
     def job(page):
+        refusal = _never_touch(page.url, "submit anything")
+        if refusal:
+            return {"refused": refusal}
         button = None
         for selector in ('button[type="submit"]', 'input[type="submit"]',
                          'button:has-text("Submit")', 'button:has-text("Continue")',
@@ -337,10 +375,14 @@ def submit_form() -> str:
                 "url": page.url}
 
     try:
-        outcome = _do(job)
+        outcome = _do(job, tab="same")
+    except BrowserUnavailable as exc:
+        return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"I couldn't submit it: {type(exc).__name__}: {exc}"
 
+    if outcome.get("refused"):
+        return outcome["refused"]
     if outcome.get("none"):
         return "I couldn't find a submit button. What's it called?"
     errors = outcome.get("errors") or []
@@ -373,65 +415,79 @@ def fill_login_field(site: str = "") -> str:
     The password is read into a local, typed into the page, and dropped with
     the frame. It is never a tool result — a tool result reaches the model,
     the transcript window and the audit log.
+
+    ONE JOB, ON ONE PAGE, CHECKED AT THE TYPING. The host used to be read and
+    approved in one browser job and the secret typed in a second. Anything
+    between the two moved the password somewhere nobody had checked: the tab
+    closing (the session then hands the next job whichever tab is open), or
+    the page navigating itself. Reproduced against a faked browser - the
+    password went to evil.example both ways. Now the approval, the vault read
+    and the typing are a single job on the tab the work was in (tab="same":
+    a replaced tab is refused, never used), and the host is read again
+    immediately before typing and must still be the one that was approved.
     """
     from . import vault
 
+    def job(page):
+        url = page.url or ""
+        host = _host(url)
+        if not host:
+            return "There's no page open to sign into."
+        refusal = _never_touch(url, "type a password")
+        if refusal:
+            return refusal
+        if vault.site_permission(url) != "always":
+            return (f"I don't have your approval to use a saved password on "
+                    f"{host}. Say 'always allow {host}' if you want me to, "
+                    f"and I'll only ever use it on exactly that host.")
+
+        # vault.get_secret is INTERNAL and deliberately not a registered
+        # tool: a tool returns its result to the model, and a password must
+        # never take that path. This module is code, not the model, so it
+        # is the correct caller - the value goes straight from the vault
+        # into the page.
+        name = (site or host).strip()
+        try:
+            secret = vault.get_secret(name)
+        except vault.VaultLocked:
+            return ("Your vault is locked. Say 'unlock my vault' and I'll "
+                    "open the passphrase box - you type it, I never hear it.")
+        except KeyError:
+            return (f"There's nothing saved under '{name}'. Sign in yourself "
+                    f"this once and I'll offer to save it afterwards.")
+        except Exception as exc:  # noqa: BLE001
+            return f"I couldn't open the vault: {type(exc).__name__}"
+        try:
+            if not secret:
+                return f"There's nothing saved under '{name}'."
+            # Where the page is NOW, not where it was a moment ago.
+            now = page.url or ""
+            if (_host(now) != host or vault.site_permission(now) != "always"
+                    or _never_touch(now, "type a password")):
+                return (f"The page moved off {host} while I was getting your "
+                        f"password, so I didn't type it anywhere. Open the "
+                        f"sign-in page again and ask me once it's there.")
+            boxes = page.locator('input[type="password"]')
+            count = boxes.count()
+            if count == 0:
+                return "There's no password box on this page."
+            if count > 1:
+                return (f"There are {count} password boxes on this page — "
+                        f"that usually means it's a sign-up form asking you "
+                        f"to confirm. I won't guess which is which; type it "
+                        f"yourself this once.")
+            boxes.first.fill(secret)
+            return ("Typed your password in. If there's a code or a "
+                    "checkbox, that part's yours — tell me when to carry on.")
+        finally:
+            del secret          # out of scope with this frame, always
+
     try:
-        url = _do(lambda page: page.url)
+        return _do(job, tab="same")
+    except BrowserUnavailable as exc:
+        return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"I couldn't see the page: {type(exc).__name__}"
-
-    host = _host(url)
-    if not host:
-        return "There's no page open to sign into."
-
-    permission = vault.site_permission(url)
-    if permission != "always":
-        return (f"I don't have your approval to use a saved password on "
-                f"{host}. Say 'always allow {host}' if you want me to, and "
-                f"I'll only ever use it on exactly that host.")
-
-    # vault.get_secret is INTERNAL and deliberately not a registered tool: a
-    # tool returns its result to the model, and a password must never take
-    # that path. This module is code, not the model, so it is the correct
-    # caller - the value goes straight from the vault into the page.
-    name = (site or host).strip()
-    try:
-        secret = vault.get_secret(name)
-    except vault.VaultLocked:
-        return ("Your vault is locked. Say 'unlock my vault' and I'll open "
-                "the passphrase box - you type it, I never hear it.")
-    except KeyError:
-        return (f"There's nothing saved under '{name}'. Sign in yourself this "
-                f"once and I'll offer to save it afterwards.")
-    except Exception as exc:  # noqa: BLE001
-        return f"I couldn't open the vault: {type(exc).__name__}"
-    if not secret:
-        return f"There's nothing saved under '{name}'."
-
-    def job(page):
-        boxes = page.locator('input[type="password"]')
-        count = boxes.count()
-        if count == 0:
-            return "NONE:"
-        if count > 1:
-            return f"MANY:{count}"
-        boxes.first.fill(secret)
-        return "OK:"
-
-    try:
-        outcome = _do(job)
-    finally:
-        del secret          # out of scope with this frame, always
-
-    if outcome.startswith("NONE:"):
-        return "There's no password box on this page."
-    if outcome.startswith("MANY:"):
-        return (f"There are {outcome[5:]} password boxes on this page — that "
-                f"usually means it's a sign-up form asking you to confirm. "
-                f"I won't guess which is which; type it yourself this once.")
-    return ("Typed your password in. If there's a code or a checkbox, that "
-            "part's yours — tell me when to carry on.")
 
 
 REGISTRY: dict[str, Any] = {
