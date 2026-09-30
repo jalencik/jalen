@@ -184,6 +184,12 @@ green:
     - community_post_guide  # reads the channel's post format off local disk
     - save_telegram_draft   # a DRAFT reaches nobody. send_telegram_message stays RED.
     - claude_code_status    # reports whether a CLI is installed; runs nothing
+    # Signs him in to ChatGPT or Gemini with HIS Google account and stops at
+    # the password box, which is his to type. Had no tier at all until
+    # 2026-09-30, so it ran as unclassified-AMBER and was announced like an
+    # overwrite. GREEN because it overwrites nothing and reaches no one;
+    # refuse_from_content (below) is what keeps a page from starting it.
+    - web_sign_in
     # The technician's eyes. Every one of these READS system state and
     # changes nothing — that is enforced by the module split, not by
     # convention: jarvis/tools/technician.py contains no write of any kind.
@@ -526,6 +532,7 @@ injection_guard:
     - open_url
     - search_site
     - open_signup
+    - web_sign_in          # his Google identity, offered to a site
     # The disk.
     - create_file
     - create_folder
