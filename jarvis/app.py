@@ -1448,10 +1448,78 @@ class Jalen:
         self.audit.utterance(reply, who="jarvis")
         self._note_said(reply)
 
-    def process(self, text: str) -> None:
+    def process(self, text: str, *, from_him: bool = True) -> None:
+        """
+        Handle one utterance.
+
+        `from_him` says whether it is POSITIVELY his: spoken with his name or
+        the wake word, or typed. The microphone loop passes False for speech
+        it admitted without the name - the question window, a stitched
+        continuation - because that may be the television. Every other front
+        door (text mode, the Telegram bot, the extension's chat panel) is
+        text he typed, so the default is True.
+        """
         text = (text or "").strip()
         if not text:
             return
+
+        low = text.lower().rstrip(".!?")
+
+        # kill switch always wins - over a waiting question too.
+        if low in self.kill_phrases:
+            self.audit.utterance(text, who="user")
+            self.speaker.stop()
+            self.kill.set()
+            self._answer_q.put(False)
+            return
+
+        # ANSWERS FIRST, and an answer is not an instruction.
+        #
+        # These three branches used to sit BELOW the taint clear, the
+        # stitching and the reference expansion, so an answer to a waiting
+        # question counted as a fresh instruction from him. An independent
+        # audit reproduced it against this function: after reading a web
+        # page, one word - "Amen." - handed to ask_user turned the same
+        # turn's next send from BLACK into GREEN. And in the production log
+        # on 26 August, ask_user ran with origin=content at 10:59:50, he
+        # answered "Hey Jelen.", and the same turn's next ask_user at
+        # 11:01:33 ran with origin=user.
+        #
+        # Above the stitching for two smaller reasons. An answer used to
+        # replace self._plan with read_plan("the notes one"), so the turn
+        # that asked was judged afterwards against the wrong contract; and
+        # expand_references would rewrite "it" inside a phone number.
+        #
+        # A rating he was just asked for. Before _awaiting_reply because
+        # nothing is waiting on a queue here, and before the router because
+        # a bare "eight" would otherwise route to whatever "eight" matches.
+        if self._pending_rating is not None:
+            if time.time() - self._pending_rating.get("asked_at", 0) > self.RATING_EXPIRES_S:
+                self._pending_rating = None      # he moved on; so do we
+            elif self._take_rating(text):
+                self.audit.utterance(text, who="user")
+                return
+
+        # A pending open QUESTION takes everything he says as the answer:
+        # "open chrome" said in answer to "what's your phone number" is an
+        # answer, not a command, and routing it would be both wrong and
+        # irreversible.
+        if self._awaiting_reply:
+            self.audit.utterance(text, who="user")
+            self._reply_q.put(text)
+            return
+
+        # a pending yes/no takes priority over everything else
+        if self._awaiting_confirmation:
+            answer = self._parse_yes_no(text)
+            if answer is not None:
+                self.audit.utterance(text, who="user")
+                self._answer_q.put(answer)
+                return
+
+        # ------------------------------------------------------------------
+        # From here on this is a NEW instruction.
+        # ------------------------------------------------------------------
 
         # Stitching. The fast endpoint can close an utterance during a pause
         # that turns out to be mid-sentence, so "open chrome and go to
@@ -1473,7 +1541,22 @@ class Jalen:
         # HE SPOKE. Everything Jalen read before this moment stops being in
         # play - this is the only event that can honestly mean "this is his
         # instruction, not a web page's". Deliberately the single caller.
-        taint.he_asked_again()
+        #
+        # Two conditions, and both are over-blocking by design - the
+        # direction taint.py chose, because the other direction is an email
+        # sending mail on its author's behalf:
+        #
+        #   from_him     admitted by his name or the wake word, or typed. The
+        #                question window admits speech with no name, which is
+        #                right for hearing an answer and wrong for certifying
+        #                that what was read no longer matters.
+        #   no overlap   taint is process-wide and two turns can run at
+        #                once, so this turn clearing it would un-taint the
+        #                OTHER turn while it is still acting on the email it
+        #                read. taint.py said overlap could only over-block;
+        #                it could also under-block, until this.
+        if from_him and not self._another_turn_in_flight():
+            taint.he_asked_again()
 
         # WHAT "IT" MEANS. Expanded before anything routes, because "send it
         # to Saved Messages" reaching the router as literally "it" is how a
@@ -1492,28 +1575,9 @@ class Jalen:
 
         self.audit.utterance(text, who="user")
 
+        # Recomputed: stitching and expansion may have changed the text, and
+        # the end-phrase test below is about what he now means.
         low = text.lower().rstrip(".!?")
-
-        # kill switch always wins
-        if low in self.kill_phrases:
-            self.speaker.stop()
-            self.kill.set()
-            self._answer_q.put(False)
-            return
-
-        # A pending open QUESTION takes everything he says as the answer.
-        # Checked before the yes/no branch and before the router, because
-        # while a question is open there is no other interpretation: "open
-        # chrome" said in answer to "what's your phone number" is an answer,
-        # not a command, and routing it would be both wrong and irreversible.
-        # A rating he was just asked for. Before _awaiting_reply because
-        # nothing is waiting on a queue here, and before the router because
-        # a bare "eight" would otherwise route to whatever "eight" matches.
-        if self._pending_rating is not None:
-            if time.time() - self._pending_rating.get("asked_at", 0) > self.RATING_EXPIRES_S:
-                self._pending_rating = None      # he moved on; so do we
-            elif self._take_rating(text):
-                return
 
         # "YES, GO ON."
         #
@@ -1531,17 +1595,6 @@ class Jalen:
             resumed = self._resume_something()
             if resumed is not None:
                 self.say(resumed)
-                return
-
-        if self._awaiting_reply:
-            self._reply_q.put(text)
-            return
-
-        # a pending yes/no takes priority over everything else
-        if self._awaiting_confirmation:
-            answer = self._parse_yes_no(text)
-            if answer is not None:
-                self._answer_q.put(answer)
                 return
 
         # Exact match, not substring: "...just the number, nothing else." is a
@@ -1679,7 +1732,8 @@ class Jalen:
 
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
 
-        def dispatch_turn(text: str, turn_id: int, timer: TurnTimer) -> None:
+        def dispatch_turn(text: str, turn_id: int, timer: TurnTimer,
+                          from_him: bool = True) -> None:
             """
             Run process() on its own thread so this loop keeps reading mic
             frames while a turn is in flight — including while it's stuck
@@ -1705,7 +1759,7 @@ class Jalen:
             task_id = conversation.start_task(text[:80], conversation.THINKING)
             try:
                 with systools.com_initialized():
-                    self.process(text)
+                    self.process(text, from_him=from_him)
                 conversation.update_task(task_id, state=conversation.COMPLETED)
             except BaseException as exc:      # noqa: BLE001
                 conversation.update_task(task_id, state=conversation.FAILED,
@@ -2059,6 +2113,15 @@ class Jalen:
                     self._refresh_orb()
                     continue
 
+                # WAS IT POSITIVELY HIM? The address gate admits some speech
+                # with no name - an answer to its own question, a stitched
+                # continuation, anything while a confirmation is pending -
+                # and that is right for HEARING him. It is not enough to
+                # certify that an email Jalen just read no longer matters,
+                # because it may be the television. Only the wake word or
+                # his name can do that; see the taint clear in process().
+                from_him = wake_initiated or addressed_to_jalen(text)
+
                 # The utterance closed on the FAST threshold. If the words
                 # say he is mid-sentence ("...open chrome and"), put the
                 # audio back and keep listening on the patient one. The
@@ -2093,7 +2156,7 @@ class Jalen:
                 # turn is the one whose silence he is currently sitting in.
                 self._turn_timer = timer
                 threading.Thread(
-                    target=dispatch_turn, args=(text, turn_id, timer), daemon=True,
+                    target=dispatch_turn, args=(text, turn_id, timer, from_him), daemon=True,
                     name=f"jalen-turn-{turn_id}",
                 ).start()
 
@@ -2302,6 +2365,17 @@ class Jalen:
 
     def _forget_expectation(self) -> None:
         self._expecting = None
+
+    def _another_turn_in_flight(self) -> bool:
+        """
+        Is some OTHER turn still working? The calling turn counts itself.
+
+        In voice mode run() adds a turn to _active_turns before its thread
+        starts, so a turn sees itself in the set; the other front doors
+        never add one, so for them the set is empty.
+        """
+        with self._turn_lock:
+            return len(self._active_turns) > 1
 
     def _rating_is_pending(self) -> bool:
         """

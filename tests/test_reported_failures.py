@@ -178,6 +178,8 @@ class _BareApp:
     """Only what handle_with_brain touches."""
 
     def __init__(self, brain):
+        from pathlib import Path
+
         self.brain = brain
 
         class Audit:
@@ -185,6 +187,16 @@ class _BareApp:
                 pass
 
         self.audit = Audit()
+        # handle_with_brain now remembers when Claude cannot think (an
+        # expired sign-in, a usage limit) instead of asking again every
+        # turn - see tests/test_brain_down_is_said_once.py. Nothing is
+        # latched here, so these tests exercise exactly the paths they did.
+        self._brain_down = None
+        self._brain_down_detail = ""
+        self._brain_down_at = 0.0
+        self._brain_down_told = False
+        self._credentials_file = Path("does-not-exist.json")
+        self._credentials_seen = 0.0
 
     handle_with_brain = None  # bound below
 
@@ -193,6 +205,14 @@ def _ask(app, text="hello"):
     import asyncio
 
     from jarvis.app import Jalen
+
+    # The real latch helpers, not stand-ins, so a change to how the latch
+    # decides is exercised here too.
+    for name in ("_brain_still_down", "_credentials_stamp", "_brain_down_sentence",
+                 "_latch_brain_down", "_clear_brain_down", "BRAIN_RETRY_S",
+                 "_LATCHING_KINDS"):
+        if not hasattr(type(app), name):
+            setattr(type(app), name, getattr(Jalen, name))
 
     return asyncio.new_event_loop().run_until_complete(
         Jalen.handle_with_brain(app, text)
