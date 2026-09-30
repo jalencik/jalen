@@ -191,6 +191,8 @@ def main() -> int:
         print("          --only-binary claude-agent-sdk 'claude-agent-sdk>=0.2.140,<0.3.0'")
         problems += 1
 
+    problems += _check_accounts()
+
     print("\nConfig")
     try:
         from jarvis.config import CONFIG
@@ -242,6 +244,67 @@ def _print_sign_in_fix(claude_path: str) -> None:
     print("        3. Restart Jalen. The token is read at startup.")
     print("      Leave ANTHROPIC_API_KEY empty - a value there switches the")
     print("      brain to per-token billing instead of your subscription.")
+
+
+def _check_accounts() -> int:
+    """
+    The two accounts he actually works through, checked for real.
+
+    On 2026-09-30 this command said "1 blocking problem" - the brain's
+    sign-in - while Google had been refusing to refresh its login
+    (RefreshError) and every email and calendar request failed. It never
+    looked at Google or Telegram at all. Same shape as the brain check it
+    already fixed once: a diagnostic that cannot see an outage reports none.
+
+    Each check uses the loader the tools themselves use, so it cannot pass
+    while they fail.
+    """
+    problems = 0
+    print("\nAccounts")
+    try:
+        from jarvis.integrations import google_auth
+
+        if not google_auth.have_token():
+            print(f"{BAD}Google is not connected - email and calendar can't work")
+            print("      FIX:  .venv\\Scripts\\python.exe scripts\\connect_google.py")
+            problems += 1
+        else:
+            google_auth.load_credentials()
+            print(f"{OK}Google connected as {google_auth.whoami()}")
+    except Exception as exc:  # noqa: BLE001 - a diagnostic reports, it does not crash
+        print(f"{BAD}Google is connected but refusing - email and calendar can't work")
+        print(f"      Google says: {exc}")
+        print("      FIX:  .venv\\Scripts\\python.exe scripts\\connect_google.py")
+        print("      If it stops again after about 7 days, the app's OAuth consent")
+        print("      screen is in Testing mode: publish it in Google Cloud Console")
+        print("      (APIs & Services > OAuth consent screen > Publish app).")
+        problems += 1
+
+    try:
+        from jarvis.config import CONFIG
+
+        if not CONFIG.get_path("telegram.personal.enabled", False):
+            print(f"{WARN}personal Telegram is switched off in config/jarvis.yaml")
+        else:
+            from jarvis.tools.messaging import telegram_status
+
+            status = telegram_status()
+            if status.startswith("Personal Telegram signed in"):
+                print(f"{OK}{status}")
+            else:
+                print(f"{BAD}{status}")
+                problems += 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"{BAD}personal Telegram could not be checked: {type(exc).__name__}: {exc}")
+        problems += 1
+    finally:
+        try:
+            from jarvis.integrations.telegram_user import RUNTIME
+
+            RUNTIME.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+    return problems
 
 
 def _check_disk() -> int:
