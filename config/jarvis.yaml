@@ -343,6 +343,9 @@ router:
 # BRAIN  (spec I68-I69)
 # ---------------------------------------------------------------------------
 brain:
+  # [NOT READ] Nothing reads brain.provider (grep, 2026-09-30): the brain is
+  # always Claude, through ClaudeSDKClient. Setting "gemini" here changes
+  # nothing - there is no second brain to fall back to.
   provider: "claude"               # claude | gemini
   # Model tiering. Simple turns cost you less of your monthly allowance.
   # [NOT IMPLEMENTED] model tiering. pick_model() exists and reads these
@@ -386,6 +389,9 @@ brain:
 
   # Free-tier offload: send cheap, tool-free questions to Gemini instead of
   # spending Claude allowance on them. Set to false to route everything to Claude.
+  # [NOT READ] Nothing reads this key (grep, 2026-09-30). Every turn that
+  # reaches the brain goes to Claude; Gemini is used only when he delegates
+  # to it. "true" here does not mean small talk is free.
   use_gemini_for_chitchat: true
   # AN ALIAS, NOT A PINNED VERSION. Verified against Google on 2026-08-24:
   #   gemini-2.5-flash    404 "no longer available to new users"
