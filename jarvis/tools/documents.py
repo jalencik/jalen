@@ -308,8 +308,13 @@ def _tidy_pdf_text(text: str) -> str:
     return text.strip()
 
 
-def _extract_pdf(path: Path) -> str:
+def _extract_pdf(path: Path, budget: int = _EXTRACT_BUDGET_CHARS) -> str:
     """
+    `budget` stops extraction early. research.web_read passes a small one:
+    only _MAX_PAGE_CHARS of a web PDF ever reaches the model, and with the
+    default 300k it extracted nearly all 77 pages of the Llama 2 paper
+    (29.8s) to keep the first 6,000 characters.
+
     PDF text via pypdf — pure Python, ~380 KB, no compiler and no native
     dependency, which is why it fits a machine with ~1 GB free RAM.
 
@@ -346,7 +351,7 @@ def _extract_pdf(path: Path) -> str:
     parts: list[str] = []
     total = len(reader.pages)
     for index, page in enumerate(reader.pages, start=1):
-        if sum(len(p) for p in parts) > _EXTRACT_BUDGET_CHARS:
+        if sum(len(p) for p in parts) > budget:
             parts.append(f"[...stopped at page {index} of {total}...]")
             break
         try:

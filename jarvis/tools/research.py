@@ -83,6 +83,12 @@ _HONEST_HEADERS = {
 # 2.6x the largest, and one bad link can no longer read gigabytes into a
 # machine with ~1 GB free. Only _MAX_PAGE_CHARS of text reaches the model.
 _MAX_FETCH_BYTES = 3 * 1024 * 1024
+# PDFs are read too - arXiv papers ARE PDFs. Measured 2026-09-30 with HEAD
+# requests: BERT 0.7 MB, ResNet 0.8, Attention 2.1, DeepSeek-R1 4.8, GPT-4
+# report 5.0, Llama 2 13.0, Stable Diffusion 39.0 (its figures). A PDF
+# cannot be read from a prefix - its index is at the END - so one past the
+# cap is refused with its size, not cut. 25 MB takes six of those seven.
+_MAX_PDF_BYTES = 25 * 1024 * 1024
 _MAX_REDIRECTS = 5  # NOT MEASURED; httpx's own default was 20.
 # What gets decoded as text. A PDF or an image "extracted" as text is
 # garbage the brain would then summarise with confidence.
@@ -141,9 +147,11 @@ class _Page:
     """What one fetch produced - or, in `refused`, the sentence saying why not."""
 
     def __init__(self, status: int = 0, text: str = "", url: str = "",
-                 ctype: str = "", truncated: bool = False, refused: str = ""):
+                 ctype: str = "", truncated: bool = False, refused: str = "",
+                 data: bytes = b""):
         self.status, self.text, self.url = status, text, url
         self.ctype, self.truncated, self.refused = ctype, truncated, refused
+        self.data = data  # a PDF's bytes; text types use .text
 
 
 def _host_of(url: str) -> str:
@@ -225,6 +233,8 @@ def _one_request(client, url: str, headers: dict) -> tuple[_Page, str | None]:
         if status in (301, 302, 303, 307, 308) and response.headers.get("location"):
             return _Page(status=status, url=url), response.headers["location"]
         ctype = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if ctype == "application/pdf" and status == 200:
+            return _pdf_bytes(response, url), None
         if ctype and not ctype.startswith(_TEXT_TYPES):
             return _Page(status=status, url=url, ctype=ctype), None
         chunks, size, truncated = [], 0, False
@@ -238,6 +248,56 @@ def _one_request(client, url: str, headers: dict) -> tuple[_Page, str | None]:
         text = raw.decode(response.encoding or "utf-8", errors="replace")
         return _Page(status=status, text=text, url=url, ctype=ctype,
                      truncated=truncated), None
+
+
+def _pdf_bytes(response, url: str) -> _Page:
+    """A PDF, whole or not at all: a prefix of one cannot be read."""
+    mb = 1024 * 1024
+    declared = response.headers.get("content-length") or ""
+    if declared.isdigit() and int(declared) > _MAX_PDF_BYTES:
+        return _Page(refused=(f"That PDF is {int(declared) / mb:.0f} MB - too big to read "
+                              f"over the web (I stop at {_MAX_PDF_BYTES // mb} MB). "
+                              "Download it and ask me to read the file."), url=url)
+    chunks, size = [], 0
+    for chunk in response.iter_bytes():
+        chunks.append(chunk)
+        size += len(chunk)
+        if size > _MAX_PDF_BYTES:
+            return _Page(refused=(f"That PDF is too big to read over the web (over "
+                                  f"{_MAX_PDF_BYTES // mb} MB). Download it and ask me "
+                                  "to read the file."), url=url)
+    return _Page(status=200, url=url, ctype="application/pdf", data=b"".join(chunks))
+
+
+def _read_pdf(page: _Page, host: str) -> str:
+    """
+    Hand a downloaded PDF to the same extractor read_document uses
+    (documents._extract_pdf: pypdf, page-labelled, budgeted), through a temp
+    file that is deleted whatever happens.
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from . import documents
+
+    fd, name = tempfile.mkstemp(suffix=".pdf", prefix="jalen-web-")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(page.data)
+        try:
+            # 3x what the fence keeps: margin for page labels and the tidy
+            # step, and still a few pages rather than the whole paper.
+            text = documents._extract_pdf(Path(name), budget=3 * _MAX_PAGE_CHARS)
+        except documents.UnsupportedFormat as exc:
+            return str(exc)
+    finally:
+        try:
+            os.unlink(name)
+        except OSError:
+            pass
+    label = page.url.rsplit("/", 1)[-1] or host
+    return f"{page.url}\n\n" + _fence(f"PDF: {label}\n\n{text}", host)
 
 
 def _get(url: str) -> tuple[int, str]:
@@ -341,6 +401,8 @@ def web_read(url: str) -> str:
                 "research.contact in config/jarvis.yaml and I'll be able to read it.")
     if page.status != 200:
         return f"That page returned HTTP {page.status}."
+    if page.ctype == "application/pdf":
+        return _read_pdf(page, host)
     if page.ctype and not page.ctype.startswith(_TEXT_TYPES):
         kind = "a PDF" if "pdf" in page.ctype else f"a {page.ctype} file"
         return (f"That link is {kind}, not a web page, and I can't read that from "
