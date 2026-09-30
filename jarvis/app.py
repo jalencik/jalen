@@ -2872,24 +2872,37 @@ class Jalen:
 
         for job in done:
             minutes = (job.get("ended_at", 0) - job.get("started_at", 0)) / 60
-            folder = Path(str(job.get("folder", ""))).name
             state = job.get("state")
+            # Named the way devwork names it, so a background COMMAND (the
+            # self-test) is not announced as "the coding job in jarvis".
+            name = devwork._describe(job)
+            name = name[:1].upper() + name[1:]
             if state == "finished" and job.get("summary"):
                 # A background COMMAND (the self-test) already knows how to
                 # describe its own result, so say that rather than "go and
                 # review it" — there is nothing to review, the answer is the
                 # sentence.
                 line = f"{job.get('prompt', 'That')} finished: {job['summary']}"
+            elif state == "finished" and job.get("kind") == "command":
+                line = f"{name} finished after {minutes:.0f} minutes."
             elif state == "finished":
                 line = (
-                    f"The coding job in {folder} just finished after "
+                    f"{name} just finished after "
                     f"{minutes:.0f} minutes. Say review the coding job and "
                     "I'll tell you what it actually changed."
                 )
             elif state == "timeout":
-                line = f"The coding job in {folder} ran out of time after {minutes:.0f} minutes."
+                line = f"{name} ran out of time after {minutes:.0f} minutes."
+                if job.get("alive_pid"):
+                    # devwork keeps holding a process its tree-kill could not
+                    # end; he is the only one who can finish the job.
+                    line += (
+                        f" I couldn't stop it, though - process "
+                        f"{job['alive_pid']} is still running. Say stop the "
+                        "background job to try again, or end it in Task Manager."
+                    )
             else:
-                line = f"The coding job in {folder} failed: {job.get('error', 'no reason given')}."
+                line = f"{name} failed: {job.get('error', 'no reason given')}."
             self.audit.write("system", summary=f"coding job {job.get('id')}: {state}",
                              detail={"folder": str(job.get("folder", ""))})
             self.say(line)
