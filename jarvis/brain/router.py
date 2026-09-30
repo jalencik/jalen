@@ -1278,9 +1278,19 @@ class IntentRouter:
         self.fuzzy_threshold = int(cfg.get_path("router.fuzzy_threshold", 86))
         self.address = cfg.get_path("identity.address_user_as", "")
         self._rules = _rules()
-        self._miss_log = DATA_DIR / "router_misses.log"
         self.hits = 0
         self.misses = 0
+
+    @property
+    def _miss_log(self):
+        """
+        Resolved when a miss is WRITTEN, not when the router is built. It
+        used to be captured in __init__, so a router constructed at import
+        time (tests/test_conversation_requests.py builds one during
+        collection) escaped conftest's DATA_DIR redirect and wrote test
+        phrases into his real log - 227 lines of "jaluddin" by 2026-10-01.
+        """
+        return DATA_DIR / "router_misses.log"
 
     @staticmethod
     def _normalise(text: str, lower: bool = True) -> str:
