@@ -37,7 +37,7 @@ from .audit import AuditLog
 from . import conversation, habits, plan as planning
 from . import taint
 from .brain.router import (
-    Intent, IntentRouter, addressed_to_jalen, solicits_an_answer,
+    Intent, IntentRouter, addressed_to_jalen, is_kill_phrase, solicits_an_answer,
 )
 from .config import CONFIG, SECRETS
 from . import crashlog
@@ -1602,8 +1602,9 @@ class Jalen:
 
         low = text.lower().rstrip(".!?")
 
-        # kill switch always wins - over a waiting question too.
-        if low in self.kill_phrases:
+        # kill switch always wins - over a waiting question too. The same
+        # matcher as the address gate's exemption; see is_kill_phrase.
+        if is_kill_phrase(text, self.kill_phrases):
             self.audit.utterance(text, who="user")
             self.speaker.stop()
             self.kill.set()
@@ -2484,7 +2485,7 @@ class Jalen:
         # costs a sentence; an assistant that will not stop when told costs
         # rather more, and barge-in already halts playback on any loud noise
         # whatsoever.
-        if (text or "").lower().strip().rstrip(".!?") in self.kill_phrases:
+        if is_kill_phrase(text, self.kill_phrases):
             return True
         return addressed_to_jalen(text)
 

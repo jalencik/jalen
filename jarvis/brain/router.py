@@ -165,6 +165,53 @@ def addressed_to_jalen(text: str) -> bool:
 
 
 # ----------------------------------------------------------------------------
+# IS THIS THE EMERGENCY STOP?
+#
+# Kill phrases used to be compared as an exact string after lowercasing and
+# stripping only . ! and ? - so the comma speech recognition writes after a
+# name broke the one command he needs to work under pressure. Replayed by an
+# independent audit through the real checks: "Jalen stop" stopped him, and
+# "Jalen, stop.", "Hey Jalen, stop.", "Jaylen stop.", "Jalen, enough." and
+# "Stop, Jalen." did not - they went to the brain instead, which today can only
+# say its sign-in has expired.
+#
+# So: punctuation becomes space, the name in any pronunciation is stripped
+# from either end (a greeting in front of it too), and what is left must be
+# one of the phrases WHOLE. "stop the car" still stops nothing.
+#
+# One function, called from both places the stop is checked - process() and
+# the address gate's exemption - because widening one gate and not the other
+# is the two-gates bug CLAUDE.md records.
+_KILL_PREFIX = None
+_KILL_SUFFIX = None
+
+
+def _normalise_for_kill(text: str) -> str:
+    low = (text or "").lower()
+    for curly in ("’", "ʼ", "‘", "`"):
+        low = low.replace(curly, "'")
+    low = re.sub(r"[^a-z0-9' ]", " ", low)
+    return re.sub(r"\s+", " ", low).strip()
+
+
+def is_kill_phrase(text: str, phrases) -> bool:
+    """True when the whole utterance is one of the kill phrases, name aside."""
+    global _KILL_PREFIX, _KILL_SUFFIX
+    if _KILL_PREFIX is None:
+        _KILL_PREFIX = re.compile(
+            r"^(?:(?:hey|hi|yo|ok|okay) )?" + _NAME + r" ", re.I)
+        _KILL_SUFFIX = re.compile(r" " + _NAME + r"$", re.I)
+    said = _normalise_for_kill(text)
+    if not said:
+        return False
+    wanted = {_normalise_for_kill(p) for p in phrases}
+    if said in wanted:
+        return True
+    bare = _KILL_SUFFIX.sub("", _KILL_PREFIX.sub("", said)).strip()
+    return bool(bare) and bare in wanted
+
+
+# ----------------------------------------------------------------------------
 # DID JALEN JUST ASK HIM SOMETHING?
 #
 # The other half of addressed_to_jalen. The name is required to START a
