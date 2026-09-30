@@ -145,7 +145,8 @@ def test_an_answer_to_a_confirmation_does_not_clear_the_taint():
     taint.mark("email from someone@example.com")
     j = _jalen(_awaiting_confirmation=True)
     _run(j, "yes")
-    assert j._answer_q.get_nowait() is True
+    # A ConfirmAnswer now, truthy only on yes - see test_confirmations_are_bound.
+    assert j._answer_q.get_nowait()
     assert taint.is_tainted()
 
 
@@ -267,7 +268,7 @@ def test_the_clear_comes_after_every_answer_handoff():
     source = inspect.getsource(Jalen.process)
     clear = source.index("taint.he_asked_again()")
     assert source.index("self._reply_q.put(") < clear
-    assert source.index("self._answer_q.put(answer)") < clear
+    assert source.index("self._answer_q.put(ConfirmAnswer(") < clear
 
 
 def test_the_microphone_loop_says_whether_it_was_him():

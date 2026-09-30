@@ -50,6 +50,30 @@ _DEAD_CLIENT_SIGNS = (
 )
 
 
+def _deny_reason(answer: Any) -> str:
+    """
+    What the model is told when a spoken "Confirm?" did not end in yes.
+
+    It used to be "He said no. Don't retry" for EVERY falsy answer - so a
+    timeout, where he may never have heard the question, was reported to him
+    as a refusal he never made (2026-08-24T05:10, the recycle bin). The app's
+    confirm() returns a ConfirmAnswer that says which no it was; a bare bool
+    from an older caller still reads as a refusal.
+    """
+    outcome = getattr(answer, "outcome", "no")
+    if outcome == "timeout":
+        return ("He did not answer in time - he may not have heard the "
+                "question. Do not say he refused. Tell him it was not done, "
+                "and ask once more if it still matters.")
+    if outcome == "correction":
+        words = getattr(answer, "words", "") or ""
+        return (f'He did not approve that as asked. His words were: "{words}". '
+                "If that is a correction, do what he said instead - it goes "
+                "through the safety gate like anything else. Do not retry the "
+                "original.")
+    return "He said no. Don't retry; ask what he'd prefer."
+
+
 def _looks_like_a_dead_client(exc: BaseException) -> bool:
     text = f"{type(exc).__name__}: {exc}".lower()
     return any(sign in text for sign in _DEAD_CLIENT_SIGNS)
@@ -655,7 +679,7 @@ class Brain:
                         "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
                             "permissionDecision": "deny",
-                            "permissionDecisionReason": "He said no. Don't retry; ask what he'd prefer.",
+                            "permissionDecisionReason": _deny_reason(approved),
                         }
                     }
                 return {}

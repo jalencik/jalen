@@ -256,6 +256,46 @@ _SPOKEN_WORD = re.compile(r"[\w']+", re.UNICODE)
 ECHO_TAIL_S = 3.0
 
 
+# Words that turn an answer into a CORRECTION: he is not saying yes to what
+# was asked, he is saying what to do instead. Padded with spaces because the
+# parser pads the sentence the same way.
+_CORRECTION_MARKERS = (" instead ", " actually ", " rather ", " but ",
+                       " first ", " change ")
+
+
+class ConfirmAnswer:
+    """
+    What he said to a spoken "Confirm?" - truthy ONLY on a real yes.
+
+    Truthiness keeps both callers working unchanged (`if not approved:`), and
+    `outcome` says WHICH no it was, because they are not the same thing:
+
+        yes          approve
+        no           he refused
+        timeout      nobody answered - he may never have heard the question
+        correction   he answered with what to do instead: "send it to Rodion
+                     instead". `words` carries his sentence, so the model can
+                     act on the correction inside the turn that asked, rather
+                     than a second turn being started in parallel.
+
+    Before this, every falsy answer reached the model as "He said no. Don't
+    retry", so a timeout was reported to him as a refusal he never made
+    (2026-08-24T05:10, emptying the recycle bin).
+    """
+
+    __slots__ = ("outcome", "words")
+
+    def __init__(self, outcome: str, words: str = "") -> None:
+        self.outcome = outcome
+        self.words = words
+
+    def __bool__(self) -> bool:
+        return self.outcome == "yes"
+
+    def __repr__(self) -> str:
+        return f"ConfirmAnswer({self.outcome!r}, {self.words!r})"
+
+
 @dataclass(frozen=True)
 class Expectation:
     """
@@ -366,6 +406,12 @@ class Jalen:
         self._awaiting_reply = False
         self._awaiting_confirmation = False
         self._awaiting_stop = False
+        # The confirmation currently being asked, and when it finished
+        # playing - for recognising its own echo. See confirm().
+        self._confirm_lock: asyncio.Lock | None = None
+        self._confirm_question = ""
+        self._confirm_asked_at = 0.0
+        self._confirm_reasked = False
         # "after the work has been done, it should ask the user, Hey boss,
         # How do you rate my work out of 10". Holds the context of the job
         # being rated, or None. Deliberately NOT reusing _awaiting_reply:
@@ -580,39 +626,86 @@ class Jalen:
         self.speaker.say_now(text)
 
     # ------------------------------------------------------------ confirmations
-    async def confirm(self, question: str) -> bool:
+    def _prompt_lock(self) -> asyncio.Lock:
+        """
+        ONE spoken prompt at a time, confirmation or stop-window.
+
+        Two turns can be in flight and both confirm() and announce() wait on
+        the same _answer_q. Without this, one "yes" answered whichever prompt
+        was waiting OLDEST - not the one he had just heard - and confirm()'s
+        finally cleared _awaiting_confirmation for both. Reproduced by an
+        independent audit against the real code. Created lazily because
+        tests build Jalen with __new__; both callers run on the brain's one
+        event loop, so the None check and the assignment cannot interleave.
+        """
+        if getattr(self, "_confirm_lock", None) is None:
+            self._confirm_lock = asyncio.Lock()
+        return self._confirm_lock
+
+    async def confirm(self, question: str) -> "ConfirmAnswer":
         """RED tier: ask out loud and wait for a real yes (spec F45/F46)."""
         timeout = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
-        self.orb.set_state("blocked")
-        self.say_blocking(question)
-        self._awaiting_confirmation = True
-        self._drain_answers()
-        try:
-            answer = await asyncio.get_running_loop().run_in_executor(
-                None, self._wait_for_answer, timeout
-            )
-        finally:
-            self._awaiting_confirmation = False
-            self.orb.set_state("thinking")
+        async with self._prompt_lock():
+            self.orb.set_state("blocked")
+            self.say_blocking(question)
+            # Stamped AFTER the question has finished playing, so the echo
+            # window measures the tail of "...Confirm?" arriving back through
+            # the microphone - not the length of the question.
+            self._confirm_question = question
+            self._confirm_asked_at = time.monotonic()
+            self._confirm_reasked = False
+            self._awaiting_confirmation = True
+            self._drain_answers()
+            try:
+                answer = await asyncio.get_running_loop().run_in_executor(
+                    None, self._wait_for_answer, timeout
+                )
+            finally:
+                self._awaiting_confirmation = False
+                self.orb.set_state("thinking")
         if answer is None:
             self.say_blocking("No answer, so I've cancelled it.")
-            return False
-        return answer
+            return ConfirmAnswer("timeout")
+        if isinstance(answer, ConfirmAnswer):
+            return answer
+        # A bare bool: the kill switch puts False, deliberately - the AMBER
+        # stop-window below tests `is False` on the same queue.
+        return ConfirmAnswer("yes" if answer else "no")
 
     async def announce(self, text: str) -> None:
         """AMBER tier: say it, then give a short window to say stop."""
         window = float(self.cfg.get_path("safety.undo_window_s", 4))
-        self.say_blocking(text)
-        self._awaiting_stop = True
-        self._drain_answers()
-        try:
-            stopped = await asyncio.get_running_loop().run_in_executor(
-                None, self._wait_for_stop, window
-            )
-        finally:
-            self._awaiting_stop = False
+        async with self._prompt_lock():
+            self.say_blocking(text)
+            self._awaiting_stop = True
+            self._drain_answers()
+            try:
+                stopped = await asyncio.get_running_loop().run_in_executor(
+                    None, self._wait_for_stop, window
+                )
+            finally:
+                self._awaiting_stop = False
         if stopped:
             raise RuntimeError("cancelled by user")
+
+    def _echoes_the_confirmation(self, text: str) -> bool:
+        """
+        Is this the tail of "...Confirm?" coming back through the microphone?
+
+        Every RED prompt ends in "Confirm?" and " confirm " is on the YES
+        list, so the echo approved the action it was asking about. The
+        general echo test could not catch it: it treats only three words or
+        more as echo, so that a one-word answer such as "ChatGPT" is never
+        taken for Jalen's own voice. Here the question is KNOWN, so a heard
+        utterance that is the question's own ending - "Confirm.", "notepad.
+        Confirm?" - within ECHO_TAIL_S of it finishing is the echo. "yes" is
+        not in the question and so can never be mistaken for it.
+        """
+        if time.monotonic() - getattr(self, "_confirm_asked_at", 0.0) > ECHO_TAIL_S:
+            return False
+        heard = _SPOKEN_WORD.findall((text or "").lower())
+        asked = _SPOKEN_WORD.findall((getattr(self, "_confirm_question", "") or "").lower())
+        return bool(heard) and len(heard) <= len(asked) and asked[-len(heard):] == heard
 
     def _drain_answers(self) -> None:
         while not self._answer_q.empty():
@@ -632,6 +725,20 @@ class Jalen:
             return self._answer_q.get(timeout=window) is False
         except queue.Empty:
             return False
+
+    @staticmethod
+    def _is_correction(text: str) -> bool:
+        """
+        "Send it to Rodion instead" - an answer that says what to do instead.
+
+        Normalised exactly as _parse_yes_no normalises, so the two agree on
+        what a marker is. A correction is never a yes to what was asked.
+        """
+        flattened = (text or "").strip().lower()
+        for curly in ("’", "ʼ", "‘", "`"):
+            flattened = flattened.replace(curly, "'")
+        low = " " + re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", flattened)) + " "
+        return any(marker in low for marker in _CORRECTION_MARKERS)
 
     @staticmethod
     def _parse_yes_no(text: str) -> Optional[bool]:
@@ -731,9 +838,38 @@ class Jalen:
             " nevermind ", " wait ", " hold on ", " not yet ", " not now ",
             " forget it ", " leave it ", " skip it ", " negative ",
             " definitely not ", " absolutely not ", " i'd rather not ",
+            # Colloquial refusals the agreement words below would otherwise
+            # catch: "I'm good" is "no thanks", and " good " is a YES word.
+            # Reproduced as approvals by an independent audit.
+            " i'm good ", " im good ", " i'm busy ", " im busy ",
         ):
             if phrase in low:
                 return False
+
+        # --- NOT AN ANSWER: a correction, a question, somebody else's assistant ---
+        #
+        # Agreement is searched for ANYWHERE in the sentence, which is right
+        # for "you, of course" and wrong for a sentence that only contains an
+        # agreement word on its way to saying something else. Each of these
+        # approved the ORIGINAL action, reproduced against this function:
+        #
+        #     "send it to Rodion instead"            " send it "
+        #     "great, but first fix the typo"        " great "
+        #     "ok so what does it say"               " ok "
+        #     "Okay Google"                          " okay "
+        #     "good question, who is Ulughbek"       " good "
+        #
+        # None, not False: confirm() keeps waiting and asks once, or - for a
+        # correction - process() hands his words back to the turn that asked.
+        # Moving YES to None is the safe direction; nothing here can turn a
+        # refusal into approval.
+        if any(marker in low for marker in _CORRECTION_MARKERS):
+            return None
+        if any(w in low for w in (" what ", " who ", " why ", " how ", " which ",
+                                  " where ", " when ")):
+            return None
+        if any(w in low for w in (" google ", " alexa ", " siri ")):
+            return None
 
         # --- YES, anywhere in the sentence ---
         for phrase in (
@@ -1512,10 +1648,34 @@ class Jalen:
 
         # a pending yes/no takes priority over everything else
         if self._awaiting_confirmation:
+            # Jalen's own "...Confirm?" coming back through the microphone.
+            # Ignored silently: it is not him, so it is neither an answer
+            # nor a new instruction.
+            if self._echoes_the_confirmation(text):
+                return
+            # "Send it to Rodion instead." Not a yes to what was asked - it
+            # was approving the ORIGINAL action - and not a plain no either:
+            # it is what he wants done. His words go back with it, so the
+            # turn that asked can act on them, instead of this falling
+            # through and starting a second turn in parallel.
+            if self._is_correction(text):
+                self.audit.utterance(text, who="user")
+                self._answer_q.put(ConfirmAnswer("correction", text))
+                return
             answer = self._parse_yes_no(text)
             if answer is not None:
                 self.audit.utterance(text, who="user")
-                self._answer_q.put(answer)
+                self._answer_q.put(ConfirmAnswer("yes" if answer else "no", text))
+                return
+            # Not readable as either. It used to fall straight through to
+            # the router and the brain, starting a second turn while the
+            # first was still waiting on him. Asked about ONCE; after that a
+            # new instruction is his to give, so it is handled as before
+            # rather than trapping him inside the confirmation.
+            if not getattr(self, "_confirm_reasked", False):
+                self._confirm_reasked = True
+                self.audit.utterance(text, who="user")
+                self.say("Sorry - was that a yes or a no?")
                 return
 
         # ------------------------------------------------------------------
@@ -2152,7 +2312,16 @@ class Jalen:
                 # no cancellation, so a handful of commands issued while one
                 # was still working would all complete later and speak in a
                 # burst — the reported "old commands execute minutes later".
-                if in_flight >= MAX_IN_FLIGHT_TURNS:
+                #
+                # NEVER FOR AN ANSWER. When a turn is waiting on a
+                # confirmation or a question, it is itself one of the turns
+                # in flight - so with one other turn running, his "yes" was
+                # refused with "I'm still on the last one", the confirmation
+                # timed out, and the timeout was reported as a refusal. An
+                # answer starts no work; it releases work already waiting.
+                answering = (self._awaiting_confirmation or self._awaiting_reply
+                             or self._awaiting_stop or self._rating_is_pending())
+                if in_flight >= MAX_IN_FLIGHT_TURNS and not answering:
                     with self._turn_lock:
                         self._active_turns.discard(turn_id)
                     self.say("I'm still on the last one — give me a second.")
