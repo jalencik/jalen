@@ -168,15 +168,23 @@ longer belongs inside the expandable block.
 
 ## Telegram HTML: what is actually supported
 
-Only these tags. Anything else is rejected by the API and the post fails to
-save, which is worse than looking plain:
+Only these tags, and every one of them arrives as formatting:
 
-`<b>` `<i>` `<u>` `<s>` `<code>` `<pre>` `<a href="">` `<blockquote>`
+`<b>` `<i>` `<u>` `<s>` `<code>` `<pre>` `<a href="https://...">` `<blockquote>`
 `<blockquote expandable>` `<tg-spoiler>`
 
-No `<h1>`, no `<ul>`, no `<li>`, no `<br>`, no `<p>`, no markdown `**`.
-Line breaks are literal newlines. Ampersands and angle brackets in the text
-itself must be escaped as `&amp;` `&lt;` `&gt;`.
+(`<strong>` `<em>` `<ins>` `<strike>` `<del>` and `<span class="tg-spoiler">`
+are other spellings of the same things. `<a>` takes `href` and nothing else.)
+
+Anything else - `<h1>`, `<ul>`, `<li>`, `<br>`, `<p>`, a tag never closed, a
+tag closed out of order - and the post fails to save: nothing is sent or
+saved, and the reply names the tag. It is not guessed at, because a guess
+either eats words or posts the tags as visible text. No markdown `**` either:
+it arrives as two asterisks.
+
+Line breaks are literal newlines. Write `&amp;` `&lt;` `&gt;` for those
+characters in the text itself; `&lt;b&gt;` is how to show a tag as text. A
+bare `&` - a link's `?a=1&b=2` - is kept exactly as written.
 
 ---
 

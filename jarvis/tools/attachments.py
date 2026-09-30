@@ -119,7 +119,9 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
     it reaches a person and cannot be recalled.
     """
     from ..integrations.telegram_user import RUNTIME
-    from .messaging import _enabled, _resolve as _resolve_chat, _title_of
+    from .messaging import (
+        _chat_name, _deliver, _enabled, _formatted, _resolve as _resolve_chat,
+    )
 
     _enabled()
     path, problem = _resolve(file)
@@ -132,11 +134,35 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
         entity = await _resolve_chat(client, to)
         if entity is None:
             return f"I couldn't find a Telegram chat called {to!r} — nothing sent."
-        await client.send_file(entity, str(path), caption=caption or None)
-        return (
+        # The caption goes through the same per-call decision as a message
+        # (messaging._formatted): Telegram HTML when it is HTML, plain text
+        # otherwise, and never Telethon's markdown default. parse_mode=None
+        # matters here more than in send_message: send_file treats an EMPTY
+        # entity list as "parse it yourself", so without it a plain caption
+        # like "**v2** final" would lose its asterisks to markdown.
+        post = _formatted(caption or "")
+        if post.refusal:
+            return f"Nothing sent — the caption: {post.refusal}."
+
+        async def send(words, entities):
+            await client.send_file(
+                entity, str(path), caption=words or None,
+                formatting_entities=entities or None, parse_mode=None,
+            )
+
+        # The same single plain retry as a message, on a refusal only: the
+        # first version had none, so a caption Telegram would not format
+        # raised past the tool instead of going out plain.
+        sent, note = await _deliver(send, post)
+        if sent is None:
+            return f"Nothing sent — {note}."
+        reply = (
             f"Sent {path.name} ({path.stat().st_size / 1024**2:.1f} MB) "
-            f"to {_title_of(entity)}."
+            f"to {await _chat_name(client, entity)}."
         )
+        if note:
+            reply += f" The caption went WITHOUT formatting — {note}."
+        return reply
 
     return RUNTIME.run(work)
 

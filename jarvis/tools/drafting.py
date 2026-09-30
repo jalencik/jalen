@@ -124,19 +124,22 @@ def send_posts(to: str, posts: list, as_draft: bool = False) -> str:
             "files with save_draft_text and post them yourself."
         )
 
-    done, failed = [], []
+    done, failed, unconfirmed = [], [], []
     for index, post in enumerate(items, start=1):
         try:
             result = action(to=to, text=post)
         except Exception as exc:  # noqa: BLE001
-            failed.append(f"  {index}. {type(exc).__name__}: {exc}")
+            line = f"  {index}. {type(exc).__name__}: {exc}"
+            (failed if _never_sent(exc) else unconfirmed).append(line)
             continue
-        lowered = result.lower()
-        if "couldn't" in lowered or "could not" in lowered or "nothing sent" in lowered:
-            failed.append(f"  {index}. {result}")
-        else:
+        outcome = _outcome(result)
+        if outcome == "sent":
             first_line = post.splitlines()[0][:60]
             done.append(f"  {index}. {first_line}")
+        elif outcome == "failed":
+            failed.append(f"  {index}. {result}")
+        else:
+            unconfirmed.append(f"  {index}. {result}")
 
     lines = [f"{len(done)} of {len(items)} sent to {to}."]
     if done:
@@ -145,7 +148,48 @@ def send_posts(to: str, posts: list, as_draft: bool = False) -> str:
         # Never rounded away. "Sent 50 posts" when eleven failed is the
         # silent-omission failure in its purest form.
         lines += [f"FAILED ({len(failed)}):"] + failed
+    if unconfirmed:
+        # Neither rounded up nor down. FAILED means "send it again", and for
+        # a post that may already be in the channel that is a double post.
+        lines += [
+            f"NOT CONFIRMED ({len(unconfirmed)}) — these may have gone out; "
+            f"check {to} before sending any of them again:"
+        ] + unconfirmed
     return "\n".join(lines)
+
+
+# HOW A REPLY SAYS WHAT HAPPENED: by its OPENING words - the sentence Jalen
+# writes - never by a word anywhere in it. A delivered reply quotes the post,
+# so the first version, which searched the whole reply for "couldn't", "could
+# not" and "nothing sent", counted a post that said "couldn't" as FAILED after
+# it had gone out, and a failed post is one he sends again. messaging and
+# attachments open every delivered reply with "Sent" (drafts: "Saved"), and
+# every reply where nothing went with one of _NOT_DELIVERED. Anything else is
+# not a reply either module writes, so it is reported unconfirmed, not guessed.
+_DELIVERED = ("Sent", "Saved")
+_NOT_DELIVERED = ("Nothing sent", "Nothing saved", "I couldn't", "Couldn't")
+
+
+def _outcome(reply: Any) -> str:
+    """'sent', 'failed' or 'unconfirmed', from how the reply begins."""
+    opening = str(reply or "").lstrip()
+    if opening.startswith(_DELIVERED):
+        return "sent"
+    if opening.startswith(_NOT_DELIVERED):
+        return "failed"
+    return "unconfirmed"
+
+
+def _never_sent(exc: Exception) -> bool:
+    """
+    An exception that proves nothing went out: no Telegram session, or
+    Telegram refusing the request (a 400). Anything else - a timeout, a
+    dropped connection - may have delivered first.
+    """
+    from ..integrations.telegram_user import TelegramNotConnected
+    from .messaging import _rejected
+
+    return isinstance(exc, TelegramNotConnected) or _rejected(exc)
 
 
 REGISTRY: dict[str, Any] = {
