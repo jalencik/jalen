@@ -387,6 +387,19 @@ class Jalen:
         # Read once, here, not on the gate path - the file's own rule.
         self._answer_window_s = float(
             cfg.get_path("conversation.answer_window_s", 30))
+        # IS THE BRAIN ABLE TO THINK AT ALL? Set when Claude answers with a
+        # typed failure - an expired sign-in, a billing problem, a usage
+        # limit - rather than an answer. See _latch_brain_down. Without it
+        # every turn paid a round-trip to be told the same thing, and read
+        # the CLI's error sentence aloud as if it were the answer.
+        self._brain_down: str | None = None
+        self._brain_down_detail = ""
+        self._brain_down_at = 0.0
+        self._brain_down_told = False
+        # Signing in rewrites this file, which is how a latched brain notices
+        # he has fixed it without waiting for a restart or a timer.
+        self._credentials_file = Path.home() / ".claude" / ".credentials.json"
+        self._credentials_seen = self._credentials_stamp()
         # The action + destination he named this turn, if he named them.
         self._plan = planning.Plan()
         # Last thing he said, for re-attaching a continuation fragment —
@@ -523,7 +536,7 @@ class Jalen:
             ).prewarm_system_scan()),
         ]
         if bool(self.cfg.get_path("brain.prewarm", True)):
-            jobs.append(("brain", lambda: self._run_coro(self._start_brain())))
+            jobs.append(("brain", lambda: self._run_coro(self._prewarm_brain())))
 
         for label, fn in jobs:
             threading.Thread(
@@ -1103,7 +1116,101 @@ class Jalen:
             await brain.start()
             self.brain = brain
 
+    # --------------------------------------------------- when Claude can't
+    #
+    # How long a latched brain-down state lasts before the next turn tries
+    # Claude again even though nothing visible has changed.
+    #
+    # Five minutes, because the signal that normally clears it - the
+    # credentials file changing when he signs in - is not the only way he
+    # fixes it: a usage limit simply expires, and a billing problem is fixed
+    # on claude.ai. A failed retry costs one round-trip of about 400ms
+    # (measured against the live expired sign-in on 2026-09-30) and spends
+    # nothing, because an unauthenticated request is never billed. So the
+    # only cost of a short interval is that latency, paid at most once per
+    # five minutes and only when he actually asks something.
+    BRAIN_RETRY_S = 300.0
+
+    # Latched: nothing will change until he acts, so asking again is waste.
+    # Not latched: Claude's servers having a bad minute, or a malformed
+    # request, which the very next turn may not repeat.
+    _LATCHING_KINDS = ("authentication_failed", "billing_error", "rate_limit")
+
+    def _credentials_stamp(self) -> float:
+        try:
+            return self._credentials_file.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _latch_brain_down(self, kind: str, detail: str = "") -> None:
+        self._brain_down = kind
+        self._brain_down_detail = detail
+        self._brain_down_at = time.monotonic()
+        self._credentials_seen = self._credentials_stamp()
+
+    def _clear_brain_down(self) -> None:
+        self._brain_down = None
+        self._brain_down_detail = ""
+        self._brain_down_told = False
+
+    def _brain_still_down(self) -> str | None:
+        """The latched failure, or None if it is time to try Claude again."""
+        kind = self._brain_down
+        if kind is None:
+            return None
+        if self._credentials_stamp() != self._credentials_seen:
+            return None           # he signed in: try it now, not in five minutes
+        if time.monotonic() - self._brain_down_at >= self.BRAIN_RETRY_S:
+            return None
+        return kind
+
+    def _brain_down_sentence(self, kind: str, detail: str, first: bool) -> str:
+        """
+        One sentence per failure he can act on. Never the CLI's raw text,
+        except where that text is the useful part - a usage limit's reset
+        time.
+        """
+        if kind == "authentication_failed":
+            if first:
+                return (
+                    "My Claude sign-in has expired, so I can't do anything that "
+                    "needs thinking until you sign me back in. Quick commands - "
+                    "opening apps, reading Telegram, the time - still work. Run "
+                    "jalen check and it'll show you the one command to type."
+                )
+            return ("I still can't think - my Claude sign-in has expired. "
+                    "Run jalen check for the fix.")
+        if kind == "billing_error":
+            if first:
+                return (
+                    "Claude is reporting a billing problem on the account, so I "
+                    "can't think right now. That one needs you at claude.ai - "
+                    "quick commands still work."
+                )
+            return "Still blocked on Claude's billing problem - that needs you at claude.ai."
+        if kind == "rate_limit":
+            said = f" It says: {detail.rstrip('.')}." if detail else ""
+            if first:
+                return (f"I've hit Claude's usage limit.{said} Quick commands "
+                        "still work until it resets.")
+            return f"Still over Claude's usage limit.{said}"
+        if kind == "server_error":
+            return ("Claude's servers are struggling right now. Give it a "
+                    "minute and ask me again.")
+        if kind == "invalid_request":
+            return ("Claude rejected that request as malformed - that's a fault "
+                    "on my side, not something you said.")
+        return "Claude returned an error I don't recognise, so I couldn't answer that."
+
     async def handle_with_brain(self, text: str, on_text=None) -> str:
+        from .brain.agent import BrainUnavailable
+
+        down = self._brain_still_down()
+        if down is not None:
+            # Known down, and nothing has changed: answer from memory rather
+            # than paying a round-trip to be told the same thing again.
+            return self._brain_down_sentence(down, self._brain_down_detail, first=False)
+
         if self.brain is None:
             try:
                 await self._start_brain()
@@ -1133,7 +1240,17 @@ class Jalen:
                     "asking again won't help: run jalen check."
                 )
         try:
-            return await self.brain.ask(text, on_text=on_text)
+            reply = await self.brain.ask(text, on_text=on_text)
+        except BrainUnavailable as exc:
+            # Recorded as an ERROR, which it is - it used to be logged as an
+            # ordinary utterance with outcome null, so "why has Jalen been
+            # useless for ten days" had no answer in the audit trail.
+            self.audit.error(f"brain.{exc.kind}", exc)
+            first = not (self._brain_down == exc.kind and self._brain_down_told)
+            if exc.kind in self._LATCHING_KINDS:
+                self._latch_brain_down(exc.kind, exc.detail)
+                self._brain_down_told = True
+            return self._brain_down_sentence(exc.kind, exc.detail, first=first)
         except Exception as exc:
             self.audit.error("brain", exc)
 
@@ -1162,6 +1279,29 @@ class Jalen:
             # (exit code: 129)" is read out loud by a TTS engine, and it
             # tells him nothing he can act on.
             return f"Something went wrong in my head — {type(exc).__name__}. Try again?"
+
+        # It answered, so whatever was latched is over.
+        if self._brain_down is not None:
+            self._clear_brain_down()
+        return reply
+
+    async def _prewarm_brain(self) -> None:
+        """
+        Start the brain in the background, and say ONCE if it is signed out.
+
+        Connecting succeeds with no credential at all, so prewarm used to
+        log success while signed out and he found out only when a real
+        request failed. Saying it at startup, once, is the difference
+        between "Jalen is broken" and "Jalen told me what to fix".
+        """
+        await self._start_brain()
+        if self.brain is None:
+            return
+        if await self.brain.signed_in() is False:
+            self._latch_brain_down("authentication_failed")
+            self._brain_down_told = True
+            self.audit.write("system", summary="brain signed out at startup")
+            self.say(self._brain_down_sentence("authentication_failed", "", first=True))
 
     def speak_brain_reply(self, user_text: str) -> None:
         """

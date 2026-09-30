@@ -77,6 +77,19 @@ def probe_speech() -> list[tuple[str, str, str]]:
     return out
 
 
+def _cli_logged_in(cli: str) -> bool | None:
+    """loggedIn from `claude auth status`, or None if it can't be read."""
+    import json
+    import subprocess
+
+    try:
+        result = subprocess.run([cli, "auth", "status"], capture_output=True,
+                                text=True, timeout=30)
+        return bool(json.loads(result.stdout).get("loggedIn"))
+    except Exception:
+        return None
+
+
 def probe_brain() -> list[tuple[str, str, str]]:
     out = []
     # The BRAIN's binary is not the one on PATH, and "a file exists" is not
@@ -86,20 +99,33 @@ def probe_brain() -> list[tuple[str, str, str]]:
     from jarvis.brain.agent import resolved_cli_path
 
     brain_cli, where, spawnable = resolved_cli_path()
-    out.append((
-        "Claude (the brain)",
-        AVAILABLE if (brain_cli and spawnable) else BLOCKED,
-        where if (brain_cli and spawnable) else f"not runnable — {where}",
-    ))
+    if not (brain_cli and spawnable):
+        out.append(("Claude (the brain)", BLOCKED, f"not runnable — {where}"))
+    else:
+        # RUNNABLE IS NOT SIGNED IN. This line said AVAILABLE for the whole
+        # ten days the sign-in was expired, because spawning the binary was
+        # the only thing it checked. `auth status` answers without making a
+        # request, so it costs nothing to ask. It is a presence check - a
+        # bogus env token can still read loggedIn:true - which is why
+        # check_env.py makes one real request; this is the cheap half.
+        signed_in = _cli_logged_in(brain_cli)
+        if signed_in is False:
+            out.append(("Claude (the brain)", BLOCKED,
+                        "signed out — it cannot think. Run jalen check for the fix"))
+        else:
+            out.append(("Claude (the brain)", AVAILABLE if signed_in else PARTIAL,
+                        where if signed_in else f"{where}; sign-in not verified"))
 
-    # The handoff is a genuinely different binary: jarvis/tools/coding.py
-    # launches the PATH install interactively (claude.cmd first, by design), so
-    # PATH is the correct source for THIS line and only this one.
-    handoff = shutil.which("claude")
+    # The handoff resolver is coding._claude_cli, not PATH. It used to prefer
+    # npm's claude.CMD, and cmd.exe cut every multi-line brief at its first
+    # line - so it now prefers a real executable and reaches the shim last.
+    from jarvis.tools import coding
+
+    handoff = coding._claude_cli()
     out.append((
         "Claude Code handoff", AVAILABLE if handoff else BLOCKED,
         "headless jobs, reviewed against the git diff" if handoff
-        else "needs the claude CLI on PATH",
+        else "no Claude Code CLI found",
     ))
     out.append((
         "Claude desktop (cowork)",

@@ -55,6 +55,63 @@ def _looks_like_a_dead_client(exc: BaseException) -> bool:
     return any(sign in text for sign in _DEAD_CLIENT_SIGNS)
 
 
+class BrainUnavailable(Exception):
+    """
+    Claude answered, but not with an answer.
+
+    THE CLI DOES NOT RAISE WHEN IT CANNOT THINK. With the sign-in expired it
+    sends a SYNTHETIC assistant message - model "<synthetic>", error
+    "authentication_failed", text "Failed to authenticate: OAuth session
+    expired and could not be refreshed" - and then a ResultMessage with
+    is_error=True. ask() used to read only the text, so that sentence became
+    Jalen's reply: spoken aloud on every turn, logged as an ordinary
+    utterance, the task marked COMPLETED. Measured live on 2026-09-30, and
+    in data/audit.jsonl as four identical replies in 68 seconds.
+
+    `kind` is the SDK's own AssistantMessageError literal -
+    authentication_failed, billing_error, rate_limit, invalid_request,
+    server_error, unknown - so nothing here depends on how the CLI happens
+    to word the sentence this month. It has already worded the same failure
+    two ways ("401 OAuth access token has been revoked" on 22 August).
+
+    `detail` is the CLI's own text, kept because for a usage limit it says
+    WHEN the limit resets, which is the one thing he needs to know.
+
+    The message deliberately contains none of _DEAD_CLIENT_SIGNS: a match
+    would restart the CLI on every turn and fail again, nine seconds a time.
+    """
+
+    def __init__(self, kind: str, detail: str = "") -> None:
+        self.kind = kind or "unknown"
+        self.detail = (detail or "").strip()
+        super().__init__(f"brain unavailable: {self.kind}")
+
+
+# What a turn that stopped early, having said nothing, says instead of
+# nothing. ResultMessage.subtype values from the SDK; anything else falls
+# back to the generic line.
+_STOPPED_EARLY = {
+    "error_max_turns": (
+        "I ran out of steps before I finished that - {turns} tool calls in. "
+        "Ask me to carry on, or give me a narrower version of it."
+    ),
+    "error_during_execution": (
+        "Something failed while I was working on that, and I have nothing "
+        "finished to show you."
+    ),
+}
+_STOPPED_EARLY_DEFAULT = (
+    "I stopped before finishing that, and I have nothing to show for it yet."
+)
+# Said through the SAME stream he is listening to, when part of the answer
+# was already spoken before the turn stopped. A note appended to the return
+# value would never be heard: once text has streamed, app.py does not speak
+# the returned string again.
+_CUT_SHORT_NOTE = (
+    " - I stopped partway through there, so that may be incomplete."
+)
+
+
 # Windows only. CreateProcess flag meaning "give this child no console".
 _CREATE_NO_WINDOW = 0x08000000
 
@@ -755,6 +812,36 @@ class Brain:
             finally:
                 self._client = None
 
+    async def signed_in(self) -> bool | None:
+        """
+        Does the CLI have a Claude credential at all? None when it can't tell.
+
+        WHY THIS EXISTS. Connecting succeeds with no credential whatsoever,
+        so prewarm logged "prewarm brain: 13159ms" as a success on 21
+        September and again on the 23rd while signed out, and he first found
+        out when a real request failed - then again on every request after.
+
+        get_server_info() reports the account's tokenSource without spending
+        a request. Measured on this machine while expired: tokenSource
+        "none". It is a PRESENCE check only - an expired token that is still
+        on disk, or a bogus CLAUDE_CODE_OAUTH_TOKEN, may well still report a
+        source - so the authoritative signal remains the first
+        authentication_failed from ask(). Private SDK surface, so it is
+        wrapped rather than trusted.
+        """
+        client = self._client
+        if client is None:
+            return None
+        try:
+            info = await client.get_server_info()
+        except Exception:
+            return None
+        account = (info or {}).get("account") or {}
+        source = account.get("tokenSource")
+        if source is None:
+            return None
+        return source != "none"
+
     async def _restart_client(self) -> None:
         """
         Replace a dead CLI subprocess with a live one.
@@ -833,6 +920,12 @@ class Brain:
             streamed: list[str] = []
             blocks: list[str] = []
             final = ""
+            # What went wrong, read from the fields the SDK TYPES rather than
+            # from the words it happens to use. See BrainUnavailable.
+            error_kind: str | None = None
+            error_text = ""
+            stopped_early: str | None = None
+            turns_used = 0
 
             async for message in self._client.receive_response():
                 # Token deltas (include_partial_messages). Detected by shape
@@ -852,18 +945,57 @@ class Brain:
                     continue
 
                 if isinstance(message, AssistantMessage):
+                    kind = getattr(message, "error", None)
+                    if kind:
+                        # The synthetic error message. Its text is the CLI's
+                        # explanation, NOT an answer, so it goes to
+                        # error_text and never into what gets spoken.
+                        error_kind = kind
+                        error_text = " ".join(
+                            b.text for b in message.content
+                            if getattr(b, "text", None))
+                        continue
                     for block in message.content:
                         if getattr(block, "text", None):
                             blocks.append(block.text)
                 elif isinstance(message, ResultMessage):
-                    if getattr(message, "subtype", "") == "success":
+                    subtype = getattr(message, "subtype", "") or ""
+                    turns_used = getattr(message, "num_turns", 0) or 0
+                    if subtype == "success" and not getattr(message, "is_error", False):
                         final = getattr(message, "result", "") or ""
+                    elif subtype == "success":
+                        # is_error with a "success" subtype is how the CLI
+                        # reports an API failure it could not attribute to
+                        # a turn - seen live with terminal_reason
+                        # "api_error". Treat it as an error even when no
+                        # assistant message carried the typed flag.
+                        error_kind = error_kind or "unknown"
+                        error_text = error_text or (getattr(message, "result", "") or "")
+                    else:
+                        stopped_early = subtype
                     break
+
+            if error_kind and not streamed:
+                raise BrainUnavailable(error_kind, error_text)
 
             # Precedence matters. When deltas arrived, they are what was
             # actually SPOKEN, so they must win: returning the SDK's `result`
             # instead would hand app.py a string that differs from the audio
             # already playing, and the tail would be spoken twice.
             if streamed:
+                if (error_kind or stopped_early) and on_text is not None:
+                    # Report done and not-done in the same breath.
+                    on_text(_CUT_SHORT_NOTE)
                 return "".join(streamed).strip()
-            return (final or " ".join(blocks)).strip()
+
+            answer = (final or " ".join(blocks)).strip()
+            if stopped_early and not answer:
+                # A tool-only turn that hit max_turns returned '' here, and
+                # say('') returns before speaking or logging anything, so
+                # the turn was simply silent. The long research turns he
+                # asks for are exactly the ones that hit the limit.
+                template = _STOPPED_EARLY.get(stopped_early, _STOPPED_EARLY_DEFAULT)
+                return template.format(turns=turns_used or "several")
+            if stopped_early:
+                return answer + _CUT_SHORT_NOTE
+            return answer

@@ -157,12 +157,30 @@ def main() -> int:
                  "--setting-sources", ""],
                 capture_output=True, text=True, timeout=60,
             )
-            if result.returncode == 0 and "ok" in result.stdout.lower():
+            # "ok" AS A WORD. The old test was `"ok" in stdout`, and the
+            # failure text from 22 August - "...access token has been
+            # revoked." - contains "ok" inside "token". It only failed to
+            # misfire because that run also exited non-zero.
+            import re as _re
+            said = (result.stdout or "").strip()
+            if result.returncode == 0 and _re.search(r"\bok\b", said.lower()):
                 print(f"{OK}authenticated — your Claude plan is working")
             else:
-                print(f"{WARN}claude CLI is installed but not authenticated. Run: claude setup-token")
+                # BLOCKING, not a warning. This printed "[--]" and then "All
+                # good" with exit code 0 for ten days while every brain turn
+                # failed - and it is the diagnostic Jalen itself tells him to
+                # run when that happens. The CLI's own reply is shown
+                # because it names the cause and holds no secret.
+                reason = (said or (result.stderr or "").strip()).splitlines()
+                print(f"{BAD}the brain is NOT signed in to Claude — it cannot think")
+                if reason:
+                    print(f"      Claude says: {reason[0][:160]}")
+                _print_sign_in_fix(claude_path)
+                problems += 1
         except Exception as exc:
-            print(f"{WARN}couldn't verify ({type(exc).__name__}: {exc}) — run `claude setup-token` if the brain fails")
+            print(f"{BAD}couldn't verify the Claude sign-in ({type(exc).__name__}: {exc})")
+            _print_sign_in_fix(claude_path)
+            problems += 1
     else:
         # Not "not on PATH" — PATH is irrelevant to the brain. This means the
         # SDK could resolve nothing at all, which on Windows usually means the
@@ -201,6 +219,29 @@ def main() -> int:
     print("\n" + ("All good — start it with:  .\\jalen.ps1" if problems == 0
                   else f"{problems} blocking problem(s) above."))
     return 1 if problems else 0
+
+
+def _print_sign_in_fix(claude_path: str) -> None:
+    """
+    The fix, naming the binary the BRAIN runs - not whatever `claude` means
+    in his terminal, which is npm's shim and a different install.
+
+    setup-token first, because it produces a LONG-LIVED token: the ordinary
+    login is what expired on 20 September and "could not be refreshed",
+    leaving the brain unable to think for ten days before anyone noticed.
+    A token in CLAUDE_CODE_OAUTH_TOKEN beats the machine-wide login (see
+    CLAUDE.md), so it also stops another Claude install on this machine from
+    signing Jalen out. He pastes it himself: nothing here reads, writes or
+    prints a credential.
+    """
+    print("      FIX (about two minutes, once):")
+    print(f'        1. In a terminal run:  "{claude_path}" setup-token')
+    print("           It opens your browser - sign in with your Claude account.")
+    print("        2. It prints a long token. Open .env in this folder and set:")
+    print("              CLAUDE_CODE_OAUTH_TOKEN=<paste it here>")
+    print("        3. Restart Jalen. The token is read at startup.")
+    print("      Leave ANTHROPIC_API_KEY empty - a value there switches the")
+    print("      brain to per-token billing instead of your subscription.")
 
 
 def _check_disk() -> int:
