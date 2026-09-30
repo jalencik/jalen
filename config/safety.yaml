@@ -495,3 +495,55 @@ injection_guard:
   # Any tool call whose arguments originated from read content and target a
   # RED tool is automatically blocked and reported, regardless of markers.
   block_red_tools_from_read_content: true
+  # GREEN tools that ACT - on another program, on the disk, on what Jalen
+  # will remember - refused the same way when the request came from
+  # something Jalen read. The rule above only ever covered RED and AMBER,
+  # and most of what can act on this machine is GREEN: type_text into a
+  # focused PowerShell, os.startfile on an .exe, a .bat in the Startup
+  # folder, remember_alias("mom" -> a stranger) that a CLEAN turn later
+  # obeys. Readers are not here (reading is what taints), and neither are
+  # drafts - "read his email and draft a reply" is the core flow, and a
+  # draft reaches nobody.
+  # Measured before listing, data/audit.jsonl 2026-09-30: 4,967 rows, 23
+  # actions with origin=content, every one a reader or an already-refused
+  # send - so this refuses 0 of the tainted calls he actually made.
+  # Only GREEN tools belong here (RED/AMBER are already refused), and
+  # tests/test_green_actors_refuse_content.py fails on a name that is not a
+  # GREEN tool the brain can call.
+  refuse_from_content:
+    # Input into other programs - the machine does what the page says.
+    - type_text
+    - keyboard_shortcut
+    - click_element
+    - fill_field
+    - next_field
+    # Launching. os.startfile RUNS an executable, whichever tool calls it,
+    # and a URL can carry what he just read to a stranger's server.
+    - open_app
+    - open_target
+    - open_in
+    - open_folder
+    - open_url
+    - search_site
+    - open_signup
+    # The disk.
+    - create_file
+    - create_folder
+    - copy_file
+    - move_file
+    - rename_file
+    - screenshot           # writes to a path the caller chooses
+    # What Jalen will remember, and later treat as his.
+    - remember
+    - remember_alias
+    - forget_habit
+    - record_rating        # also emails a summary
+    # Ending things.
+    - cancel_task          # kills a coding job's whole process tree
+    - close_app            # can lose unsaved work
+    - close_browser
+    # His calendar. (archive_email and label_email are GREEN above but the
+    # brain has no tool for either - listing them here would protect
+    # nothing. Add them the day they reach TOOL_SPECS: archiving hides the
+    # security alert that warned him.)
+    - create_calendar_event

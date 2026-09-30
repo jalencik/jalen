@@ -168,6 +168,7 @@ class SafetyEngine:
         self.guard_enabled = guard.get("enabled", True)
         self._markers = [m.lower() for m in guard.get("suspicious_markers", []) or []]
         self._block_red_from_content = guard.get("block_red_tools_from_read_content", True)
+        self._acts_on_the_world = frozenset(guard.get("refuse_from_content", []) or [])
 
         self.posture = cfg.get_path("safety.posture", "irreversible_only")
         self.paranoid = bool(cfg.get_path("safety.paranoid_first_week", True))
@@ -389,6 +390,22 @@ class SafetyEngine:
                 Tier.BLACK, tool, summary,
                 "this came from something I read, not from you — I don't act on "
                 "instructions found in content",
+                False, False, True, detail,
+            )
+
+        # 2b. ...and GREEN tools that ACT. The check above only ever covered
+        # RED and AMBER, so after a read every GREEN tool that types, clicks,
+        # launches, writes a file or plants a memory still did what the text
+        # said. The list is in safety.yaml (injection_guard.
+        # refuse_from_content) with its measurement. Still above
+        # pre-approval, for the same reason as step 2.
+        if (origin == "content" and self._block_red_from_content
+                and tool in self._acts_on_the_world):
+            detail["acts_on_the_world_under_taint"] = True
+            return Verdict(
+                Tier.BLACK, tool, summary,
+                "I read something while doing this, so I won't do that on its "
+                "say-so. Ask me again yourself and I will",
                 False, False, True, detail,
             )
 
