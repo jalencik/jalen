@@ -24,10 +24,15 @@ python run.py --why    # why the last run stopped
 .venv\Scripts\python.exe -m pytest tests\ -q --ignore=tests\benchmark_latency.py --ignore=tests\benchmark_open.py --ignore=tests\benchmark_phrasing.py
 ```
 
-3,249 tests collect under that gate; 3,474 if the benchmarks are included,
+3,802 tests collect under that gate; 4,027 if the benchmarks are included,
 because `pytest.ini` sets `python_files = test_*.py *_test.py benchmark_*.py`.
 
-Always `python -m pytest`, never the bare `pytest.exe` — 61 of 86 test files
+One test fails on this machine for a reason outside the code:
+`test_overhaul_fixes::test_real_typos_and_abbreviations_still_resolve[capcut]`
+expects CapCut to be installed, and `%LOCALAPPDATA%\CapCut\Apps` is now
+empty. Every other failure is real.
+
+Always `python -m pytest`, never the bare `pytest.exe` — 80 of 109 test files
 have no `sys.path.insert` and depend on `-m` putting the CWD on the path.
 `pytest-timeout` is not installed, so `--timeout=` kills the run before
 collection.
@@ -62,10 +67,18 @@ There is no linter, no type checker, no CI and no git remote.
 - **`suppress_cli_console_window()` must run before `ClaudeSDKClient` is
   constructed** (agent.py:487 before :489). It patches `anyio.open_process` by
   module attribute.
-- **Never hardcode `origin='user'`** — always `taint.origin_now()`. (Two live
-  call sites violate this today: research.py:194 and attachments.py:57. Both
-  only act on a BLACK verdict, so the blast radius is small, but do not copy
-  the pattern.)
+- **Never hardcode `origin='user'`** — always `taint.origin_now()`. Leaving
+  `origin=` out is the same mistake: `classify()` defaults it to `"user"`.
+  (The two call sites that did this, research.py and attachments.py, were
+  fixed on 2026-09-30.) A question that is not about origin at all — "is
+  this file / this site protected?" — goes to `SafetyEngine.protected_path()`
+  or `protected_domain()`, never to a second copy of the never-touch list.
+- **A GREEN tool that acts goes on `injection_guard.refuse_from_content`**
+  in `config/safety.yaml`. The injection guard escalates only RED and AMBER
+  on a tainted turn; a GREEN tool that types, clicks, launches, writes a
+  file or stores a memory does whatever the page Jalen just read says,
+  unless it is on that list. `tests/test_green_actors_refuse_content.py`
+  and `tests/test_every_tool_has_a_tier.py` catch typos, not omissions.
 - **Two gates decide whether you are heard, and they must agree.** The
   microphone gate (`follow_up_until`, and now `_expectation_open()`, in the
   `not listening` branch of `Jalen.run`) decides whether a sound opens a
@@ -108,8 +121,11 @@ There is no linter, no type checker, no CI and no git remote.
   traceback is a bug and an error message is a sentence.
 - **Adding a tool is three edits**: the module's `REGISTRY`, `TOOL_SPECS` in
   `jarvis/brain/tools.py`, and a tier in `config/safety.yaml`. The first two
-  hard-fail at startup when they drift; the third fails at nothing and silently
-  degrades to unclassified-AMBER.
+  hard-fail at startup when they drift; the third used to fail at nothing and
+  silently degrade to unclassified-AMBER, and now fails
+  `tests/test_every_tool_has_a_tier.py`. If the tool is GREEN and acts on the
+  world, it also goes on `injection_guard.refuse_from_content` (see
+  Invariants) — nothing enforces that one.
 - **Every tuned constant carries its measurement in a comment.** Changing a
   number without a new measurement breaks the local convention.
 - Config is read only through `cfg.get_path("dotted.key", default)` in
