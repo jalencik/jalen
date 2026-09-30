@@ -38,6 +38,27 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _every_test_starts_and_ends_untainted():
+    """
+    Taint is process-wide (jarvis/taint.py), which is right for Jalen - one
+    turn, one origin - and wrong for a test run, where it leaked from one
+    FILE into the next. tests/test_web_sign_in.py resumes a delegation that
+    reads a web answer, and left the whole process at origin_now() ==
+    "content". Every safety test after it then classified as if Jalen had
+    just read a stranger's page: test_agent_hook_safety_gate's confirmed
+    delete_file was refused, but only when run after it - the full gate's
+    alphabetical order hid it. Worse is the other direction: a test that
+    asserts a refusal could pass because of taint some earlier file left,
+    not because of the rule it is testing.
+    """
+    from jarvis import taint
+
+    taint.he_asked_again()
+    yield
+    taint.he_asked_again()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _keep_tests_out_of_real_data(tmp_path_factory):
     scratch = tmp_path_factory.mktemp("jarvis-test-data")
