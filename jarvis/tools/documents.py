@@ -48,6 +48,18 @@ from typing import Any
 from ..config import CONFIG
 from .filesystem import _is_under_never_touch, _never_touch_dirs, _resolve
 
+_ENGINE = None
+
+
+def _never_touch_engine():
+    """The SafetyEngine every protected-path question goes to, built once."""
+    global _ENGINE
+    if _ENGINE is None:
+        from ..safety import SafetyEngine
+
+        _ENGINE = SafetyEngine(CONFIG)
+    return _ENGINE
+
 # Returned text cap. This may end up spoken (TTS) or as LLM context, not
 # displayed in an editor — 20k characters is generously a dozen pages, well
 # past "I gave you the gist," and still small enough not to blow a context
@@ -403,8 +415,10 @@ def _load_document(path: str) -> tuple[bool, str]:
         return False, f"{path} is a folder, not a file — try list_directory or search_in_files."
     # Defense in depth: SafetyEngine.classify() already blocks reads under
     # never_touch before any tool runs, same as every other tool here. This
-    # is the belt-and-suspenders check filesystem.search_files also does.
-    if _is_under_never_touch(p, _never_touch_dirs()):
+    # is the belt-and-suspenders check for callers that skip classify - and
+    # it asks the SAME engine, patterns included, not the directories-only
+    # copy it used to (which let a passwords.txt through).
+    if _never_touch_engine().protected_path(p):
         return False, f"{p.name} is on the protected list — I won't read it."
 
     max_mb = _max_file_mb()
@@ -515,15 +529,24 @@ def search_in_files(query: str, folder: str | None = None) -> str:
         for dirpath, dirnames, filenames in os.walk(root):
             if not _budget_left():
                 break
+            # One implementation of "protected", patterns included: the
+            # directories-only check let passwords.txt and credentials.json
+            # in an ordinary folder be opened and quoted back to the model.
+            # A folder named like a pattern ("Mother credentials") is pruned
+            # whole; a file is checked when it is about to be READ (~220 us
+            # each, and at most _SEARCH_MAX_FILES_READ of them).
+            engine = _never_touch_engine()
             dirnames[:] = [
                 d for d in dirnames
-                if d.lower() not in exclude_dirs and not _is_under_never_touch(Path(dirpath) / d, never_dirs)
+                if d.lower() not in exclude_dirs
+                and not _is_under_never_touch(Path(dirpath) / d, never_dirs)
+                and not engine.protected_path(Path(dirpath) / d)
             ]
             for name in filenames:
                 if not _budget_left():
                     break
                 p = Path(dirpath) / name
-                if p.suffix.lower() not in exts or _is_under_never_touch(p, never_dirs):
+                if p.suffix.lower() not in exts or engine.protected_path(p):
                     continue
                 try:
                     if p.stat().st_size > max_mb * 1_000_000:

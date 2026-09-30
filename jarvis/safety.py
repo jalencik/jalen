@@ -286,6 +286,18 @@ class SafetyEngine:
                 return domain
         return None
 
+    def protected_path(self, path: Any) -> str | None:
+        """
+        Is this file or folder on the never-touch list - its paths OR its
+        filename patterns? The ONE implementation, for code that walks the
+        disk or picks a file itself after classify has run: search_in_files
+        excluded never-touch directories and nothing else, and returned the
+        lines of a passwords.txt in an ordinary folder. Returns the reason,
+        or None. ~220 us per call (measured 2026-09-30), so walkers ask it
+        for what they are about to READ, not for every name they pass.
+        """
+        return self._touches_forbidden_path({"path": str(path)})
+
     def protected_domain(self, address: str) -> str | None:
         """
         Is this web address on the never-touch domain list? For callers that

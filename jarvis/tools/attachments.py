@@ -53,11 +53,13 @@ _SAFETY = SafetyEngine(CONFIG)
 
 
 def _is_protected(path: Path) -> str | None:
-    """The reason this file may not be sent, or None."""
-    verdict = _SAFETY.classify("send_telegram_file", {"path": str(path)})
-    from ..safety import Tier
-
-    return verdict.reason if verdict.tier is Tier.BLACK else None
+    """
+    The reason this file may not be sent, or None. Asks the never-touch
+    question directly: it used to go through classify() with the default
+    origin, which CLAUDE.md lists as a hardcoded-origin call site - and
+    WHERE the request came from is not part of "is this file protected".
+    """
+    return _SAFETY.protected_path(path)
 
 # Telegram's own limit for a normal account is 2GB. Gmail's is 25MB for the
 # whole encoded message, and base64 inflates by a third, so the real ceiling
