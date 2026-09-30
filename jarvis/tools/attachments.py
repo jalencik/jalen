@@ -118,9 +118,9 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
     pre-approved — same rule as a text message, and for the same reason:
     it reaches a person and cannot be recalled.
     """
-    from ..integrations.telegram_user import RUNTIME
     from .messaging import (
-        _chat_name, _deliver, _enabled, _formatted, _resolve as _resolve_chat,
+        _Attempt, _chat_name, _deliver, _enabled, _formatted, _run_send,
+        _resolve as _resolve_chat,
     )
 
     _enabled()
@@ -153,6 +153,7 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
         # The same single plain retry as a message, on a refusal only: the
         # first version had none, so a caption Telegram would not format
         # raised past the tool instead of going out plain.
+        attempted.set()
         sent, note = await _deliver(send, post)
         if sent is None:
             return f"Nothing sent — {note}."
@@ -164,7 +165,9 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
             reply += f" The caption went WITHOUT formatting — {note}."
         return reply
 
-    return RUNTIME.run(work)
+    # A timeout must not read as a failure: see messaging._run_send.
+    attempted = _Attempt()
+    return _run_send(work, to, attempted)
 
 
 def draft_email_with_file(to: str, subject: str, body: str, file: str) -> str:

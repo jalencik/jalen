@@ -618,6 +618,7 @@ def send_telegram_message(to: str, text: str) -> str:
 
         # A post that went out plain is recoverable; one lost to an exception
         # is not - so a refused formatting is retried once plain (_deliver).
+        attempted.set()
         message, note = await _deliver(send, post)
         if message is None:
             return f"Nothing sent — {note}."
@@ -633,7 +634,59 @@ def send_telegram_message(to: str, text: str) -> str:
             )
         return f"Sent to {name}: {message!r}"
 
-    return RUNTIME.run(work)
+    attempted = _Attempt()
+    return _run_send(work, to, attempted)
+
+
+class _Attempt:
+    """Set, on the Telegram loop, the moment a send is handed to Telegram."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self._event = threading.Event()
+
+    def set(self) -> None:
+        self._event.set()
+
+    def __bool__(self) -> bool:
+        return self._event.is_set()
+
+
+def _run_send(work, to: str, attempted: _Attempt) -> str:
+    """
+    RUNTIME.run(work) for anything that SENDS, saying what can be known.
+
+    A SEND THAT TIMED OUT WAS REPORTED AS A FAILURE, AND A FAILED POST IS ONE
+    THE BRAIN SENDS AGAIN. RUNTIME.run waits with
+    run_coroutine_threadsafe(...).result(60); on timeout that raises while
+    the coroutine KEEPS RUNNING on the Telegram loop, so the post can still
+    land a moment later. The exception escaped, the tool wrapper turned it
+    into "send_telegram_message failed: TimeoutError", and the obvious next
+    move was a second copy in his channel, as him. A network error after the
+    request went out has the same shape.
+
+    So: a timeout is always "Not confirmed" (the work may still be running);
+    any other error is "Nothing sent" if it came before the send was handed
+    to Telegram, "Not confirmed" after. drafting.send_posts counts "Not
+    confirmed" as NOT CONFIRMED, never FAILED. Not being signed in still
+    raises TelegramNotConnected: it proves nothing went out and carries the
+    fix.
+    """
+    try:
+        return RUNTIME.run(work)
+    except TelegramNotConnected:
+        raise
+    except TimeoutError:
+        return (f"Not confirmed — Telegram didn't answer in time, so the message "
+                f"to {to} may already be there. Check the chat before sending "
+                "it again.")
+    except Exception as exc:  # noqa: BLE001 - spoken, not raised
+        if attempted:
+            return (f"Not confirmed — the connection failed ({type(exc).__name__}) "
+                    f"after I sent it to {to}, so it may already be there. Check "
+                    "the chat before sending it again.")
+        return f"Nothing sent — I couldn't reach Telegram ({type(exc).__name__}: {exc})."
 
 
 def save_telegram_draft(to: str, text: str) -> str:
