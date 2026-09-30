@@ -8,6 +8,7 @@ channel O'ktam is actually using. That keeps the policy in one testable place.
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -36,6 +37,57 @@ class Verdict:
     @property
     def allowed_immediately(self) -> bool:
         return self.tier is Tier.GREEN
+
+
+# Argument names that carry a location. "path", "file" and "dir" were the
+# only ones inspected, so project_status(folder=...), open_in(target=...) and
+# copy_file/move_file(destination=...) were never checked at all - and
+# copying a file INTO ~/.ssh is how a key gets planted. Listed from every
+# argument in TOOL_SPECS that the old three missed. "location" is left out
+# on purpose: create_calendar_event(location="Password workshop") is a
+# place, not a file, and a value that really is a path is still caught by
+# _LOOKS_LIKE_A_PATH below.
+_PATHISH_KEYS = ("path", "file", "dir", "folder", "target", "source", "dest")
+
+# A value that IS a path, whatever its argument is called: a drive letter, a
+# home-relative path, a %VARIABLE%, a UNC or long-path prefix, a relative
+# ./ or ../, or a file: URL (open_url hands those straight to os.startfile)
+# - anchored at the START, so a sentence that mentions C:/Windows halfway
+# through is not one.
+_LOOKS_LIKE_A_PATH = re.compile(
+    r"^(?:[a-zA-Z]:[\\/]|~(?:[\\/]|$)|%[^%\s]+%|\\\\|//|\.{1,2}[\\/]|file:)",
+    re.IGNORECASE)
+
+# Any other URL is not a path, even in a path-ish argument:
+# remember_alias(target="https://passwords.google.com") names a web page.
+# Two or more scheme letters, so "C://Windows" is still a drive.
+_WEB_URL = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]+://")
+
+
+def _expanded_path(raw: str) -> str:
+    """
+    The argument as the tool will read it, before it is made absolute: the
+    same expansion the tools do (filesystem._resolve: expandvars, then
+    expanduser), plus what they get for free from the OS - ".." resolved,
+    the \\\\?\\ long-path prefix and a file: scheme removed. Pure string
+    operations; nothing here touches the filesystem.
+    """
+    s = str(raw).strip()
+    if s[:5].lower() == "file:":
+        from urllib.parse import unquote
+
+        s = unquote(s[5:])
+        s = re.sub(r"^[\\/]+(?=[a-zA-Z]:)", "", s)
+    for prefix in ("\\\\?\\", "//?/", "\\\\.\\", "//./"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+    return os.path.normpath(os.path.expandvars(os.path.expanduser(s)))
+
+
+def _canonical_path(raw: str) -> str:
+    """The path a tool would actually open, as a comparable string."""
+    s = os.path.normpath(os.path.abspath(_expanded_path(raw)))
+    return s.replace("\\", "/").rstrip("/").lower()
 
 
 # EXACTLY the spellings messaging._resolve turns into get_me() - his own
@@ -108,22 +160,57 @@ class SafetyEngine:
         return str(Path(str(p)).as_posix()).rstrip("/").lower()
 
     def _touches_forbidden_path(self, args: dict[str, Any]) -> str | None:
+        """
+        Does any argument point at something on the never-touch list?
+
+        IT USED TO PROTECT ONE SPELLING OF EACH PATH. The raw argument was
+        compared, while every tool that touches a file expands it first
+        (filesystem._resolve: expandvars + expanduser), so the gate and the
+        tool disagreed about which file was being touched. Reproduced
+        against this engine: C:\\Users\\user\\.ssh\\config was BLACK, and
+        ~/.ssh/config, %USERPROFILE%/.ssh/config, a "..\\" detour and the
+        \\\\?\\ long-path form were all GREEN. And only argument names
+        containing path/file/dir were inspected, so folder= and target=
+        walked straight past it, with origin=content too.
+
+        Now a path is canonicalised the way the tools resolve it before it
+        is compared, and any argument whose NAME suggests a location, or
+        whose WHOLE value looks like a path, is inspected. Prose that merely
+        mentions C:/Windows is left alone - a guard that fires on sentences
+        gets switched off.
+        """
         candidates: list[str] = []
         for key, value in (args or {}).items():
-            if isinstance(value, str) and (
-                "path" in key.lower() or "file" in key.lower() or "dir" in key.lower()
-                or re.match(r"^[a-zA-Z]:[\\/]", value)
-            ):
+            if not isinstance(value, str) or not value.strip() or "\n" in value:
+                continue
+            v = value.strip()
+            if _LOOKS_LIKE_A_PATH.match(v):
+                candidates.append(value)
+            elif (any(hint in key.lower() for hint in _PATHISH_KEYS)
+                    and not _WEB_URL.match(v)):
                 candidates.append(value)
         for raw in candidates:
-            norm = self._norm(raw)
+            try:
+                norm = _canonical_path(raw)
+                written = _expanded_path(raw).replace("\\", "/").lower()
+            except Exception:
+                # Fail CLOSED. A path this cannot read is not a path it has
+                # checked.
+                return "a path I couldn't check safely, so I won't touch it"
             for blocked in self._never_paths:
                 if norm == blocked or norm.startswith(blocked + "/"):
                     return f"path is on the never-touch list ({blocked})"
-            name = Path(raw).name
-            for pattern in self._never_patterns:
-                if fnmatch.fnmatch(name.lower(), pattern.lower()):
-                    return f"filename matches protected pattern '{pattern}'"
+            # Every component, not only the final name: a protected name
+            # used as a FOLDER ("Mother credentials" moved off the Desktop,
+            # a "passwords" folder of plain .txt files) protects what is
+            # inside it too. Only the components he WROTE (after expansion),
+            # never the working directory a relative path is resolved
+            # against - or Jalen started from a folder called
+            # "credentials-app" would refuse every relative path.
+            for part in written.split("/"):
+                for pattern in self._never_patterns:
+                    if fnmatch.fnmatch(part, pattern.lower()):
+                        return f"filename matches protected pattern '{pattern}'"
         return None
 
     def _touches_forbidden_target(self, args: dict[str, Any]) -> str | None:
