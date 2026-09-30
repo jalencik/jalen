@@ -304,6 +304,25 @@ class Brain:
         self.model = cfg.get_path("brain.model_default", "claude-sonnet-5")
 
     # ------------------------------------------------------------ system prompt
+    def _preapproved_destinations_line(self) -> str:
+        """
+        The EXACT `to` values that go out without a confirmation.
+
+        The safety gate now approves a destination only by its exact name -
+        it used to match any substring in either direction, so "Ed" and "a"
+        were pre-approved - and the prompt only ever said "his Machine
+        Learning community". A model left to paraphrase the title gets a
+        spoken "Confirm?" at best and a chat that cannot be found at worst.
+        Read from config so the prompt and the gate cannot drift apart.
+        """
+        names = [str(n) for n in
+                 (self.cfg.get_path("telegram.personal.send_without_asking_to", []) or [])]
+        if not names:
+            return ""
+        spelled = " and ".join(f'to="{n}"' for n in names)
+        return (f"Use exactly {spelled} for those - the gate matches the exact "
+                "name, and anything else is asked about or not found.\n")
+
     def system_prompt(self) -> str:
         base = self.cfg.get_path("persona.style", "")
         projects = self.cfg.get("projects", []) or []
@@ -417,6 +436,7 @@ class Brain:
             "it by name. Drafting instead is the failure he reported: he "
             "asked for a post to be sent to his Saved Messages, got a draft, "
             "and had to go and press send himself.\n"
+            + self._preapproved_destinations_line() +
             "Read the post back to him after sending.\n"
             "save_telegram_draft is for a destination he has NOT pre-approved, "
             "or when he explicitly asks for a draft.\n"
@@ -609,7 +629,8 @@ class Brain:
             origin = ("content" if input_data.get("_from_content")
                       else taint.origin_now())
 
-            verdict = self.safety.classify(tool, args, origin=origin)
+            verdict = self.safety.classify(tool, args, origin=origin,
+                                           named_by_him=taint.named())
 
             if verdict.tier is Tier.BLACK:
                 self.audit.action(verdict, "blocked")

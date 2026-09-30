@@ -38,6 +38,20 @@ class Verdict:
         return self.tier is Tier.GREEN
 
 
+# EXACTLY the spellings messaging._resolve turns into get_me() - his own
+# Saved Messages - compared the same way it compares them (stripped,
+# lowercased, nothing else). Identical on purpose, and asserted by running
+# the real resolver in tests/test_preapproval_is_exact.py: if the gate
+# approved a spelling the resolver did not map to him, the approval and the
+# send would be about two different chats, which is the exact split the
+# substring matching below used to create.
+SELF_CHAT_ALIASES = ("me", "myself", "saved messages", "saved", "my notes")
+
+
+def _is_self_chat(raw: Any) -> bool:
+    return str(raw or "").strip().lower() in SELF_CHAT_ALIASES
+
+
 def _simplify(name: str) -> str:
     """
     Lowercase, strip punctuation and collapse spaces.
@@ -138,6 +152,7 @@ class SafetyEngine:
         *,
         summary: str = "",
         origin: str = "user",
+        named_by_him: str = "",
     ) -> Verdict:
         """
         origin:
@@ -145,6 +160,12 @@ class SafetyEngine:
           "content" - derived from something Jalen read: email, web page, file.
                       These can never trigger RED tools. This is the
                       prompt-injection defence and it is not overridable.
+
+        named_by_him:
+          the destination HIS instruction named ("Saved Messages"), from
+          taint.named(). Passed in rather than read here so this stays a
+          function of its arguments. It widens exactly one thing - see the
+          Saved Messages exception in step 2 - and nothing else.
         """
         args = args or {}
         summary = summary or self._describe(tool, args)
@@ -171,6 +192,37 @@ class SafetyEngine:
 
         # 2. Prompt-injection: content-derived requests cannot do irreversible things.
         if origin == "content" and self._block_red_from_content and base in (Tier.RED, Tier.AMBER):
+            # EXCEPT INTO HIS OWN NOTEBOOK, WHEN HE SAID SO.
+            #
+            # Refusing this cost him his most-asked flow - "read Andres's
+            # email and put a summary in my Saved Messages" - inside a single
+            # turn (a BLACK on his own post at 2026-08-26T14:32:27).
+            #
+            # Three conditions, and the third is the one that matters:
+            #   - a tool that writes text, not a file upload, where WHICH
+            #     file is exactly what an injected instruction would pick
+            #   - he pre-approved Saved Messages in config
+            #   - HIS words named Saved Messages. Saved Messages is visible
+            #     only to him, which is exactly what makes it worth abusing:
+            #     text an email writes into his own notebook reads as if HE
+            #     wrote it - a phishing link, a fake note to himself. So the
+            #     destination has to have come from him, not from what Jalen
+            #     read. An email that ASKS for Saved Messages is refused.
+            #
+            # Never the channel, which his community reads. And it sits
+            # INSIDE this block rather than beside pre-approval, so
+            # tests/test_adversarial.py's ordering invariant holds.
+            if (tool in self._SAFE_TO_OWN_CHAT_UNDER_TAINT
+                    and self._self_chat_preapproved
+                    and _simplify(named_by_him) in SELF_CHAT_ALIASES
+                    and _is_self_chat(args.get(self._DESTINATION_ARG.get(tool, ""), ""))):
+                detail["own_saved_messages_under_taint"] = True
+                return Verdict(
+                    Tier.GREEN, tool, summary,
+                    "your own Saved Messages - nothing I read can send it "
+                    "anywhere else",
+                    False, False, False, detail,
+                )
             return Verdict(
                 Tier.BLACK, tool, summary,
                 "this came from something I read, not from you — I don't act on "
@@ -227,37 +279,69 @@ class SafetyEngine:
 
     # --------------------------------------------------- pre-approved sends
     # tool -> which argument carries the destination.
+    #
+    # send_posts and send_telegram_file were missing, so "send those fifty
+    # posts to my channel" and a file to his own Saved Messages asked every
+    # time - while the send_telegram_file spec told the model the gate
+    # "asks first unless the destination is one he pre-approved". Safe to
+    # add only now that matching is exact: under the old substring rule
+    # this would have spread "Ed is pre-approved" to batches of fifty.
     _DESTINATION_ARG = {
         "send_telegram_message": "to",
         "save_telegram_draft": "to",
+        "send_posts": "to",
+        "send_telegram_file": "to",
     }
+
+    # What may still go to his OWN Saved Messages after Jalen has read
+    # somebody else's text. See step 2 of classify().
+    _SAFE_TO_OWN_CHAT_UNDER_TAINT = frozenset({
+        "send_telegram_message", "save_telegram_draft", "send_posts",
+    })
+
+    @property
+    def _self_chat_preapproved(self) -> bool:
+        return any(name in SELF_CHAT_ALIASES for name in self._preapproved)
 
     def _is_preapproved(self, tool: str, args: dict[str, Any]) -> bool:
         """
         True when this send is going somewhere he has already said yes to.
 
-        Matching is on the NORMALISED destination — case and punctuation
-        removed — because he says "my ML community" and the channel is
-        called "AI engineering & Machine learning". Substring matching in
-        either direction, so a configured "saved messages" also covers the
-        "me"/"saved" spellings _resolve() accepts.
+        EXACT, NOT "CONTAINS". This used to accept a substring in either
+        direction - `target in allowed or allowed in target` - and an
+        independent audit reproduced what that meant with the real config:
+        "Ed", "Ai", "Mac", "Sa", "Mes", "Eng", "Sage" and even "a" went out
+        with no confirmation, as did any group whose title merely CONTAINED
+        a pre-approved name ("Saved Messages backup group"). Then the
+        resolver picked the chat by its own rule, so the gate approved a
+        WORD and the resolver sent to an ENTITY.
 
-        A destination that does not match falls through to RED and is asked
-        about, which is the correct default for anything that reaches
-        another person.
+        So it now approves exactly what the resolver will send to:
+
+          his own Saved Messages   the spellings _resolve() maps to get_me()
+                                   (SELF_CHAT_ALIASES), and no others
+          any other configured     its exact title, with case and punctuation
+          destination              normalised - "AI engineering & Machine
+                                   learning" and "ai engineering and machine
+                                   learning" are one name
+
+        A casual spoken name - "my ML community" - is not approved here,
+        because the resolver cannot find a chat by that name either; the
+        brain is told the channel's real title (system prompt, TELEGRAM
+        SHORTHAND). Anything that does not match falls through to RED and is
+        asked about, the right default for anything that reaches a person.
         """
         arg = self._DESTINATION_ARG.get(tool)
         if arg is None:
             return False
-        target = _simplify(str(args.get(arg, "")))
+        raw = args.get(arg, "")
+        target = _simplify(str(raw))
         if not target:
             return False
-        for allowed in self._preapproved:
-            if not allowed:
-                continue
-            if target == allowed or allowed in target or target in allowed:
-                return True
-        return False
+        if _is_self_chat(raw) and self._self_chat_preapproved:
+            return True
+        return any(allowed and target == allowed and allowed not in SELF_CHAT_ALIASES
+                   for allowed in self._preapproved)
 
     # ------------------------------------------------------------- formatting
     # Argument names whose VALUE must never reach the audit log.

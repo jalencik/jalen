@@ -1063,7 +1063,8 @@ class Jalen:
         # automatically his, and this must be the same check the brain path
         # makes or the router becomes the way around the guard.
         verdict = self.safety.classify(tool, intent.args,
-                                       origin=taint.origin_now())
+                                       origin=taint.origin_now(),
+                                       named_by_him=taint.named())
         if verdict.tier is Tier.BLACK:
             self.audit.action(verdict, "blocked")
             return f"I won't do that — {verdict.reason}."
@@ -1555,7 +1556,8 @@ class Jalen:
         #                OTHER turn while it is still acting on the email it
         #                read. taint.py said overlap could only over-block;
         #                it could also under-block, until this.
-        if from_him and not self._another_turn_in_flight():
+        fresh = from_him and not self._another_turn_in_flight()
+        if fresh:
             taint.he_asked_again()
 
         # WHAT "IT" MEANS. Expanded before anything routes, because "send it
@@ -1572,6 +1574,12 @@ class Jalen:
         # where. Kept so that what actually runs can be compared against what
         # he asked for - see _check_the_plan below.
         self._plan = planning.read_plan(text)
+        # And WHERE he said to put it, for the gate's one taint exception:
+        # a send to his own Saved Messages survives Jalen having read an
+        # email only when HIS words named Saved Messages. Same condition
+        # as the clear above, for the same reason.
+        if fresh:
+            taint.he_named(self._plan.destination)
 
         self.audit.utterance(text, who="user")
 

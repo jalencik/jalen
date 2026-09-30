@@ -84,16 +84,41 @@ def mark(source: str) -> None:
             del _SOURCES[:-20]
 
 
+# The place HE named in the instruction that started this - "Saved Messages",
+# say - as planning.read_plan() read it. Read by the safety gate's single
+# taint exception: after Jalen has read someone else's text it may still write
+# to his OWN Saved Messages, but only when this came from his words and not
+# from the text. Reset with the taint, set only for an instruction that is
+# positively his.
+_NAMED = ""
+
+
 def he_asked_again() -> None:
     """
     A fresh utterance from HIM. Everything read before it is no longer in play.
 
-    Called from exactly one place, the top of process(). Widening that list is
-    how this control quietly dies again: any other caller would be asserting
-    "this is his instruction" about something that is not.
+    Called from exactly one place in process(), for a new instruction that is
+    positively his. Widening that list is how this control quietly dies again:
+    any other caller would be asserting "this is his instruction" about
+    something that is not.
     """
+    global _NAMED
     with _LOCK:
         _SOURCES.clear()
+        _NAMED = ""
+
+
+def he_named(destination: str) -> None:
+    """Record the destination his fresh instruction named, if any."""
+    global _NAMED
+    with _LOCK:
+        _NAMED = str(destination or "")
+
+
+def named() -> str:
+    """The destination his current instruction named, or ''."""
+    with _LOCK:
+        return _NAMED
 
 
 def is_tainted() -> bool:
