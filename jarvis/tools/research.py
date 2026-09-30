@@ -60,6 +60,35 @@ _HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# ...and some refuse exactly that. Wikipedia answers the Chrome UA above with
+# 403 "Please respect our robot policy", so web_read could not read it at
+# all. Measured 2026-09-30 across 11 sites: an honest UA gets identical
+# pages on 8 and unlocks Wikipedia, but www.iqair.com - a site he actually
+# read - rate-limits it (429) while serving the Chrome UA. So the browser UA
+# goes first and this is ONE retry on a 403/429. Wikipedia also wants a
+# CONTACT in it (a URL or an email) and still refuses without one; which
+# contact to hand to every site that refuses Jalen once is his decision,
+# so it is research.contact in config/jarvis.yaml, empty by default.
+_CONTACT = str(CONFIG.get_path("research.contact", "") or "").strip()
+_HONEST_HEADERS = {
+    "User-Agent": ("Jalen/1.0 (personal voice assistant fetching one page its "
+                   "owner asked for" + (f"; {_CONTACT}" if _CONTACT else "")
+                   + ") python-httpx"),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# The largest real page measured on 2026-09-30 was 1,135 KB
+# (en.wikipedia.org/wiki/Machine_learning, with a contact UA); forbes.com
+# 745 KB, github.com/pytorch/pytorch 613 KB, bbc.com/news 361 KB. 3 MB is
+# 2.6x the largest, and one bad link can no longer read gigabytes into a
+# machine with ~1 GB free. Only _MAX_PAGE_CHARS of text reaches the model.
+_MAX_FETCH_BYTES = 3 * 1024 * 1024
+_MAX_REDIRECTS = 5  # NOT MEASURED; httpx's own default was 20.
+# What gets decoded as text. A PDF or an image "extracted" as text is
+# garbage the brain would then summarise with confidence.
+_TEXT_TYPES = ("text/", "application/xhtml", "application/xml", "application/json",
+               "application/ld+json", "application/rss", "application/atom")
+
 _TAG_SOUP = re.compile(r"(?is)<(script|style|nav|footer|header|aside|form|svg).*?</\1>")
 _TAGS = re.compile(r"(?s)<[^>]+>")
 _BLANKS = re.compile(r"\n{3,}")
@@ -108,14 +137,115 @@ def _fence(text: str, source: str) -> str:
     )
 
 
-def _get(url: str) -> tuple[int, str]:
-    import httpx
+class _Page:
+    """What one fetch produced - or, in `refused`, the sentence saying why not."""
 
-    with httpx.Client(
-        follow_redirects=True, timeout=_TIMEOUT_S, headers=_HEADERS
-    ) as client:
-        response = client.get(url)
-        return response.status_code, response.text
+    def __init__(self, status: int = 0, text: str = "", url: str = "",
+                 ctype: str = "", truncated: bool = False, refused: str = ""):
+        self.status, self.text, self.url = status, text, url
+        self.ctype, self.truncated, self.refused = ctype, truncated, refused
+
+
+def _host_of(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or "").rstrip(".").lower()
+    except ValueError:
+        return ""
+
+
+def _not_for_the_open_web(url: str) -> str | None:
+    """
+    Why this address is refused before any byte is sent, or None.
+
+    Two lists. The never-touch domains (his bank, PayPal, click.uz...), by
+    hostname, through the same SafetyEngine every tool goes through. And
+    his OWN machine and network: http://127.0.0.1:9222/json is the debug
+    endpoint of Jalen's own Chrome and lists every open tab's URL, and
+    web_read stays allowed after a read - so a page could otherwise chain
+    "read the debug port" into "read attacker/?tabs=...". The 9 hosts he
+    has actually web_read (data/audit.jsonl, 2026-09-30) are all public.
+
+    Checked for the first URL AND every redirect hop, before it is fetched.
+    A name that RESOLVES to a private address (DNS rebinding) is not caught
+    here; that would need a lookup per hop. Recorded, not fixed.
+    """
+    import ipaddress
+
+    host = _host_of(url)
+    if not host:
+        return "I couldn't read that web address, so I haven't opened it."
+    if host == "localhost" or host.endswith(".localhost"):
+        return "That address is this computer itself, and I don't read it from the web."
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        ip = None
+    if ip is not None and (ip.is_private or ip.is_loopback or ip.is_link_local
+                           or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+        return (f"{host} is on this computer or your own network, not the "
+                "open web, so I haven't opened it.")
+    if pattern := _safety.protected_domain(url):
+        return f"That leads to {host}, which is on your never-touch list ({pattern})."
+    return None
+
+
+def _fetch(url: str) -> _Page:
+    """
+    GET one page, bounded.
+
+    IT USED TO TRUST WHATEVER CAME BACK: response.text read whole, whatever
+    its type, after up to 20 redirects httpx followed without looking. Now:
+    at most _MAX_REDIRECTS hops, each checked by _not_for_the_open_web
+    BEFORE it is fetched; a body cut off at _MAX_FETCH_BYTES; only text
+    types decoded; and one honest-User-Agent retry on a 403/429 (see
+    _HONEST_HEADERS).
+    """
+    import httpx
+    from urllib.parse import urljoin
+
+    current = url
+    with httpx.Client(follow_redirects=False, timeout=_TIMEOUT_S) as client:
+        for _hop in range(_MAX_REDIRECTS + 1):
+            if why := _not_for_the_open_web(current):
+                return _Page(refused=why, url=current)
+            page, location = _one_request(client, current, _HEADERS)
+            if page.status in (403, 429):
+                page, location = _one_request(client, current, _HONEST_HEADERS)
+            if location is None:
+                return page
+            current = urljoin(current, location)
+    return _Page(refused=f"That link kept redirecting (more than {_MAX_REDIRECTS} times), "
+                         "so I stopped following it.", url=current)
+
+
+def _one_request(client, url: str, headers: dict) -> tuple[_Page, str | None]:
+    """One request. Returns the page, and the Location to follow if it redirected."""
+    with client.stream("GET", url, headers=headers) as response:
+        status = response.status_code
+        if status in (301, 302, 303, 307, 308) and response.headers.get("location"):
+            return _Page(status=status, url=url), response.headers["location"]
+        ctype = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if ctype and not ctype.startswith(_TEXT_TYPES):
+            return _Page(status=status, url=url, ctype=ctype), None
+        chunks, size, truncated = [], 0, False
+        for chunk in response.iter_bytes():
+            chunks.append(chunk)
+            size += len(chunk)
+            if size >= _MAX_FETCH_BYTES:
+                truncated = True
+                break
+        raw = b"".join(chunks)[:_MAX_FETCH_BYTES]
+        text = raw.decode(response.encoding or "utf-8", errors="replace")
+        return _Page(status=status, text=text, url=url, ctype=ctype,
+                     truncated=truncated), None
+
+
+def _get(url: str) -> tuple[int, str]:
+    """The old (status, body) shape, for web_search. Bounded like _fetch."""
+    page = _fetch(url)
+    if page.refused:
+        raise ValueError(page.refused)
+    return page.status, page.text
 
 
 def _unwrap_ddg(href: str) -> str:
@@ -191,23 +321,43 @@ def web_read(url: str) -> str:
     if not re.match(r"^https?://", target, re.I):
         target = "https://" + target
 
-    blocked = _safety.classify("web_read", {"url": target}, origin="user")
+    from .. import taint
+
+    blocked = _safety.classify("web_read", {"url": target}, origin=taint.origin_now())
     if blocked.tier.name == "BLACK":
         return f"I won't open that — {blocked.reason}"
 
     try:
-        status, body = _get(target)
+        page = _fetch(target)
     except Exception as exc:
         return f"I couldn't fetch that page ({type(exc).__name__})."
-    if status != 200:
-        return f"That page returned HTTP {status}."
+    if page.refused:
+        return page.refused
+    host = _host_of(page.url) or _host_of(target)
+    if page.status in (403, 429) and host.endswith(("wikipedia.org", "wikimedia.org")) \
+            and not _CONTACT:
+        return ("Wikipedia refused me: it only lets automated readers in when they "
+                "give a contact. Put an email or a web address of yours under "
+                "research.contact in config/jarvis.yaml and I'll be able to read it.")
+    if page.status != 200:
+        return f"That page returned HTTP {page.status}."
+    if page.ctype and not page.ctype.startswith(_TEXT_TYPES):
+        kind = "a PDF" if "pdf" in page.ctype else f"a {page.ctype} file"
+        return (f"That link is {kind}, not a web page, and I can't read that from "
+                "the web. Download it and ask me to read the file.")
 
+    body = page.text
     title_match = re.search(r"(?is)<title[^>]*>(.*?)</title>", body)
-    title = _text_from_html(title_match.group(1)) if title_match else target
+    title = _text_from_html(title_match.group(1)) if title_match else ""
     text = _text_from_html(body)
     if not text:
-        return f"{title} loaded but had no readable text — it may be all images or script."
-    return f"{title}\n{target}\n\n" + _fence(text, title)
+        return f"{host} loaded but had no readable text — it may be all images or script."
+    # The title is the SITE's words too, so it goes inside the fence, and the
+    # fence is labelled with the host rather than with the title.
+    note = ("\n(That page was too big to read whole - this is only the first "
+            f"{_MAX_FETCH_BYTES // (1024 * 1024)} MB.)" if page.truncated else "")
+    inside = f"{title}\n\n{text}" if title else text
+    return f"{page.url or target}\n\n" + _fence(inside, host) + note
 
 
 REGISTRY: dict[str, Any] = {

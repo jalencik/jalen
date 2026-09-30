@@ -682,6 +682,24 @@ integrations:
   vps:      { enabled: false }                                     # E40 - explicitly OFF, permanently
 
 # ---------------------------------------------------------------------------
+# WEB RESEARCH  (web_read / web_search - plain HTTP, no browser, no cookies)
+# ---------------------------------------------------------------------------
+research:
+  # A CONTACT FOR SITES THAT ASK WHO IS READING - YOURS TO DECIDE.
+  #
+  # Wikipedia refuses automated readers that don't say who they are: it
+  # answers a browser-looking reader with 403 "Please respect our robot
+  # policy", and an honest one too unless it carries a contact (a web
+  # address or an email). Measured 2026-09-30 - with a contact,
+  # en.wikipedia.org/wiki/Machine_learning comes back whole (1,135 KB).
+  #
+  # Empty on purpose. Whatever goes here is sent to every site that refuses
+  # Jalen's first try (only then - the first try looks like Chrome), so it
+  # identifies you to them. Put an address you're happy to share: your
+  # channel's t.me link, a GitHub profile, or an email.
+  contact: ""
+
+# ---------------------------------------------------------------------------
 # WEB DELEGATION  (handing work to ChatGPT / Gemini in a real browser)
 # ---------------------------------------------------------------------------
 web:
