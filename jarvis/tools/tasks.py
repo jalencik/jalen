@@ -56,9 +56,18 @@ _A_JOB_BY_NAME = re.compile(
 # and to be asked about - never enough on their own to end anything.
 _JOB_WORD = re.compile(r"\b(?:jobs?|agents?|claude|background|coding)\b", re.I)
 
-# "don't stop the coding job" contains the coding job too. The typographic
-# apostrophe (U+2019) is built with chr() so this source line stays ASCII.
-_NEGATED = re.compile(r"\b(?:don(?:'|" + chr(0x2019) + r")?t|do\s+not)\b", re.I)
+# "don't stop the coding job" contains the coding job too. A VETO is a
+# negation that directly governs the stop verb ("don't stop", "do not
+# cancel", "never kill", with a filler word or two: "don't you stop").
+# It used to be the bare words "don't"/"do not" anywhere in the sentence, so
+# "cancel the coding job now, don't let it keep running" and "stop the coding
+# job, I don't need it" were refused as if he wanted the job left running -
+# reproduced by an independent review of 6d34421. The typographic apostrophe
+# (U+2019) is built with chr() so this source line stays ASCII.
+_NEGATED = re.compile(
+    r"\b(?:don(?:'|" + chr(0x2019) + r")?t|do\s+not|never)\s+"
+    r"(?:(?:you|please|ever|just|go\s+ahead\s+and)\s+)*"
+    r"(?:stop|cancel|kill|end|quit|abort|halt|terminate|shut)\b", re.I)
 
 _TOKEN = re.compile(r"[^\W_]+")
 
