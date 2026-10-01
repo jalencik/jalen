@@ -98,9 +98,22 @@ def run_own_tests(subset: str = "") -> str:
     """
     args = [_python(), "-m", "pytest", "-q"]
     if subset.strip():
-        target = subset.strip()
+        target = subset.strip().replace("\\", "/")
         if not target.startswith("tests"):
             target = f"tests/{target}"
+        # CONFINED TO tests/. The subset only had to START with "tests", and
+        # pytest treats the rest as a path, so "tests/../../anything.py"
+        # imported and ran whatever it found - from a GREEN tool the model
+        # can call. Found by the independent review, 2026-10-01.
+        tests_dir = (ROOT / "tests").resolve()
+        try:
+            resolved = (ROOT / target.partition("::")[0]).resolve()
+        except (OSError, ValueError):
+            resolved = None
+        if (resolved is None or not resolved.exists()
+                or not (resolved == tests_dir or tests_dir in resolved.parents)):
+            return ("I only run test files inside my own tests folder, and I "
+                    "couldn't find that one there.")
         args.append(target)
     else:
         # The full suite goes to the background, so he is not left in

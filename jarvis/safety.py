@@ -39,6 +39,12 @@ class Verdict:
         return self.tier is Tier.GREEN
 
 
+# Argument names that carry a program or a window: open_app(name=),
+# focus_window(name=), read_screen(window=), type_text(window=),
+# open_in(app=, target=). Prose arguments (text, body, query, message) are
+# not in it on purpose.
+_PROGRAM_KEYS = ("name", "app", "window", "target", "title", "exe", "program", "process")
+
 # Longest address web_read will fetch after a read without having been
 # shown it. A Wikipedia article URL with a long title is about 120; this
 # leaves room and still cannot carry a token. NOT MEASURED beyond that.
@@ -226,6 +232,8 @@ class SafetyEngine:
             if real and real not in self._never_paths:
                 self._never_paths.append(real)
         self._never_patterns = never.get("patterns", []) or []
+        self._harmless_names = frozenset(
+            str(n).strip().lower() for n in (never.get("harmless_names", []) or []) if str(n).strip())
         self._never_apps = [a.lower() for a in never.get("apps", []) or []]
         self._never_domains = never.get("domains", []) or []
 
@@ -276,9 +284,14 @@ class SafetyEngine:
         """
         candidates: list[str] = []
         for key, value in (args or {}).items():
-            if not isinstance(value, str) or not value.strip() or "\n" in value:
+            if not isinstance(value, str) or not value.strip():
                 continue
             v = value.strip()
+            # A newline in the MIDDLE marks prose. Surrounding whitespace does
+            # not: the tools strip it, so start_coding_job(folder="C:\\Windows\n")
+            # used to skip this check and then open C:\\Windows.
+            if "\n" in v:
+                continue
             if _LOOKS_LIKE_A_PATH.match(v):
                 candidates.append(value)
             elif (any(hint in key.lower() for hint in _PATHISH_KEYS)
@@ -314,13 +327,27 @@ class SafetyEngine:
                     resolved = resolved[len(base):]
             names.update(resolved)
             for part in names:
+                # Plain names that hold no secret (a HuggingFace
+                # tokenizer.json, a .env.example) are not what the patterns
+                # are for. Checked here, after the protected FOLDERS above,
+                # so a harmless name inside ~/.ssh is still refused.
+                if part in self._harmless_names:
+                    continue
                 for pattern in self._never_patterns:
                     if fnmatch.fnmatch(part, pattern.lower()):
                         return f"filename matches protected pattern '{pattern}'"
         return None
 
     def _touches_forbidden_target(self, args: dict[str, Any]) -> str | None:
-        blob = " ".join(str(v) for v in (args or {}).values()).lower()
+        # The password-manager check looks at the arguments that NAME a
+        # program or a window, not at prose: a message that merely mentions
+        # Bitwarden, or a search for "bitwarden vs 1password", was refused
+        # because the names were looked for in every argument joined together
+        # (c8ca2a3 fixed prose for domains and left this behind).
+        blob = " ".join(
+            str(v) for k, v in (args or {}).items()
+            if isinstance(v, str) and any(h in str(k).lower() for h in _PROGRAM_KEYS)
+        ).lower()
         for app in self._never_apps:
             if app in blob:
                 return f"targets a password manager ({app})"

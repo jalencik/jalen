@@ -463,6 +463,21 @@ never_touch:
     - "{home}/.aws"
     - "{home}/.gnupg"
     - "{home}/AppData/Roaming/ProtonVPN"
+  # Exact filenames that the patterns below would catch but that hold no
+  # secret, so they are NOT refused. Checked only against the filename
+  # patterns, after the protected folders: a harmless name inside ~/.ssh is
+  # still refused. Found by the independent review, 2026-10-01: "*token*.json"
+  # refused every HuggingFace tokenizer file - the vocabulary of a language
+  # model, in every model folder he works with - and ".env*" refused
+  # .env.example. Add a name here only if it can never hold a credential.
+  harmless_names:
+    - tokenizer.json
+    - tokenizer_config.json
+    - special_tokens_map.json
+    - added_tokens.json
+    - .env.example
+    - .env.sample
+    - .env.template
   patterns:
     - "*.pem"
     - "*.key"

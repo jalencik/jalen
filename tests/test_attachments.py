@@ -28,7 +28,6 @@ ROOT = Path(__file__).resolve().parent.parent
     [
         ".env",
         ".env.local",
-        ".env.example",
         "production.env",
         "data/telegram_user.session",
         "data/telegram_user.session-journal",
@@ -49,6 +48,17 @@ def test_credentials_are_never_sendable(name):
     to send it and happily would have.
     """
     assert attachments._is_protected(ROOT / name), f"{name} could be attached and sent"
+
+
+def test_the_env_template_is_not_a_credential():
+    """
+    .env.example was in the list above, as if it were a live credential. It is
+    the TEMPLATE: 14 variables, every value empty or a placeholder (checked
+    2026-10-01), and sending it is how someone is told what to configure. It
+    is on never_touch.harmless_names; a real .env.local, production.env or
+    .env stays refused above.
+    """
+    assert attachments._is_protected(ROOT / ".env.example") is None
 
 
 @pytest.mark.parametrize("name", ["README.md", "image.png", "notes.txt", "cv.pdf"])
