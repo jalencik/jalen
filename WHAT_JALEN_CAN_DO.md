@@ -1,5 +1,5 @@
 
-# What Jalen can do  (163 things)
+# What Jalen can do  (183 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -98,14 +98,19 @@ _Reading, drafting and sending Gmail._
 _Your own chats and your channel._
 
 - [ ]   **community_post_guide** - The layout rules for his AI Engineering & Machine Learning channel: bullet character, where bold goes, the expandable Q&A block, the fixed sign-off
+- [ ]   **find_premium_emoji** - Look up his PREMIUM custom emoji, read from his own Telegram account, and get the <tg-emoji emoji-id="ID">E</tg-emoji> tag for each
+- [ ]   **list_sticker_packs** - List the custom emoji sets and sticker packs on his Telegram account, or, with pack, the stickers inside one pack (numbered, with their emoji)
 - [ ] * **list_telegram_chats** - List his recent Telegram conversations with unread counts
+- [ ]   **mark_telegram_read** - Mark ONE chat as read  [tells you first, you can say stop]
 - [ ] * **read_telegram** - Read recent messages from ONE Telegram chat, named the way he says it — 'Uluhbek', 'Saved Messages', an @username
 - [ ]   **save_draft_text** - Write a long piece — an essay, a personal statement, an application answer, a post — to a file AND his clipboard
 - [ ]   **save_telegram_draft** - Write text into a chat's DRAFT box without sending it
-- [ ]   **search_telegram** - Search across all his Telegram messages for a phrase
+- [ ]   **search_telegram** - Search his Telegram messages for a phrase, across every chat or in one
 - [ ]   **send_posts** - Send SEVERAL posts to one Telegram chat in a single call  [stops and waits for you to say yes]
+- [ ]   **send_sticker** - Send ONE sticker to a Telegram chat as its own message, as him, ONLY WHEN HE ASKS for a sticker (for example 'post it with a sticker'): never after...  [stops and waits for you to say yes]
 - [ ]   **send_telegram_file** - Send a file to a Telegram chat  [stops and waits for you to say yes]
 - [ ] * **send_telegram_message** - Send a Telegram message AS HIM to a person or group  [stops and waits for you to say yes]
+- [ ] * **telegram_dm_catchup** - 'Catch me up on my DMs', 'who messaged me', 'who needs a reply': the unread PRIVATE messages from people (no groups, channels or bots), grouped by ...
 - [ ] * **telegram_status** - Report which personal Telegram account is signed in, or what to run if none is
 - [ ] * **telegram_unread** - The unread Telegram messages THEMSELVES, from the busiest chats — not a count
 
@@ -127,21 +132,27 @@ _Your own chats and your channel._
 - [ ] * **search_site** - Search a specific website and show the results: YouTube, Google, GitHub, Reddit, Amazon, Wikipedia, Spotify, Maps and others
 - [ ]   **web_read** - Fetch one web page and extract its readable text
 - [ ]   **web_search** - Search the web and get the results back AS TEXT — titles, snippets and URLs you can actually read
+- [ ] * **web_sign_in** - ACTUALLY SIGN HIM IN to ChatGPT or Gemini, through his own Google account, in Jalen's browser
 
 ## Files and folders
 
 - [ ] * **clear_temp_files** - Delete the contents of the temp folders  [stops and waits for you to say yes]
-- [ ] * **copy_file** - Copy a file to a destination path or folder
+- [ ] * **copy_file** - Copy a single FILE to a destination path or folder
 - [ ] * **create_file** - Create a new text file
 - [ ] * **create_folder** - Create a folder, and any missing parent folders
 - [ ]   **delete_file** - Delete a file  [stops and waits for you to say yes]
 - [ ]   **edit_file** - Overwrite an existing file's contents  [tells you first, you can say stop]
+- [ ]   **ext_fill_form_from_profile** - Fill the form on his REAL current Chrome tab from his personal-info folder, through the extension - name, age, email, school, and the rest  [tells you first, you can say stop]
+- [ ]   **fill_form_from_profile** - Fill the form on screen from his personal-info folder (data/personal_info) in one go - name, age, email, school, and any other ordinary field it re...  [tells you first, you can say stop]
+- [ ]   **folder_move_status** - Where a folder move is up to, whether one was interrupted, and how the last ones finished
 - [ ]   **list_aliases** - List every nickname taught so far
 - [ ]   **list_directory** - List a folder's contents
-- [ ]   **move_file** - Move a file to a destination path or folder
+- [ ]   **move_file** - Move a single FILE to a destination path or folder
+- [ ] * **move_folder** - Move a whole folder to another drive and check it arrived  [stops and waits for you to say yes]
 - [ ] * **open_folder** - Open a folder in File Explorer
 - [ ] * **open_in** - Launch an application already pointed at a file or folder, e.g
 - [ ] * **open_target** - Open exactly ONE thing by name: an application, a file, or a folder
+- [ ] * **plan_folder_move** - The dry run for moving a whole folder to another drive, e.g
 - [ ] * **read_document** - Extract readable text from a document: plain text, markdown, csv, json, code/config files, .docx/.pptx/.xlsx (read directly as the zip-of-XML they ...
 - [ ]   **read_file** - Read a text file's contents
 - [ ]   **remember_alias** - Teach a nickname for an app, file or folder so it can be opened by that name later
@@ -202,6 +213,7 @@ _The vault, and typing into forms._
 - [ ]   **fill_credential** - Type a stored secret into the field HE HAS FOCUSED  [tells you first, you can say stop]
 - [ ]   **fill_field** - Type ordinary text into the focused field — a name, a phone number, a short answer
 - [ ]   **fill_form_field** - Type a value into one named field  [tells you first, you can say stop]
+- [ ]   **fill_login_code** - Read his latest one-time login code from his own email and type it into the verification-code box on the page  [tells you first, you can say stop]
 - [ ]   **fill_login_field** - Type his saved password into this page's password box  [stops and waits for you to say yes]
 - [ ]   **list_secrets** - The NAMES of what is stored — never the values
 - [ ]   **list_site_decisions** - Every site he has approved or blocked, so he can audit it
@@ -225,20 +237,28 @@ _The vault, and typing into forms._
 
 ## Everything else
 
+- [ ]   **browse_to** - Open a web address in JALEN'S OWN Chrome - the signed-in one that inspect_form, fill_form_field, fill_form_from_profile, fill_login_field and submit_f  [tells you first, you can say stop]
 - [ ] * **cancel_task** - Stop a running task
+- [ ]   **ext_form_fields** - List the form fields on his real current tab via the extension, so you can fill what you know and ask for the rest
+- [ ]   **ext_page_state** - Read the page on the tab HE is actually looking at, through the Chrome extension - title, url, headings, form-field count
+- [ ]   **ext_status** - Whether Jalen's Chrome extension is connected - i.e
 - [ ]   **form_errors** - What the form is complaining about right now
 - [ ]   **inspect_form** - List every field on the form currently open in Jalen's browser: its label, type, whether it is required, and whether it is already filled
 - [ ]   **next_field** - Press Tab to move to the next field
 - [ ]   **open_storage_settings** - Show where the disk space went
 - [ ] * **play_media** - Play something he named without saying where: a local media file if one matches, YouTube otherwise
+- [ ]   **read_browser_page** - Read the visible text of the page currently open in Jalen's own Chrome - what a page says, or, AFTER submit_form, whether it went through
+- [ ]   **send_voice_message** - Send a Telegram VOICE MESSAGE AS HIM to a person, in a DM or a group  [stops and waits for you to say yes]
 - [ ]   **submit_form** - Submit the form and report what the page said back, including any validation errors  [stops and waits for you to say yes]
+- [ ]   **transcribe_voice_note** - Turn ONE Telegram voice note into words  [tells you first, you can say stop]
 - [ ]   **upload_to_form** - Attach a real file to the form's file input - a CV, a PDF, an image  [tells you first, you can say stop]
 - [ ] * **what_are_you_doing** - Everything Jalen is currently working on and how far along it is
+- [ ]   **whats_my** - Look up one of his own details from the personal-info folder - 'what's my school', 'what email do I use'
 
 ---
 
-145 tools: 18 amber, 114 green, 13 red
-88 of them also answer to a spoken phrase, for free.
+165 tools: 24 amber, 125 green, 16 red
+92 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
   - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S
