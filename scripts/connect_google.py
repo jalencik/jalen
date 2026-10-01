@@ -106,6 +106,15 @@ def connect() -> int:
 
 if __name__ == "__main__":
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    # Any other argument falls through to connect(), so without this line
+    # "--help" opened the real Google consent flow instead of printing help.
+    if arg in ("-h", "--help"):
+        try:
+            sys.stdout.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+        print(__doc__)
+        raise SystemExit(0)
     if arg == "--status":
         raise SystemExit(status())
     if arg == "--logout":

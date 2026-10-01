@@ -139,6 +139,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # main() ignores its arguments, so without this "--help" went straight to
+    # the passphrase prompt instead of printing help.
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        try:
+            sys.stdout.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+        print(__doc__)
+        raise SystemExit(0)
     try:
         sys.exit(main())
     except KeyboardInterrupt:
