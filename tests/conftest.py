@@ -223,9 +223,34 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     vault_module.APPROVALS_PATH = scratch / "site_approvals.json"
     vault_module.SECRET_SITES_PATH = scratch / "secret_sites.json"
 
+    # --- the Chrome extension bridge: data/bridge.json --------------------
+    # That file tells the extension in his EVERYDAY Chrome which server to
+    # talk to. A test that publishes over it moves his extension to the test
+    # server, and the server's stop() deletes it: his browser has no link
+    # until Jalen restarts. Three writers did that on a gate run - the bridge
+    # test that builds BridgeServer() on the default path, the native-host
+    # test that unlinks it, and every test that builds a real Jalen() (its
+    # __init__ starts the server). A host the suite SPAWNS reads
+    # JALEN_BRIDGE_FILE, else the real file, so the variable is set too.
+    from jarvis.bridge import native_host as native_host_module
+    from jarvis.bridge import server as bridge_server_module
+    import os as _os
+
+    saved_bridge = (bridge_server_module.BRIDGE_FILE, native_host_module.BRIDGE_FILE,
+                    _os.environ.get("JALEN_BRIDGE_FILE"))
+    bridge_server_module.BRIDGE_FILE = scratch / "bridge.json"
+    native_host_module.BRIDGE_FILE = scratch / "bridge.json"
+    _os.environ["JALEN_BRIDGE_FILE"] = str(scratch / "bridge.json")
+
     try:
         yield scratch
     finally:
+        (bridge_server_module.BRIDGE_FILE, native_host_module.BRIDGE_FILE,
+         was) = saved_bridge
+        if was is None:
+            _os.environ.pop("JALEN_BRIDGE_FILE", None)
+        else:
+            _os.environ["JALEN_BRIDGE_FILE"] = was
         (vault_module.VAULT_PATH, vault_module.APPROVALS_PATH,
          vault_module.SECRET_SITES_PATH) = saved_vault
         webagent_module.CHATS_PATH, webagent_module.PROFILE_DIR = saved_webagent
