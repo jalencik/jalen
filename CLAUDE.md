@@ -70,7 +70,13 @@ There is no linter, no type checker, no CI and no git remote.
 - **Never hardcode `origin='user'`** — always `taint.origin_now()`. Leaving
   `origin=` out is the same mistake: `classify()` defaults it to `"user"`.
   (The two call sites that did this, research.py and attachments.py, were
-  fixed on 2026-09-30.) A question that is not about origin at all — "is
+  fixed on 2026-09-30.) The ONE deliberate exception is a router rule that
+  matched what he *said*, word for word: `process()` passes
+  `his_own_words=True` to `handle_local()` only when `expand_references()`
+  left his sentence untouched, because expansion can put read text into it
+  and a recalled habit is not his sentence. The brain's tool hook never gets
+  this; widening it lets a page act through the model.
+  (`tests/test_his_own_words_are_not_refused_after_a_read.py`.) A question that is not about origin at all — "is
   this file / this site protected?" — goes to `SafetyEngine.protected_path()`
   or `protected_domain()`, never to a second copy of the never-touch list.
 - **A GREEN tool that acts goes on `injection_guard.refuse_from_content`**

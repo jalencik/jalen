@@ -1083,8 +1083,14 @@ class Jalen:
             return True
         return False
 
-    def handle_local(self, intent) -> Optional[str]:
-        """Router hit — execute without ever touching an LLM."""
+    def handle_local(self, intent, *, his_own_words: bool = False) -> Optional[str]:
+        """
+        Router hit — execute without ever touching an LLM.
+
+        `his_own_words` is True only for a rule that matched what he SAID,
+        word for word (process() passes it; nothing else does): see the
+        origin note at the classify call below.
+        """
         tool = intent.tool
 
         if tool == "jalen_mute":
@@ -1203,12 +1209,25 @@ class Jalen:
         if tool == "reload_config":
             return intent.reply
 
-        # NOT hardcoded "user" any more. A router-matched intent is usually
-        # his - but a habit recalled while an email was on screen is not
-        # automatically his, and this must be the same check the brain path
-        # makes or the router becomes the way around the guard.
+        # WHERE THIS CAME FROM. The default is the taint check, the same one
+        # the brain path makes, so the router is never a way around the
+        # guard: a habit recalled while an email was on screen, or a sentence
+        # that expand_references() filled in from what was read ("open it" ->
+        # "open <an email subject>"), is not automatically his.
+        #
+        # EXCEPT a rule that matched what he SAID, word for word. His words
+        # are speech, typing, or a message from his own authenticated
+        # Telegram chat - a page cannot write them - and refusing them made
+        # "scroll down", "open Spotify" and "cancel that" fail after Jalen
+        # had read anything, until he addressed him by name again (rule
+        # matches measured 2026-10-01; tests/
+        # test_his_own_words_are_not_refused_after_a_read.py). What taint
+        # protects against is the MODEL acting on read text, and that path
+        # (the brain's tool hook) is not touched. Never-touch still applies:
+        # it is checked before origin.
+        origin = "user" if his_own_words else taint.origin_now()
         verdict = self.safety.classify(tool, intent.args,
-                                       origin=taint.origin_now(),
+                                       origin=origin,
                                        named_by_him=taint.named())
         if verdict.tier is Tier.BLACK:
             self.audit.action(verdict, "blocked")
@@ -1735,6 +1754,10 @@ class Jalen:
         # request becomes a guess. Conservative: only expands when there IS a
         # remembered subject, never invents one.
         expanded = conversation.expand_references(text)
+        # Whether what the router sees is exactly what he said. Expansion can
+        # put READ text into the sentence, so an expanded one keeps the taint
+        # check in handle_local.
+        his_own_words = expanded == text
         if expanded != text:
             self.audit.write("system",
                              summary=f"read '{text[:60]}' as '{expanded[:80]}'")
@@ -1792,7 +1815,7 @@ class Jalen:
         if self._turn_timer is not None:
             self._turn_timer.route = "router" if intent is not None else "brain"
         if intent is not None:
-            reply = self.handle_local(intent)
+            reply = self.handle_local(intent, his_own_words=his_own_words)
             if reply is not None:
                 self.say(reply)
             if intent.tool != "cancel":
