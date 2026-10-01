@@ -281,10 +281,20 @@ def _check_accounts() -> int:
         problems += 1
 
     try:
+        from jarvis import runtime
         from jarvis.config import CONFIG
 
+        # ONE CLIENT PER SESSION FILE. run.py --check returns before taking
+        # the single-instance lock, so this check used to connect even while
+        # Jalen (or scripts/live_telegram_check.py, which takes the same lock)
+        # held the session - a second client on one login. A session in use
+        # is not a problem; the program using it shows whether it works.
+        holder = runtime.running_instance()
         if not CONFIG.get_path("telegram.personal.enabled", False):
             print(f"{WARN}personal Telegram is switched off in config/jarvis.yaml")
+        elif holder is not None:
+            print(f"{WARN}personal Telegram not checked: pid {holder.pid} ({holder.mode} mode) "
+                  "is using the session, and only one program may at a time")
         else:
             from jarvis.tools.messaging import telegram_status
 

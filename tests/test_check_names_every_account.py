@@ -21,7 +21,16 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
-def check_env():
+def check_env(monkeypatch, tmp_path):
+    # The account check now leaves Telegram alone while a live Jalen holds
+    # the session (test_check_leaves_a_live_telegram_session_alone.py), so
+    # these tests must not see the real lock in data/: a gate run while
+    # Jalen is up would otherwise change their answer.
+    from jarvis import runtime
+
+    for name, leaf in (("RUNTIME_DIR", ""), ("LOCK_PATH", "jarvis.lock"),
+                       ("STOP_PATH", "jarvis.stop"), ("SIGNAL_PATH", "jalen.signal")):
+        monkeypatch.setattr(runtime, name, tmp_path / leaf if leaf else tmp_path)
     spec = importlib.util.spec_from_file_location("check_env_under_test", ROOT / "scripts" / "check_env.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules["check_env_under_test"] = module
