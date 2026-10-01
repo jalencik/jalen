@@ -68,7 +68,7 @@ _REAL_WORK = frozenset({
     "web_delegate", "web_follow_up", "delegate_task", "follow_up_task",
     "start_coding_job", "review_coding_job", "hand_off_to_cowork",
     "hand_off_to_claude_code", "send_email", "draft_email", "send_posts",
-    "send_telegram_message", "send_telegram_file", "send_sticker",
+    "send_telegram_message", "send_telegram_file", "send_sticker", "send_voice_message",
     "draft_telegram_post",
     "scan_inbox", "research_topic", "clear_temp_files", "edit_file",
     "write_file", "rename_file", "delete_file", "move_file",

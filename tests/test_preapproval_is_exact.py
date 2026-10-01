@@ -106,6 +106,44 @@ def test_other_people_still_need_a_yes(engine, to):
     assert _tier(engine, to) is Tier.RED
 
 
+# The same rule, for a voice message: exactly what the resolver sends to, and
+# nothing that merely resembles it.
+@pytest.mark.parametrize("to", [
+    "Ed", "Ai", "Mac", "Sa", "Mes", "Eng", "a", "Sage",
+    "AI engineering & Machine learning chat",
+    "Saved Messages backup group",
+    "Machine learning", "engineering",
+])
+def test_a_fragment_is_not_pre_approved_for_a_voice_message_either(engine, to):
+    assert _tier(engine, to, tool="send_voice_message") is Tier.RED, to
+
+
+@pytest.mark.parametrize("to", [
+    "Saved Messages", "saved messages", "Saved Messages ", "me", "Me", "myself",
+    "saved", "my notes", CHANNEL, "ai engineering & machine learning",
+    "AI Engineering &amp; Machine Learning",
+])
+def test_what_he_pre_approved_goes_without_asking_as_a_voice_message_too(engine, to):
+    assert _tier(engine, to, tool="send_voice_message") is Tier.GREEN, to
+
+
+@pytest.mark.parametrize("to", ["Uluhbek", "Rodion", "Mom", "@durov", "+998901234567"])
+def test_other_people_still_need_a_yes_to_hear_his_voice_message(engine, to):
+    assert _tier(engine, to, tool="send_voice_message") is Tier.RED
+
+
+@pytest.mark.parametrize("to", ["Saved Messages", "me", "my notes", CHANNEL, "Ed", "a"])
+def test_a_voice_message_is_refused_under_taint_even_to_saved_messages(engine, to):
+    """
+    The Saved Messages exception below covers TEXT he asked to have put in his
+    own notebook. It does not cover speech: a voice message a stranger's words
+    asked for is refused everywhere, named or not.
+    """
+    assert _tier(engine, to, tool="send_voice_message", origin="content") is Tier.BLACK
+    assert _tier(engine, to, tool="send_voice_message", origin="content",
+                 named_by_him="Saved Messages") is Tier.BLACK
+
+
 # ---------------------------------------------------------------------------
 # THE ALIASES ARE THE RESOLVER'S ALIASES
 # ---------------------------------------------------------------------------
@@ -158,7 +196,7 @@ def test_near_misses_do_not_resolve_to_him_either(not_self):
 # ---------------------------------------------------------------------------
 # THE OTHER SEND TOOLS, which the pre-approval ignored
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("tool", ["send_posts", "send_telegram_file"])
+@pytest.mark.parametrize("tool", ["send_posts", "send_telegram_file", "send_voice_message"])
 def test_the_batch_and_file_sends_honour_pre_approval_too(engine, tool):
     """
     _DESTINATION_ARG covered only send_telegram_message and

@@ -115,6 +115,9 @@ green:
     - read_calendar
     - read_telegram
     - telegram_unread       # unread message BODIES, fenced as untrusted
+    - telegram_dm_catchup   # unread DMs by person, plus DMs he read and left unanswered; display names and bodies inside
+                            # one untrusted fence; marks nothing read. A reader, so it
+                            # is not on refuse_from_content (reading is what taints).
     - read_github
     - read_notion
     - media_play_pause
@@ -258,6 +261,21 @@ amber:
     - edit_file
     - create_github_issue
     - write_notion_page
+    # Marks one chat read. Telegram tells the OTHER PERSON he has seen their
+    # messages, which is the one thing about reading his DMs that reaches
+    # somebody, so it is not GREEN; and the injection guard refuses AMBER to a
+    # turn that has read a stranger's message, so a DM cannot say "mark this
+    # read" or "mark all my chats read" and have it done. RED would ask a
+    # spoken yes for a thing he just asked for by name.
+    - mark_telegram_read
+    # Sends ONE voice note somebody recorded to Groq (a third party) to be
+    # turned into words. The audio leaves the laptop, so it is announced - the
+    # line names whose voice note goes to Groq (SafetyEngine._describe) - and
+    # it is refused outright for a turn that has read a stranger's text, so a
+    # message cannot ask for its own voice note, or all of them, to be sent
+    # away. Never GREEN: a catch-up must not be able to call it. Not on
+    # refuse_from_content: AMBER is already refused under content.
+    - transcribe_voice_note
     # Typing into a form field, and attaching a file to one. AMBER rather
     # than GREEN for one reason that matters more than the announcement: the
     # injection guard refuses AMBER to anything Jalen merely READ, so a web
@@ -403,6 +421,12 @@ red:
     # choice an injected instruction could make, the reason send_telegram_file
     # is outside it too.
     - send_sticker
+    # Speaks to a person as him, in Jalen's synthetic voice, and cannot be
+    # recalled. Same destination handling as send_telegram_message: asked every
+    # time except for a destination he pre-approved (safety.py
+    # _DESTINATION_ARG), and refused after a read like every other send. The
+    # question names the person AND the words (SafetyEngine._describe).
+    - send_voice_message
     # Batching the WORK, not the permission — each post still goes
     # through send_telegram_message and its destination check.
     - send_posts

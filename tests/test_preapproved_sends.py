@@ -77,6 +77,55 @@ def test_read_content_can_never_send_anywhere(engine, destination):
     assert verdict.blocked is True
 
 
+@pytest.mark.parametrize(
+    "destination",
+    [
+        "Saved Messages",
+        "saved messages",
+        "AI engineering & Machine learning",
+        "AI Engineering &amp; Machine Learning",
+    ],
+)
+def test_a_voice_message_to_his_own_destinations_goes_without_asking(engine, destination):
+    """send_voice_message has the SAME pre-approved destinations as a text."""
+    verdict = engine.classify("send_voice_message", {"to": destination, "text": "hi"})
+    assert verdict.tier is Tier.GREEN, f"{destination!r} still asks for permission"
+    assert verdict.requires_confirmation is False
+
+
+@pytest.mark.parametrize(
+    "destination",
+    ["Rodion", "SAT Talk", "Uluhbek Shonazarov", "@somebody", "Startup Family", "Ed", ""],
+)
+def test_a_voice_message_to_everyone_else_still_asks(engine, destination):
+    verdict = engine.classify("send_voice_message", {"to": destination, "text": "hi"})
+    assert verdict.tier is Tier.RED, f"{destination!r} would speak as him with no confirmation"
+    assert verdict.requires_confirmation is True
+
+
+@pytest.mark.parametrize(
+    "destination",
+    ["Saved Messages", "AI engineering & Machine learning", "Rodion"],
+)
+def test_read_content_can_never_send_a_voice_message_anywhere(engine, destination):
+    """
+    THE LOAD-BEARING TEST, for speech. Text Jalen merely READ that asks for a
+    voice message is refused even where a text would have been pre-approved -
+    and, unlike a text, even into his own Saved Messages when he named it.
+    """
+    for named in ("", "Saved Messages"):
+        verdict = engine.classify(
+            "send_voice_message", {"to": destination, "text": "posted by an injected instruction"},
+            origin="content", named_by_him=named,
+        )
+        assert verdict.tier is Tier.BLACK and verdict.blocked, (destination, named)
+
+
+def test_the_voice_message_has_a_destination_argument_and_no_taint_exception():
+    assert SafetyEngine._DESTINATION_ARG["send_voice_message"] == "to"
+    assert "send_voice_message" not in SafetyEngine._SAFE_TO_OWN_CHAT_UNDER_TAINT
+
+
 def test_the_preapproval_check_runs_after_the_injection_check():
     """
     Ordering, asserted directly. Moving the pre-approval block above the

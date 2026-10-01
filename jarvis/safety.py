@@ -207,6 +207,49 @@ def _simplify(name: str) -> str:
     return _re.sub(r"\s+", " ", text).strip()
 
 
+def _said(value: Any, limit: int) -> str:
+    """One line of what was passed: whitespace collapsed, clipped at `limit`."""
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[:limit].rstrip() + " ... and more"
+
+
+def _voice_message_summary(args: dict[str, Any]) -> str:
+    """
+    The question he is asked before Jalen speaks as him: WHO and the EXACT
+    WORDS, because the generic "send voice message: Ali" names a person and
+    says nothing about what will be said in his name. The words are the
+    whitespace-collapsed text the tool will speak, never shortened to a
+    preview (the tool refuses anything over its cap, so 600 characters here is
+    only a guard on the other side of that cap), and the voice is named so he
+    is not led to think it will sound like him.
+    """
+    to = _said(args.get("to"), 90) or "someone"
+    words = _said(args.get("text"), 600)
+    head = f"send {to} a voice message in Jalen's synthetic voice"
+    return f"{head}, saying: {words}" if words else head
+
+
+def _voice_note_summary(args: dict[str, Any]) -> str:
+    """The announcement before a voice note leaves for Groq: whose it is, and where it goes."""
+    who = _said(args.get("chat"), 60) or "someone"
+    which = _said(args.get("which"), 40).lstrip("#")
+    if which.isdigit():
+        what = f"voice note number {which}"
+    elif which and which.lower() not in ("latest", "last", "newest", "most recent"):
+        what = f"a voice note (\"{which}\")"
+    else:
+        what = "the latest voice note"
+    return (f"send {what} from {who} to Groq, a speech-to-text service on the "
+            "internet, to be turned into words")
+
+
+# Tools whose question or announcement has to say more than "<tool>: <to>".
+_SUMMARIES = {
+    "send_voice_message": _voice_message_summary,
+    "transcribe_voice_note": _voice_note_summary,
+}
+
+
 class SafetyEngine:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
@@ -604,12 +647,19 @@ class SafetyEngine:
     # "asks first unless the destination is one he pre-approved". Safe to
     # add only now that matching is exact: under the old substring rule
     # this would have spread "Ed is pre-approved" to batches of fifty.
+    #
+    # send_voice_message is here for the same reason as the others: the gate
+    # decides on the NAME in `to`, which the resolver then turns into the one
+    # chat it sends to, exactly as for a text. It is NOT in
+    # _SAFE_TO_OWN_CHAT_UNDER_TAINT below: after a read, a voice message is
+    # refused even to Saved Messages.
     _DESTINATION_ARG = {
         "send_telegram_message": "to",
         "save_telegram_draft": "to",
         "send_posts": "to",
         "send_telegram_file": "to",
         "send_sticker": "to",
+        "send_voice_message": "to",
     }
 
     # What may still go to his OWN Saved Messages after Jalen has read
@@ -697,6 +747,8 @@ class SafetyEngine:
 
     @staticmethod
     def _describe(tool: str, args: dict[str, Any]) -> str:
+        if (summarise := _SUMMARIES.get(tool)) is not None:
+            return summarise(args)
         pretty = tool.replace("_", " ")
         for key in ("to", "recipient", "path", "file_path", "url", "query", "command", "name"):
             if key in args and isinstance(args[key], str):

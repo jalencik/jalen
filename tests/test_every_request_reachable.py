@@ -41,6 +41,18 @@ CAPABILITIES = [
     ("clear_temp_files", "red", "technician: delete temp files"),
     ("scan_inbox", "green", "read 100+ emails in one call"),
     ("telegram_unread", "green", "what did I miss"),
+    # His DMs: who wrote, who is waiting, reading one chat, finding a message,
+    # and marking a chat read only when he names it.
+    ("telegram_dm_catchup", "green", "who needs a reply"),
+    ("read_telegram", "green", "read my telegram from Ali"),
+    ("search_telegram", "green", "what did Ali say about the invoice"),
+    ("mark_telegram_read", "amber", "mark Ali's chat read"),
+    # Voice, both ways: one voice note in words (announced: it goes to Groq), and
+    # a voice message sent in Jalen's synthetic voice. Both are brain tools with
+    # no router rule on purpose: one needs a spoken yes to the exact words, the
+    # other needs a summary written for the ear.
+    ("transcribe_voice_note", "amber", "what does Ali's voice note say"),
+    ("send_voice_message", "red", "send Ali a voice message"),
     ("save_telegram_draft", "green", "post as a draft"),
     ("send_telegram_message", "red", "telegram X saying Y"),
     ("send_telegram_file", "red", "send a file to Telegram"),
@@ -101,6 +113,10 @@ SPOKEN = [
     ("clear the temp files", "clear_temp_files"),
     ("telegram sat talk saying hello", "send_telegram_message"),
     ("what did I miss", "telegram_unread"),
+    ("who needs a reply", "telegram_dm_catchup"),
+    ("who messaged me", "telegram_dm_catchup"),
+    ("read my telegram from Ali", "read_telegram"),
+    ("what did Ali say on telegram", "read_telegram"),
     ("go to youtube and play dreamcore", "play_on_youtube"),
     ("read it all", "jalen_read_all"),
     ("close the youtube window", "close_browser_tab"),

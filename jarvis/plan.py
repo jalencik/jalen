@@ -58,14 +58,14 @@ ACTIONS: dict[str, tuple[str, ...]] = {
     "send":   ("draft_email", "draft_email_with_file", "save_draft_text",
                "save_telegram_draft", "create_file", "list_drafts"),
     "draft":  ("send_email", "send_telegram_message", "send_posts",
-               "send_telegram_file", "send_sticker"),
+               "send_telegram_file", "send_sticker", "send_voice_message"),
     "save":   ("send_email", "send_telegram_message", "send_posts",
-               "send_telegram_file", "send_sticker"),
+               "send_telegram_file", "send_sticker", "send_voice_message"),
     "open":   ("web_search", "search_in_files"),
     "play":   ("open_target", "search_in_files", "web_search"),
     "delete": (),
     "read":   ("send_email", "send_telegram_message", "send_posts",
-               "send_sticker", "delete_file"),
+               "send_sticker", "send_voice_message", "delete_file"),
 }
 
 _VERBS = (

@@ -143,13 +143,18 @@ class Transcriber:
         """
         client = self._groq_client()
         wav = _to_wav_bytes(audio, self.sample_rate)
+        # An empty language is "let Groq detect it": the parameter is left out
+        # rather than sent empty. Used for a voice note somebody ELSE recorded
+        # (messaging.transcribe_voice_note), who may speak Uzbek or Russian;
+        # his own voice keeps stt.language, which ships "en".
+        language = {"language": self.language} if self.language else {}
         result = client.audio.transcriptions.create(
             file=("utterance.wav", wav, "audio/wav"),
             model=self.groq_model,
-            language=self.language,
             response_format="text",
             temperature=0.0,
             timeout=self.groq_timeout_s,
+            **language,
         )
         return (result if isinstance(result, str) else getattr(result, "text", "")).strip()
 

@@ -122,7 +122,7 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
     """
     from .messaging import (
         PREMIUM_DROPPED, _Attempt, _chat_name, _deliver, _enabled, _formatted,
-        _run_send, _resolve as _resolve_chat,
+        _run_send, _resolve as _resolve_chat, _unresolved,
     )
 
     _enabled()
@@ -135,7 +135,7 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
     async def work(client):
         entity = await _resolve_chat(client, to)
         if entity is None:
-            return f"I couldn't find a Telegram chat called {to!r} — nothing sent."
+            return await _unresolved(client, to, "nothing sent")
         # The caption goes through the same per-call decision as a message
         # (messaging._formatted): Telegram HTML when it is HTML, plain text
         # otherwise, and never Telethon's markdown default. parse_mode=None

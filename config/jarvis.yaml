@@ -658,6 +658,39 @@ telegram:
     send_without_asking_to:
       - "Saved Messages"
       - "AI engineering & Machine learning"
+
+    # VOICE MESSAGES he asks Jalen to send in a DM (send_voice_message).
+    #
+    # IT IS A SYNTHETIC VOICE. Jalen's own text-to-speech (tts.voice, edge-tts)
+    # reads the words and they go out as a real Telegram voice message. It is
+    # not a recording of him and not a clone of his voice, and the first reply
+    # of every run says so.
+    #
+    # voice: "" means the voice Jalen speaks with (tts.voice). Name another
+    # edge-tts voice here to give his messages their own, e.g.
+    # "en-US-BrianNeural" or "en-GB-RyanNeural".
+    #
+    # rate: "+0%", not tts.rate's "+18%". +18% is the pace he likes to LISTEN
+    # at; it is fast for somebody else. Measured 2026-10-01, one run each on one
+    # 352-character passage through the configured voice: +0% is 18.3
+    # characters a second (19.2 s), +18% is 21.6 (16.3 s). How +0% sounds to the
+    # person receiving it is NOT MEASURED.
+    #
+    # The longest message is in code (messaging._VOICE_MAX_CHARS = 400, about 22
+    # s of speech), with the same measurement beside it. Rendering took about as
+    # long as the speech lasts (17.6 s and 26.9 s), so he waits that long after
+    # saying yes.
+    voice_message:
+      voice: ""
+      rate: "+0%"
+
+    # The language Groq listens for when he asks what ONE voice note says
+    # (transcribe_voice_note). Empty = Groq detects it, which is right for the
+    # people who write to him in Uzbek or Russian; stt.language ("en") is for
+    # HIS voice and is not used here. Put "en", "uz" or "ru" to force one if
+    # detection gets a short note wrong. NOT MEASURED: no voice note of his has
+    # been transcribed yet.
+    voice_note_language: ""
     summarise_unread: true
     monitor_channels: []
 

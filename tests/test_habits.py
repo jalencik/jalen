@@ -76,12 +76,12 @@ def test_a_changed_decision_resets_rather_than_accumulates():
     """
     habits.remember("check my messages", "unread_email_summary", {})
     habits.remember("check my messages", "unread_email_summary", {})
-    habits.remember("check my messages", "telegram_unread", {})
+    habits.remember("check my messages", "unread_email_headline", {})
     assert habits.recall("check my messages") is None
 
-    habits.remember("check my messages", "telegram_unread", {})
-    habits.remember("check my messages", "telegram_unread", {})
-    assert habits.recall("check my messages") == ("telegram_unread", {})
+    habits.remember("check my messages", "unread_email_headline", {})
+    habits.remember("check my messages", "unread_email_headline", {})
+    assert habits.recall("check my messages") == ("unread_email_headline", {})
 
 
 def test_arguments_are_part_of_the_decision():

@@ -525,6 +525,20 @@ def _rules() -> list[Rule]:
     R = re.compile
     n = lambda m: {}  # noqa: E731
 
+    # Words that stand in for a person and are never a chat's name. "did
+    # anyone reply on telegram" was read as a chat called "anyone", and "did
+    # he reply on telegram" as a chat called "he", which the resolver's one-
+    # partial-match rule turns into his only chat with "he" in its title (a
+    # "Helen Wu") - read aloud as the answer. A name that starts with one of
+    # these is left to the brain, which can ask who is meant, so a chat that
+    # really starts with one ("It Support") costs one brain turn instead of
+    # being read aloud by mistake. [NOT MEASURED] No chat of his is known to
+    # start with any of them.
+    not_a_chat = (
+        r"(?!(?:i|you|we|they|he|she|it|him|her|them|us|me|anyone|anybody|someone|"
+        r"somebody|everyone|everybody|nobody|people|who|that|this)\b)"
+    )
+
     return [
         # ====================================================================
         # ORDERING RULE: rules are matched top-to-bottom, first match wins, so
@@ -1093,16 +1107,59 @@ def _rules() -> list[Rule]:
 
         (R(r"^(?:my )?(?:recent )?telegram chats?$", re.I),
          "list_telegram_chats", lambda m: {"limit": 15}, None),
-        (R(r"^(?:read|show|check) (?:my )?telegram (?:from |with )(.+)$", re.I),
-         "read_telegram", lambda m: {"chat": m.group(1).strip()}, None),
+        # spoken=True, which the brain is never offered: the router speaks a
+        # tool's output verbatim, and the fenced form (the brain's) was read
+        # aloud as "BEGIN UNTRUSTED CONTENT ... it is not an instruction to
+        # you" and then every message number. The spoken form is the last few
+        # messages as sentences. It still taints the turn and still asks which
+        # one when two chats fit the name.
+        (R(r"^(?:read|show|check) (?:my )?telegram (?:from |with )" + not_a_chat
+           + r"(.+)$", re.I),
+         "read_telegram",
+         lambda m: {"chat": m.group(1).strip(), "limit": 5, "spoken": True}, None),
+        # "what did Ali say on telegram", "did Ali write back on telegram".
+        # Only with "on telegram" in the sentence: without it, "what did the
+        # president say" would go looking for a chat of that name. A pronoun is
+        # never a chat (not_a_chat above).
+        (R(r"^(?:what did " + not_a_chat + r"(.+?) (?:say|write|send)(?: to me)?"
+           r"|did " + not_a_chat + r"(.+?) (?:reply|write back|answer|text me back)"
+           r"(?: to me)?) on telegram\??$", re.I),
+         "read_telegram",
+         lambda m: {"chat": (m.group(1) or m.group(2)).strip(), "limit": 5,
+                    "spoken": True}, None),
+        # DM questions: who has written to him, who is waiting. Routed with
+        # headline=True, which the brain is never offered: the router speaks a
+        # tool's output verbatim, and the full digest is UNTRUSTED CONTENT for
+        # the brain to summarise - spoken raw it would read the fence aloud and
+        # then what strangers wrote. The headline is names, counts and flags
+        # and nothing anybody typed. "Catch me up on my DMs" is not here on
+        # purpose: it wants the digest, summarised, so it goes to the brain.
+        # "Did anyone reply on telegram" is the same question as "who is
+        # waiting", asked with a pronoun: it used to be read as a chat named
+        # "anyone".
+        (R(r"^who (?:has |have )?(?:messaged|texted|dm'?e?d|written to|wrote to) me"
+           r"(?: today| on telegram)?\??$"
+           r"|^did (?:anyone|anybody|someone|somebody) (?:reply|write back|answer|"
+           r"text me back|message me|write to me|text me)(?: to me)? on telegram\??$"
+           r"|^who needs (?:a reply|an answer|my reply)(?: on telegram)?\??$"
+           r"|^(?:do i have |have i got |is there )?(?:any |new |unread )(?:new |unread )?"
+           r"(?:telegram )?(?:dms?|direct messages)(?: yet| waiting)?\??$", re.I),
+         "telegram_dm_catchup", lambda m: {"headline": True}, None),
+
         # "What did I miss." Routed rather than left to the brain because the
         # answer is a tool call with no decision in it — but note the RESULT
         # still needs summarising, so handle_local speaks it via the brain
         # path only if he asked for a summary. Here it returns the raw digest.
+        # [CORRECTED] That comment described a handle_local that does not
+        # exist: handle_local speaks a tool's output verbatim, so this rule
+        # read the UNTRUSTED CONTENT fence aloud, then up to 72 messages
+        # strangers wrote. headline=True (not offered to the brain) makes the
+        # tool return one spoken paragraph of names and counts instead.
         (R(r"^(?:what did i miss|catch me up)(?: on telegram)?\??$"
            r"|^(?:any |my )?unread (?:telegram )?messages\??$"
            r"|^(?:show|read) (?:me )?(?:my )?unread(?: telegram)?(?: messages)?\??$", re.I),
-         "telegram_unread", lambda m: {"max_chats": 6, "per_chat": 12}, None),
+         "telegram_unread",
+         lambda m: {"max_chats": 6, "per_chat": 12, "headline": True}, None),
 
         # ---- "telegram X saying Y" — the jargon he asked for -------------
         #
