@@ -38,15 +38,25 @@ Then allow microphone access. In **Settings → Privacy → Microphone** (Window
 
 ## Step 2 — Put the project in place
 
-There is no online copy to clone, so copy the whole project folder from the machine that has it. The other docs assume this location. Any folder works, as long as you always run Jalen from the same one:
+There is no online copy to clone. Bring the **code**, never the original owner's private files.
+
+**Do not copy the whole folder.** The working folder also holds files that belong to its owner alone: `.env` (his keys and his Claude sign-in), `data\` (his password vault, his Telegram and Google logins, his audit log), `client_secret.json`, `config\user.yaml` (his name and accounts), plus `.venv`, `native_host_manifest.json` and `jalen_bridge_host.bat`, which only work on his machine. A copy of `data\telegram_user.session` *is* his Telegram account.
+
+The safe way is to let git pack only the code. On the machine that has the project, in its folder:
+
+```powershell
+git archive --format=zip -o $HOME\Desktop\jalen-code.zip HEAD
+```
+
+That zip holds exactly the files git tracks, and none of the private ones above. Unzip it on the new laptop, then copy one more file across by hand: the wake-word model **`models\hey_jalen.onnx`** (about 0.9 MB). Git leaves it out and it cannot be downloaded; Step 5 has the alternatives.
+
+Any folder works, as long as you always run Jalen from the same one. The other docs assume this one:
 
 ```powershell
 cd C:\Users\<you>\Desktop\Jarvis-setup\jarvis
 ```
 
-Some files are deliberately left out of git, so a code-only copy does not bring them. The one you cannot get any other way is the wake-word model **`models\hey_jalen.onnx`** (about 0.9 MB). Copy it across by hand; Step 5 has the alternatives.
-
-Do not copy `data\telegram_user.session` or `data\google_token.json` to the new laptop while the old one still runs Jalen. Sign in fresh instead (Steps 10 and 12).
+If your Desktop is synced by OneDrive (the path shows `OneDrive\Desktop`), put the project in a folder OneDrive does not sync instead, for example `C:\Jalen\jarvis`, and run everything from there. OneDrive would otherwise upload the 1.2 GB `.venv` and lock files while Jalen uses them.
 
 Run Jalen only from this folder (see "Three rules for one laptop" above).
 
@@ -95,7 +105,7 @@ About 8 MB, and it needs the internet. It fetches the voice detector (Silero VAD
 It does **not** fetch Jalen's own wake model, `models\hey_jalen.onnx`. That model was trained on the working machine and cannot be downloaded. Voice mode loads it first and stops at start-up without it ("Could not find pretrained model for model name 'hey_jalen'"). `.\jalen.ps1 check` does not look for this file. Pick one:
 
 - **Copy it** from the working machine into `models\` (Step 2). This is the best option.
-- **Use "Hey Jarvis" for now.** Put these lines in `config\user.yaml` (Step 8 explains that file) and say "Hey Jarvis" instead:
+- **Use "Hey Jarvis" for now.** Add these lines to `config\user.yaml` (Step 8 explains that file) as a block of their own, starting at the left margin, and say "Hey Jarvis" instead:
 
   ```yaml
   wake:
@@ -148,6 +158,8 @@ What each line in `.env` is for:
 
 [CREDENTIALS.md](CREDENTIALS.md) says where to get each one.
 
+Some comments inside `.env.example` are older than this guide (for example, it says to run plain `claude setup-token`). Where they disagree, follow this guide.
+
 ---
 
 ## Step 7 — Sign the brain in to Claude
@@ -177,7 +189,7 @@ Jalen thinks with your Claude subscription (Pro or Max), not with paid API credi
 
 `config\jarvis.yaml` holds the defaults, and it ships with the original owner's personal values. Do not edit it. Put your own values in **`config\user.yaml`**, which overlays it key by key and is never committed. Lists in `user.yaml` replace the list in `jarvis.yaml`; they are not added to it.
 
-These four keys carry the original owner's values and should be yours:
+These five keys carry the original owner's values and should be yours:
 
 | Key | What it does |
 |---|---|
@@ -185,8 +197,9 @@ These four keys carry the original owner's values and should be yours:
 | `web.google_account` | The Google address that Jalen's own Chrome signs in with |
 | `telegram.personal.send_without_asking_to` | Telegram chats Jalen may post to without asking first. Start with an empty list |
 | `research.contact` | A link or email that Jalen gives to websites that refuse unnamed readers. Use one you are happy to share, or leave it empty |
+| `personal.channel_handle` | The handle your community posts sign off with. **Left empty, posts sign off with the original owner's handle**, so set it if you will post |
 
-A starting `config\user.yaml`:
+A starting `config\user.yaml` (one file; every later step that mentions it adds to this same file):
 
 ```yaml
 identity:
@@ -198,6 +211,8 @@ telegram:
     send_without_asking_to: []
 research:
   contact: ""
+personal:
+  channel_handle: "<your channel handle, or leave the quotes empty if you won't post>"
 ```
 
 You can also run the guided setup, which asks your name and writes `config\user.yaml` with an empty send-without-asking list. It can also add keys to `.env` and run the Google and Telegram sign-ins (Steps 10 and 12):
@@ -206,7 +221,10 @@ You can also run the guided setup, which asks your name and writes `config\user.
 .\jalen.ps1 setup
 ```
 
-Two warnings about it. Say **No** at its brain step: it uses a different `claude` from the one the brain runs, and it does not put the token in `.env`, so Step 7 is the right way. And it rewrites `config\user.yaml` every time it runs, so add your `web`, `research` and `wake` lines back afterwards.
+Two warnings about it.
+
+- **Its brain step looks for a different `claude` program**, one installed on its own. On a laptop set up with this guide it prints `[XX] the claude CLI is not on PATH`. Ignore that and install nothing: Step 7 already signed in the copy the brain really uses. If it offers to sign in, say **No**, because it would not put the token in `.env`.
+- **It rewrites the whole of `config\user.yaml` every time it runs**, so everything you added by hand is lost (`web`, `research`, `personal`, `wake`, `telegram.personal.enabled`, `audio.input_device`). Copy the file aside first (`copy config\user.yaml config\user.yaml.bak`) and put your lines back afterwards.
 
 ---
 
@@ -226,9 +244,11 @@ Then voice:
 .\jalen.ps1 start
 ```
 
-Say **"Hey Jalen"** ("Hey Jarvis" works too), wait for the orb to turn blue, then say **"what time is it?"**. To stop, say **"Jalen, quit"** or press Ctrl+C.
+Say **"Hey Jalen"** ("Hey Jarvis" works too; if you chose the Hey Jarvis option in Step 5, say **"Hey Jarvis"**), wait for the orb to turn blue, then say **"what time is it?"**. To stop, say **"Jalen, quit"** or press Ctrl+C.
 
 If either one fails, stop it and run `.\jalen.ps1 check`. Fix every `[XX]` line except two that stay until later steps: "Google is not connected" (Step 10) and "Personal Telegram isn't signed in" (Step 12). Lines marked `[--]` are optional extras.
+
+Gmail and Calendar are optional, but `check` always counts a missing Google login as a problem. If you skip Step 10 for good, that one `[XX]` line stays, and it is safe to ignore.
 
 ---
 
@@ -246,7 +266,11 @@ The fiddliest step. Read it carefully; there's one trap that wastes people's wee
    **Do not** submit for verification. You don't need it for personal use. You'll see a "Google hasn't verified this app" screen once — click **Advanced → Go to <your app name> (unsafe)**. That is expected for your own app.
 
 5. **Credentials → Create Credentials → OAuth client ID → Desktop app.**
-6. Download the JSON, rename it `client_secret.json`, and put it in the project folder (next to `run.py`).
+6. Download the JSON and put it in the project folder (next to `run.py`) as `client_secret.json`. Windows hides file extensions, so renaming it in Explorer easily makes `client_secret.json.json`. Use this instead, from the project folder:
+
+   ```powershell
+   Move-Item "$HOME\Downloads\client_secret_*.json" .\client_secret.json
+   ```
 7. If you did not publish the app in item 4, add the Google account you will use under **Audience → Test users**. Otherwise Google refuses the sign-in.
 8. Connect, once:
 
@@ -317,11 +341,12 @@ This lets Jalen read your real chats and send messages as you.
    .venv\Scripts\python.exe scripts\connect_telegram.py --status
    ```
 
-Personal Telegram already ships switched on in `config\jarvis.yaml`, so there is nothing to edit. If you skip this step, put this in `config\user.yaml` so that `check` stops counting it as a problem:
+Personal Telegram already ships switched on in `config\jarvis.yaml`, so there is nothing to edit. If you skip this step, add `enabled: false` under the `telegram:` → `personal:` lines that `config\user.yaml` already has (Step 8), so that `check` stops counting it as a problem. Do not add a second `telegram:` block: YAML keeps only the last one, silently. The merged part looks like this:
 
 ```yaml
 telegram:
   personal:
+    send_without_asking_to: []
     enabled: false
 ```
 
@@ -344,7 +369,7 @@ This lets Jalen see the tab you are looking at in your own Chrome and fill ordin
    It writes a small launcher and a manifest into this folder and registers them for your Windows user only. The launcher always starts this folder's `.venv`, which is one more reason to run Jalen from here only.
 2. In Chrome open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `browser_extension` folder inside the project.
 3. Quit Chrome completely and open it again.
-4. Start Jalen (`.\jalen.ps1 start` or `.\jalen.ps1 text`). Click the Jalen orb in the Chrome toolbar. The panel should say **connected**.
+4. Start Jalen (`.\jalen.ps1 start` or `.\jalen.ps1 text`). Click the Jalen orb in the Chrome toolbar. A newly loaded extension hides in the puzzle-piece **Extensions** menu at first: open it and pin Jalen. The panel should say **connected**.
 
 If it says not connected, run `.\jalen.ps1 browser`. It checks each link in the chain and names the broken one.
 
@@ -484,7 +509,7 @@ Only one Jalen can run at a time, in any mode: voice, text and Telegram share on
 
 | Symptom | Cause |
 |---|---|
-| `ModuleNotFoundError: No module named 'numpy'` (or any package) even though setup succeeded | This terminal's `python` isn't the project's one. Use `.\jalen.ps1`, or call `.venv\Scripts\python.exe run.py ...` directly. Check which one you're running with: `Get-Command python \| Select-Object Source` should print a path inside `...\jarvis\.venv\Scripts\`. If it prints anything else (e.g. `AppData\Local\Programs\Python\...`), that's the bug — use the full `.venv` path. |
+| `ModuleNotFoundError: No module named 'numpy'` (or any package) even though setup succeeded | The command used a bare `python`, which is your system Python, not the project's one (this guide never activates the `.venv`, so bare `python` is always the wrong one). Use `.\jalen.ps1`, or call `.venv\Scripts\python.exe ...` with the full path. |
 | Doesn't hear "Hey Jalen" | Run `.\jalen.ps1 check`: it lists your microphones, and you can pin one with `audio.input_device` in `config\user.yaml`. If the mic is right, the model has only ever heard synthetic voices, so teach it yours with `.\jalen.ps1 voice` (about 15 minutes). `wake.threshold` already ships lowered to 0.5 for this reason. |
 | Wakes when nobody said his name | Raise `wake.threshold` back toward 0.7. The measured table is in the comment above it in `config\jarvis.yaml`. |
 | Voice mode stops at start with "Could not find pretrained model for model name 'hey_jalen'" | `models\hey_jalen.onnx` is missing. See Step 5. |
@@ -506,4 +531,12 @@ Only one Jalen can run at a time, in any mode: voice, text and Telegram share on
 .venv\Scripts\python.exe -m pytest tests\ -q -p no:cacheprovider --ignore=tests\benchmark_latency.py --ignore=tests\benchmark_open.py --ignore=tests\benchmark_phrasing.py
 ```
 
-Run it to see the current count; it was about 5,245 at commit `833adbb` and it changes as work merges. Expect one failure when CapCut is not installed: `test_overhaul_fixes.py::test_real_typos_and_abbreviations_still_resolve[capcut-True]`. It is not a code problem. Any other failure is real.
+Run it to see the current count; it was about 5,245 at commit `833adbb` and it changes as work merges.
+
+On the working machine one failure is expected: `test_overhaul_fixes.py::test_real_typos_and_abbreviations_still_resolve[capcut-True]`, because CapCut is not installed. It is not a code problem. A **fresh** laptop has a few more that are about the machine, not the code:
+
+- tests that need files only a used install has: the password vault (`data\vault.json`, made by `.\jalen.ps1 vault`) and `data\weaknesses.md`;
+- the wake-word tests, if `models\hey_jalen.onnx` is missing (Step 5);
+- three voice tests that call the internet (`test_stt_roundtrips_through_groq`, `test_barge_in_latency_is_measured`, `test_failure_paths_keep_jarvis_alive`). Run them two or three times on their own before believing a failure.
+
+Any other failure is real.
