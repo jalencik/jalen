@@ -228,6 +228,134 @@ SEARCH_TIME_BUDGET_S = 2.0
 SEARCH_MAX_ENTRIES = 60_000
 SEARCH_MAX_DEPTH = 6
 
+# Words that are never part of what a file is CALLED: the ones a person says
+# around the name.
+_SEARCH_STOP_WORDS = frozenset({"my", "the", "a", "an", "file", "folder", "please", "open"})
+
+# Words that say nothing about WHICH thing is meant - pronouns and particles.
+# Measured on data/audit.jsonl (57 open_* actions, 16 failed): "Can you open
+# it up?" arrived as name="it up", find_files matched "it" and "up" as
+# SUBSTRINGS - inside "spl-it-s" and "ded-up" - and open_target replied
+# "Opened pre_dedup_splits.json": a random file on his Desktop, opened. A
+# search for a name made only of these can only find something by accident,
+# so it is not run; a name with other words in it simply ignores them
+# ("that first draft again" is a search for "first draft").
+_FILLER_WORDS = frozenset({
+    "it", "up", "that", "this", "them", "those", "these", "one", "ones", "me",
+    "him", "her", "us", "again", "there", "here", "also", "too", "just",
+    "thing", "things", "stuff",
+})
+
+# The fillers that are ALSO real folder names ("Stuff", "Things"). Alone they are
+# looked up by their whole name before the question is asked; the pronouns and
+# particles above are not (nothing is called "it up").
+_NOUN_LIKE_FILLERS = frozenset({"one", "ones", "thing", "things", "stuff"})
+
+# "the pdf called X", "document named X", "pdf name, X" (4 lines in
+# data/router_misses.log: 7 words, so the router refused it). The describing
+# words were being searched for in the file name. A kind is required before
+# "name" - "name tag template" is a file, "pdf name, tag" is a description -
+# but "called"/"named"/"titled" stand alone.
+_DESCRIBED = re.compile(
+    r"^(?:(?P<kind>[a-z]+)\s+(?:called|named|name|titled)|(?:called|named|titled))\s*[,:]?\s+(?P<name>.+)$",
+    re.I)
+
+# What a kind word says about the file, used only to PREFER matches: if nothing
+# of that kind matches, the other hits are kept, never hidden.
+_KIND_EXTENSIONS: dict[str, tuple[str, ...]] = {
+    "pdf": (".pdf",),
+    "docx": (".docx",), "word": (".docx", ".doc"),
+    "xlsx": (".xlsx",), "excel": (".xlsx", ".xls"), "spreadsheet": (".xlsx", ".xls", ".csv"),
+    "pptx": (".pptx",), "powerpoint": (".pptx", ".ppt"), "presentation": (".pptx", ".ppt"),
+    "txt": (".txt",), "text": (".txt",),
+    "video": (".mp4", ".mkv", ".mov", ".avi", ".webm"),
+    "song": (".mp3", ".wav", ".m4a", ".flac"), "track": (".mp3", ".wav", ".m4a", ".flac"),
+    "image": (".png", ".jpg", ".jpeg", ".gif", ".webp"), "picture": (".png", ".jpg", ".jpeg", ".gif", ".webp"),
+    "photo": (".png", ".jpg", ".jpeg"),
+}
+
+# "the D drive", "d:", "drive d", "local disk d". A lone letter is NOT a
+# drive ("open d" is a file called d); the word or the colon is required.
+_DRIVE_PHRASE = re.compile(
+    r"^(?:(?:the|my)\s+)?(?:(?:local\s+)?(?:drive|disk)\s+(?P<a>[a-z])|(?P<b>[a-z])\s*(?::|\s+drive|\s+disk)(?:\s*(?:drive|disk))?)$",
+    re.I)
+
+
+# An explicit path: a drive letter, a network share, "~/..." or "%VAR%\...".
+# Said (or composed by the brain) with spaces in it, so it is NOT a sentence
+# however many words it has, and it is NOT a name to be fuzzy-matched against
+# apps. "the folder C:/x" / "file C:/x" - a kind word in front - is the same
+# path (2 lines of data/audit.jsonl).
+_EXPLICIT_PATH = re.compile(r"^(?:[a-zA-Z]:[\\/]|\\\\[^\\/\s]|~[\\/]|%[A-Za-z_]+%[\\/])")
+
+# What os.startfile RUNS rather than shows. A file with one of these endings that
+# was found by name in place of a missing path is never launched on a guess.
+_RUNS_CODE = frozenset({
+    ".exe", ".bat", ".cmd", ".com", ".scr", ".pif", ".msi", ".msix", ".appx", ".application", ".gadget",
+    ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta", ".reg", ".cpl", ".msc",
+    ".lnk", ".url", ".jar", ".py", ".pyw", ".sh",
+})
+_KIND_BEFORE_PATH = re.compile(r"^(?:file|folder|directory|document)\s+(?P<path>\S.*)$", re.I)
+
+
+def _open_explicit_path(raw: str) -> str:
+    """
+    Open the thing at an explicit path - and if nothing is there, SAY so.
+
+    Never falls through to the app and file-name search with the path as the
+    name: that matched "telegram" inside C:\\...\\telegram_post_boxette.txt, a
+    file that did not exist, and launched Telegram. The one thing that is tried
+    instead is the file's own exact name in the usual places, because a path he
+    remembers is very often a path he has since moved the file out of; it is
+    only taken when exactly one file has that name, and he is told it was found
+    somewhere else.
+    """
+    expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
+    if expanded.exists():
+        try:
+            _startfile(str(expanded))
+            what = "folder" if expanded.is_dir() else "file"
+            return f"Opened {what} {expanded.name}."
+        except Exception as exc:
+            return f"Couldn't open {expanded.name}: {exc}"
+
+    wanted = expanded.name
+    same_name: list[str] = []
+    if wanted:
+        for hit in find_files(Path(wanted).stem or wanted, limit=40):
+            if Path(hit).name.lower() == wanted.lower() and hit not in same_name:
+                same_name.append(hit)
+    if len(same_name) == 1:
+        if Path(same_name[0]).suffix.lower() in _RUNS_CODE:
+            # A document found in the wrong place is opened and he is told. A
+            # PROGRAM or a script found in the wrong place is not: os.startfile
+            # runs it, and "one file has that name somewhere I look" is a guess
+            # about which file he meant, not an instruction to run it. (It could
+            # be one he downloaded last week and never looked at.)
+            return (f"{wanted} isn't at that path any more. There's one with that name in "
+                    f"{Path(same_name[0]).parent.name}, but it's a program or a script, so I won't run it on a "
+                    "guess. Open it yourself, or say its full path.")
+        try:
+            _startfile(same_name[0])
+        except Exception as exc:
+            return f"Couldn't open {wanted}: {exc}"
+        return f"{wanted} isn't at that path any more, but I found it in {Path(same_name[0]).parent.name} and opened it."
+    if same_name:
+        return (f"{wanted} isn't at that path, but I found {len(same_name)} files with that name, in "
+                + "; ".join(sorted({Path(h).parent.name for h in same_name})[:4]) + ". Which one?")
+    return f"I couldn't find {wanted or raw} at {str(expanded.parent)[:60]}, or anywhere I look."
+
+
+def _content_terms(query: str) -> list[str]:
+    """The words of a spoken name that can identify something: not articles, not fillers."""
+    words = (query or "").lower().replace("_", " ").replace("-", " ").split()
+    return [w for w in words if w not in _SEARCH_STOP_WORDS and w not in _FILLER_WORDS]
+
+
+def _phrase_key(text: str) -> str:
+    """'MY CV', 'my_cv' and 'my-cv' are the same phrase."""
+    return re.sub(r"[\s_\-]+", " ", (text or "").lower()).strip()
+
 
 # ------------------------------------------------------------------ aliases
 def _load_aliases() -> dict[str, str]:
@@ -490,23 +618,58 @@ def _resolve_lnk_target(lnk_path: str) -> str | None:
         return None
 
 
-def open_target(name: str) -> str:
+def open_target(name: str, kind: str = "") -> str:
     """
-    Open whatever the user meant: an app, a file, or a folder — AMBER.
+    Open whatever the user meant: an app, a file, or a folder — GREEN.
 
     Resolution order matches how people actually speak. An explicit path wins
     (it's unambiguous), then a known/learned/fuzzy app name, then a search of
     the usual places for a matching file or folder.
+
+    `kind` is what he called it - "pdf", "spreadsheet", "folder" - when he
+    said ("the pdf called X"). It only PREFERS: a pdf is chosen over a text
+    file of the same name, and if there is no pdf the text file is still
+    offered rather than hidden.
     """
     raw = (name or "").strip().strip('"')
     if not raw:
         return "Open what?"
+    kind = (kind or "").strip().lower()
+    spoken = raw
 
     # Strip a leading possessive. From his log: "open my telegram please"
     # searched the disk for a file called "my telegram" and answered "I
     # couldn't find an app, file or folder called my telegram". The
     # normaliser already removes trailing courtesy; this is the front half.
     raw = re.sub(r"^(?:my|the|a|an)\s+", "", raw, flags=re.I).strip() or raw
+
+    # A drive: "the D drive", "d:", "drive d". Nothing else could mean it, and
+    # without this it was searched for as a file called "d drive".
+    if drive := _DRIVE_PHRASE.match(raw):
+        letter = (drive.group("a") or drive.group("b")).upper()
+        root = f"{letter}:\\"
+        if not os.path.isdir(root):
+            return f"There's no {letter} drive on this machine."
+        try:
+            _startfile(root)
+        except Exception as exc:
+            return f"Couldn't open the {letter} drive: {exc}"
+        return f"Opened the {letter} drive."
+
+    # The words he used to DESCRIBE the thing are not its name: "the pdf
+    # called X", "the document named X", "pdf name, X".
+    if described := _DESCRIBED.match(raw):
+        kind = kind or (described.group("kind") or "").lower()
+        raw = re.sub(r"^(?:my|the|a|an)\s+", "", described.group("name").strip(), flags=re.I).strip() or raw
+
+    # An explicit path wins over everything below, including the "whole
+    # sentence" refusal: "C:\Users\user\Desktop\The Art of Programs -
+    # Opportunity Tracker.pdf" is eight words and one file.
+    with_kind = _KIND_BEFORE_PATH.match(raw)
+    if with_kind and _EXPLICIT_PATH.match(with_kind.group("path").strip().strip('"')):
+        raw = with_kind.group("path").strip().strip('"')
+    if _EXPLICIT_PATH.match(raw):
+        return _open_explicit_path(raw)
 
     # A whole sentence is not a filename. Eighteen times in his log, the tail
     # of a multi-clause request arrived here as a name and produced "I
@@ -543,6 +706,39 @@ def open_target(name: str) -> str:
         except Exception as exc:
             return f"Couldn't open {special_folder}: {exc}"
 
+    # Nothing in it names anything. "Can you open it up?" arrived as "it up",
+    # matched "spl-it-s" and "ded-up" as substrings, and opened a random file
+    # on his Desktop. A nickname he taught is still honoured - it is looked up
+    # first, exactly as he taught it - but otherwise this is a question, not
+    # a search. (After the exact path and special-folder checks above, which
+    # are about real names; before every fuzzy path below.)
+    if not _content_terms(raw) and raw.lower() not in _load_aliases() and spoken.lower() not in _load_aliases():
+        # ...unless something is really CALLED that. "stuff", "things" and
+        # "one" are fillers when they stand alone ("open that thing"), and are
+        # also the names of real folders ("open the stuff folder"). Only a file
+        # or folder whose WHOLE name is the phrase counts - never a substring.
+        #
+        # Only when the phrase is nothing BUT such a noun ("stuff", "the things
+        # folder"): "it up" and "that one" can only be pronouns, and looking
+        # for a folder of that name would cost two seconds of silence before
+        # the same question.
+        wants_folder = (re.search(r"\bfolder\b|\bdirectory\b", raw, re.I) is not None
+                        or kind in ("folder", "directory"))
+        said = [w for w in raw.lower().split() if w not in _SEARCH_STOP_WORDS]
+        called: list[str] = []
+        if said and all(w in _NOUN_LIKE_FILLERS for w in said):
+            called = (find_files(raw, limit=5, dirs_only=wants_folder, exact_name=True)
+                      or (find_files(raw, limit=5, exact_name=True) if wants_folder else []))
+        if not called:
+            return (f"I'm not sure what \"{raw[:40]}\" refers to. What should I open?")
+        if len({h.lower() for h in called}) > 1:
+            return f"I found {len(called)}: " + "; ".join(Path(h).name for h in called[:5]) + ". Which one?"
+        try:
+            _startfile(called[0])
+        except Exception as exc:
+            return f"Couldn't open {Path(called[0]).name}: {exc}"
+        return f"Opened {Path(called[0]).name}."
+
     target, matched = resolve_app(raw)
     if target:
         try:
@@ -564,12 +760,21 @@ def open_target(name: str) -> str:
     # An explicit "folder"/"directory" narrows the search to directories, so
     # "open the SAT TOP folder" isn't buried under unrelated PDFs and specs
     # that happen to contain the same two words.
-    wants_dir = re.search(r"\bfolder\b|\bdirectory\b", raw, re.I) is not None
+    wants_dir = (re.search(r"\bfolder\b|\bdirectory\b", raw, re.I) is not None
+                 or kind in ("folder", "directory"))
     hits = find_files(raw, dirs_only=wants_dir)
     if wants_dir and not hits:
         hits = find_files(raw)  # nothing matched as a folder — don't over-restrict
     if not hits:
         return f"I couldn't find an app, file or folder called {raw}."
+
+    # "the pdf called X": prefer a pdf. Only a preference - with no pdf among
+    # the hits the others are kept, so a wrong kind word never hides the file.
+    extensions = _KIND_EXTENSIONS.get(kind)
+    if extensions:
+        of_that_kind = [h for h in hits if h.lower().endswith(extensions)]
+        if of_that_kind:
+            hits = of_that_kind
 
     # A real Desktop shortcut named exactly what was asked for outranks any
     # number of unrelated files that merely happen to contain the same
@@ -599,6 +804,13 @@ def open_target(name: str) -> str:
     distinct = {_canonical_choice_name(h) for h in hits}
     asked_for = Path(raw).name.lower()
     exact = [h for h in hits if Path(h).name.lower() == asked_for]
+    if not exact:
+        # What he SAID is a file's name more often than the possessive-
+        # stripped search term is: "my cv" is the stem of MY CV.pdf, but was
+        # searched as "cv", matched 12 files, and asked which one.
+        said_as = {_phrase_key(spoken), _phrase_key(raw)}
+        exact = [h for h in hits
+                 if _phrase_key(Path(h).stem) in said_as or _phrase_key(Path(h).name) in said_as]
 
     chosen: str | None = None
     if exact:
@@ -663,7 +875,7 @@ def _search_roots() -> list[Path]:
     return [r for r in roots if r.is_dir()]
 
 
-def find_files(query: str, limit: int = 12, dirs_only: bool = False) -> list[str]:
+def find_files(query: str, limit: int = 12, dirs_only: bool = False, exact_name: bool = False) -> list[str]:
     """
     Filename search over the usual places, best matches first.
 
@@ -671,16 +883,28 @@ def find_files(query: str, limit: int = 12, dirs_only: bool = False) -> list[str
     request explicitly said "folder"/"directory", so "open the SAT TOP
     folder" isn't drowned out by unrelated PDFs that happen to share the
     same words.
+
+    `exact_name` matches only a file or folder whose WHOLE name (without its
+    extension) is the query, and keeps the filler words in it: it is how a
+    folder really called "Stuff" or "Things" is found when "the stuff folder"
+    is otherwise nothing but fillers.
     """
     query = (query or "").strip().lower()
     if not query:
         return []
     # "my cv" / "the changes.pdf file" — drop words that are never part of a
-    # filename, so the search terms are what the user actually named.
-    stop = {"my", "the", "a", "an", "file", "folder", "please", "open"}
-    terms = [t for t in query.replace("_", " ").replace("-", " ").split() if t not in stop]
+    # filename, so the search terms are what the user actually named. And the
+    # pronouns and particles around it ("that first draft again"): a query
+    # with NOTHING left is not searched at all. It used to fall back to the
+    # whole query, which is how "it up" opened a random file.
+    if exact_name:
+        terms = [t for t in query.replace("_", " ").replace("-", " ").split() if t not in _SEARCH_STOP_WORDS]
+        wanted_name = " ".join(terms)
+    else:
+        terms = _content_terms(query)
+        wanted_name = ""
     if not terms:
-        terms = [query]
+        return []
 
     exclude = {d.lower() for d in (CONFIG.get_path("index.exclude_dirs", []) or [])}
     # (depth, name length, path): depth FIRST. A project like "Claude
@@ -708,7 +932,10 @@ def find_files(query: str, limit: int = 12, dirs_only: bool = False) -> list[str
             for entry in names:
                 scanned += 1
                 low = entry.lower()
-                if all(t in low for t in terms):
+                if exact_name:
+                    if wanted_name in (_phrase_key(Path(entry).stem), _phrase_key(entry)):
+                        scored.append((depth, len(entry), str(Path(dirpath) / entry)))
+                elif all(t in low for t in terms):
                     scored.append((depth, len(entry), str(Path(dirpath) / entry)))
             # A WALL-CLOCK budget, not just an entry cap. Measured on this
             # machine: "open my cv" took 8.96s — the entry cap alone doesn't

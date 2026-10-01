@@ -750,6 +750,28 @@ class SafetyEngine:
         if (summarise := _SUMMARIES.get(tool)) is not None:
             return summarise(args)
         pretty = tool.replace("_", " ")
+        # move_folder's question is about what the dry run he just heard
+        # RESOLVED to - the real folder, the real (maybe redirected) place, the
+        # link, the protected files carried along - not the words he spoke.
+        # foldermove.confirmation_summary reads what that dry run remembered;
+        # it touches no disk and says so when no dry run is behind it.
+        if tool == "move_folder":
+            try:
+                from .tools import foldermove
+
+                said = foldermove.confirmation_summary(args)
+            except Exception:  # noqa: BLE001 - the question must still be asked
+                said = None
+            if said:
+                return said
+        # A move has two ends and the question "Confirm?" is asked about
+        # both: "move folder: C:/Users/user/Downloads. Confirm?" never said
+        # WHERE, which is the half that matters when the original is about to
+        # be deleted. Found by tests/test_folder_move.py.
+        source, destination = args.get("path"), args.get("destination")
+        if isinstance(source, str) and isinstance(destination, str) and source and destination:
+            cut = lambda v: v if len(v) <= 90 else v[:90] + "…"  # noqa: E731
+            return f"{pretty}: {cut(source)} to {cut(destination)}"
         for key in ("to", "recipient", "path", "file_path", "url", "query", "command", "name"):
             if key in args and isinstance(args[key], str):
                 value = args[key]

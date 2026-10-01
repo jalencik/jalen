@@ -28,6 +28,7 @@ from . import (
     drafting,
     documents,
     filesystem,
+    foldermove,
     gcalendar, gmail,
     handoff,
     interaction,
@@ -72,7 +73,7 @@ for _module in (
     gmail, gcalendar, messaging, research, voice, coding, selfeval, handoff,
     technician, repairs, vault, interaction, browsertabs, attachments,
     bulkmail, autofill, drafting, devwork, selfcontrol, agents,
-    webagent, feedback, webforms, tasks, profile, otp, browser_ext, stickers,
+    webagent, feedback, webforms, tasks, profile, otp, browser_ext, stickers, foldermove,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:

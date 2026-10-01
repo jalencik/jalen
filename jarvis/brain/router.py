@@ -468,6 +468,47 @@ def _site_lookup(m: re.Match) -> dict:
     return {"url": _SITE_TABLE.get(key, key)}
 
 
+_NOT_A_FOLDER = frozenset({"it", "this", "that", "them", "these", "those", "everything", "all", "stuff", "things"})
+
+
+def _a_folder_to_a_drive(m: re.Match) -> dict | None:
+    """
+    The arguments for the dry run of "move X to <a drive>", or None when X is
+    not something that can be told to be a FOLDER from the words alone (so the
+    brain, which has move_file and the rest, gets the request instead):
+
+      - he said "folder" or "directory" ("move my cafe folder to d"), or
+      - it is one of the folders every profile has by name ("my downloads"), or
+      - it is a path that really is a folder (one stat, no search).
+
+    A bare "report.pdf", "the window" or "the cursor" is none of these.
+    """
+    import os
+
+    source = m.group("what").strip()
+    if source.lower() in _NOT_A_FOLDER:
+        return None
+    args = {"path": source, "destination": m.group("where").strip()}
+    if m.group("kind"):
+        return args
+    from ..tools import foldermove
+
+    if foldermove.is_known_folder_name(source):
+        return args
+    if re.match(r"^(?:[a-zA-Z]:[\\/]|~|%)", source) and os.path.isdir(
+            os.path.expandvars(os.path.expanduser(source))):
+        return args
+    return None
+
+
+def _the_plan_he_just_heard() -> dict | None:
+    """move_folder's arguments from the dry run he heard, or None when there is no live one."""
+    from ..tools import foldermove
+
+    plan = foldermove.last_plan()
+    return dict(plan) if plan else None
+
+
 def _default_to_desktop(name: str) -> str:
     """
     "make me a new folder called Projects" names a THING, not a location —
@@ -922,6 +963,20 @@ def _rules() -> list[Rule]:
         (R(r"^what windows (?:are open|do i have(?: open)?)\??$", re.I),
          "get_window_list", n, None),
 
+        # "open the pdf called X" / "open the document named X" / "open the
+        # pdf name, X". Four lines of data/router_misses.log were exactly
+        # this ("open the pdf name, the art of programs"): seven words, so
+        # looks_like_a_name() declined the greedy rule below and each one paid
+        # a brain round trip. The KIND is passed on, not discarded - open_target
+        # prefers a pdf over a text file of the same name - and the kinds are
+        # file-ish nouns only, so "open the chat called saved messages in
+        # telegram and write hi" is still an instruction for the brain.
+        (R(r"^(?:open|pull up|bring up|show me|launch)(?: up)? (?:the |my |a )?"
+           r"(pdf|docx?|word|xlsx?|excel|spreadsheet|pptx?|powerpoint|presentation|document|doc|file|folder|"
+           r"directory|text|txt|video|song|track|image|picture|photo)"
+           r"(?: file| document)? (?:called|named|name|titled)[,:]? (.+)$", re.I),
+         "open_target", lambda m: {"name": m.group(2).strip(), "kind": m.group(1).strip()}, None),
+
         # "open X" is the common phrasing, but people say launch/start/fire up
         # /bring up too — these all fell through to Claude before, turning a
         # 1ms local action into a multi-second round trip.
@@ -1260,6 +1315,34 @@ def _rules() -> list[Rule]:
         (R(r"^copy (.+?) to (.+)$", re.I),
          "copy_file", lambda m: {"path": m.group(1).strip(), "destination": m.group(2).strip()}, None),
 
+        # ---- moving a whole FOLDER to another drive ------------------------
+        # "move my Downloads / videos / projects folder to D". His C: drive
+        # has been 99-100% full for weeks and D: has ~300 GB free; on
+        # 2026-08-22 he asked for exactly this and nothing could do it. The
+        # first half is the DRY RUN - free, instant, and spoken before
+        # anything is asked: "4.2 GB, 1,800 files, frees 4.2 GB on C". The
+        # destination must be a drive ("d", "the D drive") or a path with a
+        # drive letter, so "move the mouse to the left", "move cafe.txt to
+        # the desktop" and "move this window to the other screen" are not
+        # taken. A pronoun is not a folder: "move it to d" falls through to
+        # the brain, which knows what "it" was. Neither is a FILE: the first
+        # version took every "move X to d", so "move report.pdf to d" and
+        # "move the window to d" were answered with "I couldn't find a folder
+        # called report.pdf" after three seconds of disk search, and the brain,
+        # which picks move_file for a file, never saw them. Only what can be
+        # told to be a folder is taken - see _a_folder_to_a_drive.
+        (R(r"^(?:move|transfer|relocate|shift) (?:my |the )?(?P<what>.+?)(?P<kind> folder| directory)? (?:over )?(?:to|onto|into) (?:the |my )?"
+           r"(?P<where>(?:(?:local )?(?:drive|disk) [c-hj-z]|[c-hj-z](?:\s*:)?(?:\s+(?:drive|disk))?|[a-z]:[\\/].*))$", re.I),
+         "plan_folder_move", lambda m: _a_folder_to_a_drive(m), None),
+        # "go ahead and move it" - the answer to that dry run. "go ahead and"
+        # is stripped by the normaliser, so this sees "move it". The plan he
+        # heard is remembered by foldermove.last_plan(), which is the ONE
+        # place its lifetime is enforced; with none (or a stale one) this
+        # rule declines and the phrase goes to the brain, rather than moving
+        # a folder nobody has described.
+        (R(r"^(?:yes[, ]+)?(?:move it|do the move|start the move|do it,? move it)$", re.I),
+         "move_folder", lambda m: _the_plan_he_just_heard(), None),
+
         # ---- documents: read / content search -------------------------------
         # "read changes.pdf" — an explicit instruction to read a document out
         # loud, so speaking its extracted text back is exactly what was
@@ -1509,6 +1592,11 @@ class IntentRouter:
             # fall back rather than lose the turn.
             cased_match = pattern.match(cased) or match
             args = build(cased_match)
+            # A rule may decline once it has looked closer ("move it to d"
+            # has no folder; "move it" with no plan just described has
+            # nothing to go ahead with). Keep looking; the brain is next.
+            if args is None:
+                continue
 
             # A greedy catch-all can match a whole paragraph. If what it
             # captured as a NAME is not name-shaped, this rule is not the

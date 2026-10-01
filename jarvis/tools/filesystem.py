@@ -170,6 +170,11 @@ def copy_file(path: str, destination: str) -> str:
     """Copy a file — AMBER."""
     src, dst = _resolve(path), _resolve(destination)
     try:
+        # Said plainly: shutil.copy2 on a folder raises PermissionError on
+        # Windows, which used to be spoken as "Permission denied".
+        if src.is_dir():
+            return (f"{src.name} is a folder, and copy_file copies single files. "
+                    "I can move a whole folder to another drive, but I don't copy one and keep both.")
         if dst.is_dir():
             dst = dst / src.name
         shutil.copy2(src, dst)
@@ -179,9 +184,23 @@ def copy_file(path: str, destination: str) -> str:
 
 
 def move_file(path: str, destination: str) -> str:
-    """Move a file — AMBER."""
+    """
+    Move a file — GREEN.
+
+    A FILE. This used to take a folder too, and shutil.move on a folder across
+    drives is copytree then rmtree: nothing counted, nothing compared, no
+    refusal of C:/Windows or a never-touch folder inside it, run inside the
+    turn so he hears nothing for minutes, and GREEN, so it asked nothing. His
+    2026-08-22 "move my Cafe folder to D" had only this to land on. A folder
+    goes to move_folder (foldermove.py), which checks the copy before it
+    removes the original.
+    """
     src, dst = _resolve(path), _resolve(destination)
     try:
+        if src.is_dir():
+            return (f"{src.name} is a folder, and move_file moves single files. To move a whole folder - to "
+                    "another drive, or into a folder like Documents - I use move folder: it measures it first, "
+                    "copies it, checks the copy, and only then removes the old one.")
         if dst.is_dir():
             dst = dst / src.name
         shutil.move(str(src), str(dst))

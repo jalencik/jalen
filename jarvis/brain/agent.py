@@ -400,6 +400,33 @@ class Brain:
             "vanish.\n"
         )
 
+        # His C: drive is nearly always full and D: has ~300 GB free; on
+        # 2026-08-22 he asked for a folder move and nothing could do it, and
+        # the nearest tool (move_file) happily took a folder and deleted the
+        # original with nothing checked. The ORDER matters and the model is
+        # the only thing that can make it happen, so it is told.
+        base += (
+            "\n\nMOVING A FOLDER TO ANOTHER DRIVE. 'Move my Downloads / videos / "
+            "projects folder to D' is two steps, always in this order. First call "
+            "plan_folder_move and tell him what it says in your own words: the size, "
+            "the file count, what it frees on the C drive, and anything it refuses. "
+            "Then call move_folder with the SAME arguments; the system asks him to "
+            "confirm out loud, and move_folder will not start without the first "
+            "step. Never use move_file for a folder - it refuses. The move runs in "
+            "the background, copies and checks everything before removing the "
+            "original, and says when it is done; if he asks how it is going use "
+            "folder_move_status, and if it was interrupted or cut short saying the "
+            "same move again finishes it. A move to another drive leaves a link at "
+            "the old path so programs still find the folder, and a move on the same "
+            "drive leaves none - pass leave_link only if he says otherwise. If the "
+            "folder holds .env or token files the plan names each one and says they "
+            "will be carried over unread: read those names out to him, as they are, "
+            "and never try to read the files. If it refuses a folder (Windows, "
+            "Program Files, AppData, keys or other protected files, Jalen's own "
+            "folder, a program running from it), say why in one sentence and do not "
+            "look for another way to move it.\n"
+        )
+
         # Two capabilities the model will not use correctly unless told
         # when to reach for them, because in both cases a WORSE tool looks
         # superficially applicable and was, until now, the only one there.

@@ -175,6 +175,18 @@ green:
     - remember
     - disk_report           # read-only report of drive/folder sizes
     - cleanup_suggestions   # read-only report; never deletes anything itself
+    # The dry run for moving a folder to another drive: counts files and bytes
+    # and reads free space, changes nothing. GREEN so that hearing "4.2 GB,
+    # 1,800 files, frees 4.2 GB on C" costs no confirmation - move_folder
+    # (RED, below) refuses to start without having heard it. It IS on
+    # refuse_from_content (below), because it is not only a report: it stores
+    # the plan, and the router's "move it" feeds that stored plan to
+    # move_folder for fifteen minutes. A page that got a plan stored would have
+    # chosen what a later, clean "move it" moves (the RED question is then the
+    # only thing in the way). The tool also refuses to store a plan on a tainted
+    # turn - the same rule where the memory is kept.
+    - plan_folder_move
+    - folder_move_status    # reads the move's own record; touches nothing
     - memory_report         # read-only report of RAM usage
     - read_document         # extracts text from a file; reads nothing it doesn't return
     - summarize_document    # ditto, just labelled for the brain to summarise
@@ -433,6 +445,22 @@ red:
     - send_whatsapp_message     # F46
     - post_public               # F46 - channels, social, anything others see
     - delete_file               # F46
+    # Moves a whole folder to another drive: copies it, checks the copy, then
+    # PERMANENTLY DELETES the original. Not the Recycle Bin - the bin lives on
+    # the same nearly-full drive, so a folder "recycled" there frees nothing.
+    # Everything before the last step is reversible and the last step is not,
+    # and a verification with a blind spot turns into lost work at exactly that
+    # step; that is F46's line. It is also long, heavy on the disk, and moves
+    # where a path lives, which can break a program he did not think of.
+    # AMBER's two-second "say stop" is not enough for a 100 GB irreversible
+    # job; he says yes out loud. The gate also reads path and destination, so a
+    # never-touch folder on either end is BLACK before it is ever asked.
+    # The one carve-out in the never-touch list is NOT here, and no pattern
+    # above was loosened for it: a folder that holds .env / token files may be
+    # moved (his decision, 2026-10-01), but only inside foldermove.py, only for
+    # those names, only after the question names each one by relative path.
+    # Every other tool still refuses the same files.
+    - move_folder
     - delete_email
     - delete_message
     - empty_recycle_bin
@@ -639,6 +667,7 @@ injection_guard:
     - copy_file
     - move_file
     - rename_file
+    - plan_folder_move     # stores the plan a later "move it" will run - see its note above
     - screenshot           # writes to a path the caller chooses
     # What Jalen will remember, and later treat as his.
     - remember

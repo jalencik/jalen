@@ -245,6 +245,21 @@ def _drive_usage() -> list[dict[str, Any]]:
     return out
 
 
+def _is_a_link(path: Any) -> bool:
+    """
+    A junction or a symlink: what is inside it lives somewhere else, often on
+    another drive. foldermove leaves one at the old path after a move
+    ("move my Downloads to D"), and os.walk does NOT treat a junction as a
+    link - it walks straight through. Counted here, D:'s files would be
+    reported as C:'s usage, and "Downloads at 4.2 GB" would contradict the
+    sentence that said the move freed 4.2 GB on C.
+    """
+    try:
+        return os.path.islink(path) or getattr(os.path, "isjunction", lambda p: False)(path)
+    except OSError:
+        return False
+
+
 def _walk_roots() -> list[Path]:
     home = Path.home()
     candidates = [
@@ -253,7 +268,7 @@ def _walk_roots() -> list[Path]:
         home / "Downloads",
         home / "AppData" / "Local" / "Temp",
     ]
-    return [p for p in candidates if p.is_dir()]
+    return [p for p in candidates if p.is_dir() and not _is_a_link(p)]
 
 
 def _scan_user_folders(
@@ -283,8 +298,14 @@ def _scan_user_folders(
     for root in roots:
         if capped:
             break
+        if _is_a_link(root):
+            continue
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if not _is_under_never_touch(Path(dirpath) / d, never_dirs)]
+            dirnames[:] = [
+                d for d in dirnames
+                if not _is_under_never_touch(Path(dirpath) / d, never_dirs)
+                and not _is_a_link(Path(dirpath) / d)
+            ]
             try:
                 rel_parts = Path(dirpath).relative_to(root).parts
             except ValueError:
@@ -365,14 +386,18 @@ def _dir_total_size(
 ) -> tuple[int, int, bool]:
     """Total bytes + file count under `path`, bounded. (0, 0, False) if the
     path doesn't exist or is itself protected."""
-    if not path.is_dir() or _is_under_never_touch(path, never_dirs):
+    if not path.is_dir() or _is_under_never_touch(path, never_dirs) or _is_a_link(path):
         return 0, 0, False
     total = 0
     count = 0
     capped = False
     deadline = time.monotonic() + time_budget_s
     for dirpath, dirnames, filenames in os.walk(path):
-        dirnames[:] = [d for d in dirnames if not _is_under_never_touch(Path(dirpath) / d, never_dirs)]
+        dirnames[:] = [
+            d for d in dirnames
+            if not _is_under_never_touch(Path(dirpath) / d, never_dirs)
+            and not _is_a_link(Path(dirpath) / d)
+        ]
         for name in filenames:
             count += 1
             if count > max_entries or time.monotonic() > deadline:
@@ -394,7 +419,7 @@ def _old_downloads_size(
     time_budget_s: float = CATEGORY_TIME_BUDGET_S,
 ) -> tuple[int, int, bool]:
     downloads = Path.home() / "Downloads"
-    if not downloads.is_dir():
+    if not downloads.is_dir() or _is_a_link(downloads):
         return 0, 0, False
     cutoff = time.time() - days * 86400
     total = 0
@@ -403,7 +428,11 @@ def _old_downloads_size(
     capped = False
     deadline = time.monotonic() + time_budget_s
     for dirpath, dirnames, filenames in os.walk(downloads):
-        dirnames[:] = [d for d in dirnames if not _is_under_never_touch(Path(dirpath) / d, never_dirs)]
+        dirnames[:] = [
+            d for d in dirnames
+            if not _is_under_never_touch(Path(dirpath) / d, never_dirs)
+            and not _is_a_link(Path(dirpath) / d)
+        ]
         for name in filenames:
             scanned += 1
             if scanned > max_entries or time.monotonic() > deadline:

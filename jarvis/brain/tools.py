@@ -117,14 +117,59 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "create_folder": ("Create a folder, and any missing parent folders.", {
         "path": ("string", "folder path", True),
     }),
-    "copy_file": ("Copy a file to a destination path or folder.", {
+    "copy_file": ("Copy a single FILE to a destination path or folder. Not for folders.", {
         "path": ("string", "source file path", True),
         "destination": ("string", "destination path or folder", True),
     }),
-    "move_file": ("Move a file to a destination path or folder.", {
-        "path": ("string", "source file path", True),
-        "destination": ("string", "destination path or folder", True),
-    }),
+    "move_file": (
+        "Move a single FILE to a destination path or folder. It refuses a folder: "
+        "to move a whole folder (Downloads, a project, Videos) to another drive use "
+        "plan_folder_move and then move_folder, which check the copy before removing "
+        "anything.",
+        {
+            "path": ("string", "source file path", True),
+            "destination": ("string", "destination path or folder", True),
+        },
+    ),
+    "plan_folder_move": (
+        "The dry run for moving a whole folder to another drive, e.g. 'move my "
+        "Downloads / videos / projects folder to D'. Changes nothing. Returns the "
+        "size, the file count, what it frees on the source drive, where it will end "
+        "up, and anything that makes it refuse (Windows, Program Files, AppData, "
+        "protected files, Jalen's own folder, a folder a program is running from). "
+        "ALWAYS call this first and say its answer to him in your own words, then "
+        "call move_folder - move_folder will not start without it.",
+        {
+            "path": ("string", "the folder: a known one (downloads, videos, documents, "
+                               "desktop, pictures, music), a name, or a full path", True),
+            "destination": ("string", "a drive ('D', 'the D drive'), a known folder "
+                                      "('documents', 'desktop') or a full folder path; "
+                                      "the folder keeps its own name inside it", True),
+            "leave_link": ("boolean", "leave it out unless he says: by default a move to ANOTHER "
+                                      "drive leaves a link at the old path (programs and shortcuts "
+                                      "still find it) and a move on the same drive leaves none; true "
+                                      "or false only if he asks for one or the other", False),
+        },
+    ),
+    "move_folder": (
+        "Move a whole folder to another drive and check it arrived. Runs in the "
+        "background and reports when done; it copies everything, compares it with "
+        "the original, and only then removes the old folder, so an interruption "
+        "loses nothing and saying the same move again resumes it. He is asked to "
+        "confirm out loud first. Call plan_folder_move first; use the same "
+        "arguments.",
+        {
+            "path": ("string", "the folder, exactly as given to plan_folder_move", True),
+            "destination": ("string", "the drive or folder, exactly as given to plan_folder_move", True),
+            "leave_link": ("boolean", "exactly as given to plan_folder_move (leave it out if you did)", False),
+        },
+    ),
+    "folder_move_status": (
+        "Where a folder move is up to, whether one was interrupted, and how the "
+        "last ones finished. Use for 'how's the move going', 'did it finish', "
+        "'what happened to the move'.",
+        {},
+    ),
     "rename_file": ("Rename a file in place.", {
         "path": ("string", "file path", True),
         "new_name": ("string", "new filename, not a full path", True),
@@ -148,7 +193,9 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "(open the app, or open the file/folder, as two separate actions) "
         "— never silently call this with only the folder/file name and "
         "drop the app half of the request as if the whole thing was done.",
-        {"name": ("string", "what to open: app name, file name, or full path", True)},
+        {"name": ("string", "what to open: app name, file name, or full path", True),
+         "kind": ("string", "optional: what sort of thing he called it, when he said - 'pdf', "
+                            "'spreadsheet', 'video', 'folder' - so a file of that kind is preferred", False)},
     ),
     "open_in": (
         "Launch an application already pointed at a file or folder, e.g. VS Code opened "

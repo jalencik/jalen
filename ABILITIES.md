@@ -1,6 +1,6 @@
 # What Jalen can do
 
-**162 tools.** Generated from the running code by
+**165 tools.** Generated from the running code by
 `scripts/abilities.py`, so it cannot promise something that no longer
 exists. Every quoted phrase is one the test suite already asserts.
 
@@ -479,7 +479,7 @@ Say: "clear the temp files"
 
 ### `copy_file` * — GREEN
 
-Copy a file to a destination path or folder.
+Copy a single FILE to a destination path or folder. Not for folders.
 
 Say: "copy notes.txt to desktop" · "copy report.docx to documents"
 
@@ -521,6 +521,10 @@ Fill the form on his REAL current Chrome tab from his personal-info folder, thro
 
 Fill the form on screen from his personal-info folder (data/personal_info) in one go - name, age, email, school, and any other ordinary field it recognises. Prefer this over filling fields one at a time when he says things like 'fill this in' or 'put my details in'. It NEVER touches password fields (vault only) or payment fields (his by rule), and it tells you exactly what it filled, what it still needs from him, and what it left for him. After it runs, ask_user only for what it reports as still needed. Call inspect_form first: like every form step, it acts only on the page inspect_form last read, and does nothing if the tab has moved since.
 
+### `folder_move_status`   — GREEN
+
+Where a folder move is up to, whether one was interrupted, and how the last ones finished. Use for 'how's the move going', 'did it finish', 'what happened to the move'.
+
 ### `list_aliases`   — GREEN
 
 List every nickname taught so far.
@@ -533,7 +537,13 @@ Needs: `path`
 
 ### `move_file`   — GREEN
 
-Move a file to a destination path or folder.
+Move a single FILE to a destination path or folder. It refuses a folder: to move a whole folder (Downloads, a project, Videos) to another drive use plan_folder_move and then move_folder, which check the copy before removing anything.
+
+Needs: `path`, `destination`
+
+### `move_folder`   — RED
+
+Move a whole folder to another drive and check it arrived. Runs in the background and reports when done; it copies everything, compares it with the original, and only then removes the old folder, so an interruption loses nothing and saying the same move again resumes it. He is asked to confirm out loud first. Call plan_folder_move first; use the same arguments.
 
 Needs: `path`, `destination`
 
@@ -556,6 +566,12 @@ Open exactly ONE thing by name: an application, a file, or a folder. Handles app
 Say: "open chrome" · "hey can you like open chrome" · "jarvis please open my cv" · "umm open capcut" · "can you open chrome" · "so open chrome"
 
 Needs: `name`
+
+### `plan_folder_move`   — GREEN
+
+The dry run for moving a whole folder to another drive, e.g. 'move my Downloads / videos / projects folder to D'. Changes nothing. Returns the size, the file count, what it frees on the source drive, where it will end up, and anything that makes it refuse (Windows, Program Files, AppData, protected files, Jalen's own folder, a folder a program is running from). ALWAYS call this first and say its answer to him in your own words, then call move_folder - move_folder will not start without it.
+
+Needs: `path`, `destination`
 
 ### `read_document` * — GREEN
 
@@ -1062,4 +1078,4 @@ Look up one of his own details from the personal-info folder - 'what's my school
 - Reach Gemini or ChatGPT over their APIs on this machine - the Gemini key is 403'd and there is no OpenAI key. The browser route works instead.
 - Undo a sent email or a deleted file. That is why those ask first.
 
-**162 tools** — 24 amber, 123 green, 15 red
+**165 tools** — 24 amber, 125 green, 16 red

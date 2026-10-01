@@ -272,6 +272,25 @@ def _taskkill() -> str:
     return str(candidate) if system_root and candidate.is_file() else "taskkill"
 
 
+def _descendants(pid: int) -> list[int]:
+    """Pids of everything the process has started (empty when psutil is not there or it has none)."""
+    try:
+        import psutil
+
+        return [child.pid for child in psutil.Process(pid).children(recursive=True)]
+    except Exception:  # noqa: BLE001 - not knowing is the same as having none
+        return []
+
+
+def _all_gone(pids: list[int]) -> bool:
+    """True only when every one of these pids is certainly not running now."""
+    try:
+        import psutil
+    except ImportError:
+        return False
+    return not any(psutil.pid_exists(p) for p in pids)
+
+
 def _kill_tree(proc: Any) -> str:
     """
     End a process AND everything it started, and say what actually happened:
@@ -291,6 +310,14 @@ def _kill_tree(proc: Any) -> str:
     if proc.poll() is not None:
         return _ENDED
     if os.name == "nt":
+        # Who is under it NOW, before anything is killed. The venv's python.exe
+        # is a launcher that runs the real interpreter as a child: taskkill /T
+        # ends the child first, the launcher exits with it, and taskkill then
+        # exits non-zero on a launcher it can no longer find. Without this the
+        # branch below read that as "it exited by itself" - 5 runs in 6 under
+        # CPU load (measured 2026-10-01) - and a job killed on timeout was
+        # recorded as finished.
+        children = _descendants(proc.pid)
         try:
             done = subprocess.run(
                 [_taskkill(), "/PID", str(proc.pid), "/T", "/F"],
@@ -301,6 +328,10 @@ def _kill_tree(proc: Any) -> str:
         except (OSError, subprocess.SubprocessError):
             tree_ended = False
         if not tree_ended and proc.poll() is not None:
+            if children and _all_gone(children):
+                # It had a child when the kill began and the child is gone:
+                # that was taskkill's doing, the parent simply followed it.
+                return _KILLED
             # taskkill did not report ending it, yet it is gone: it exited by
             # itself in the gap and taskkill found no such process. (A tree
             # where taskkill ended the parent but was refused a child would
@@ -363,7 +394,8 @@ def _stopped_on_request(job_id: str) -> bool:
         return job_id in _CANCELLED
 
 
-def _record_how_it_ended(job_id: str, proc: Any, outcome: Any) -> None:
+def _record_how_it_ended(job_id: str, proc: Any, outcome: Any,
+                         timeout_s: float | None = None) -> None:
     """
     Wait for a held process and write down how it ended - the one writer of
     a job's ending, so there is one answer.
@@ -373,7 +405,7 @@ def _record_how_it_ended(job_id: str, proc: Any, outcome: Any) -> None:
     """
     timed_out = False
     try:
-        code = proc.wait(timeout=DEFAULT_TIMEOUT_S)
+        code = proc.wait(timeout=DEFAULT_TIMEOUT_S if timeout_s is None else timeout_s)
     except subprocess.TimeoutExpired:
         verdict = _kill_tree(proc)
         if verdict == _ALIVE:
@@ -401,7 +433,8 @@ def _record_how_it_ended(job_id: str, proc: Any, outcome: Any) -> None:
 
 
 def _hold_until_it_ends(job_id: str, argv: list[str], cwd: Path, log_path: Path,
-                        outcome: Any, feed: bytes | None = None) -> None:
+                        outcome: Any, feed: bytes | None = None,
+                        timeout_s: float | None = None) -> None:
     """
     A job's thread: start its process, hold the handle so it can be stopped,
     and record how it ended.
@@ -428,7 +461,7 @@ def _hold_until_it_ends(job_id: str, argv: list[str], cwd: Path, log_path: Path,
     try:
         if feed is not None:
             _feed(job_id, proc, feed)
-        _record_how_it_ended(job_id, proc, outcome)
+        _record_how_it_ended(job_id, proc, outcome, timeout_s)
     except Exception as exc:  # noqa: BLE001
         _update(job_id, state="failed", error=f"{type(exc).__name__}: {exc}",
                 ended_at=time.time())
@@ -729,7 +762,7 @@ def start_coding_job(prompt: str, folder: str, expectation: str = "") -> str:
 
 
 def start_background_run(args: list[str], cwd: Path, label: str,
-                         summarise=None) -> str:
+                         summarise=None, timeout_s: float | None = None) -> str:
     """
     Run any long command in the background and announce it when it ends.
 
@@ -741,6 +774,10 @@ def start_background_run(args: list[str], cwd: Path, label: str,
     `summarise` turns the captured output into the sentence he hears. It is
     passed in rather than hardcoded so the caller owns what "finished well"
     means — pytest counts tests, another command might count something else.
+
+    `timeout_s` overrides DEFAULT_TIMEOUT_S for a job that is expected to
+    outlast an hour - a folder move on a slow disk - and is resumable if it is
+    cut. Left out, a job gets the hour every caller has always had.
     """
     job_id = uuid.uuid4().hex[:8]
     try:
@@ -784,7 +821,8 @@ def start_background_run(args: list[str], cwd: Path, label: str,
         return {"state": "finished", "exit_code": code, "summary": summary}
 
     threading.Thread(
-        target=_hold_until_it_ends, args=(job_id, list(args), Path(cwd), log_path, outcome),
+        target=_hold_until_it_ends,
+        args=(job_id, list(args), Path(cwd), log_path, outcome, None, timeout_s),
         name=f"bg-{job_id}", daemon=True,
     ).start()
     return f"Running {label} in the background - I'll tell you how it went."

@@ -452,3 +452,141 @@ def test_a_bare_name_still_finds_a_desktop_project(tmp_path, monkeypatch):
 
 def test_an_absolute_path_is_used_verbatim(tmp_path):
     assert devwork._resolve(str(tmp_path))[0] == tmp_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# A background run may be given a deadline of its own.
+# ---------------------------------------------------------------------------
+def _wait_for_background_threads() -> None:
+    import threading
+
+    for thread in threading.enumerate():
+        if thread.name.startswith("bg-"):
+            thread.join(timeout=30)
+
+
+def test_a_background_run_can_be_given_its_own_deadline(tmp_path, monkeypatch):
+    """
+    A folder move can outlast the one-hour default (100 GB at a spinning
+    disk's 30 MB/s). start_background_run takes timeout_s; the process is
+    ended when it is reached, and recorded as a timeout, not a failure.
+    """
+    import sys
+
+    monkeypatch.setattr(devwork, "DEFAULT_TIMEOUT_S", 3600.0)
+    said = devwork.start_background_run(
+        [sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, "a slow thing", timeout_s=0.5)
+    assert said.startswith("Running")
+    _wait_for_background_threads()
+    jobs = list(devwork._load_jobs().values())
+    assert len(jobs) == 1 and jobs[0]["state"] == "timeout", jobs
+
+
+def test_a_background_run_without_a_deadline_keeps_the_default(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(devwork, "DEFAULT_TIMEOUT_S", 0.5)
+    devwork.start_background_run([sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, "a slow thing")
+    _wait_for_background_threads()
+    assert list(devwork._load_jobs().values())[0]["state"] == "timeout"
+
+
+def test_a_longer_deadline_lets_a_job_that_the_default_would_have_cut_finish(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(devwork, "DEFAULT_TIMEOUT_S", 0.2)
+    devwork.start_background_run(
+        [sys.executable, "-c", "import time; time.sleep(1.5); print('RESULT: ok')"], tmp_path, "a slower thing",
+        summarise=lambda text: text.strip(), timeout_s=60.0)
+    _wait_for_background_threads()
+    job = list(devwork._load_jobs().values())[0]
+    assert job["state"] == "finished" and "RESULT: ok" in job["summary"], job
+
+
+# ---------------------------------------------------------------------------
+# A kill of a launcher and its child is a kill, not "it ended on its own".
+#
+# Found while gating the folder move: test_a_background_run_can_be_given_its_
+# own_deadline failed 5 times in 6 under CPU load. The cause is real, not the
+# test. The venv's python.exe/pythonw.exe is a launcher that runs the real
+# interpreter as a CHILD. taskkill /T ends the child first, the launcher exits
+# with it, and taskkill then fails on the launcher it can no longer find - so
+# it exits non-zero with the process already gone, which _kill_tree read as "it
+# exited by itself in the gap" and answered _ENDED. A job that was killed on
+# timeout was recorded "finished", and "stop the background job" on a folder
+# move would have been announced as "it had already finished". Folder moves run
+# under exactly that launcher (foldermove._interpreter).
+# ---------------------------------------------------------------------------
+class _LauncherThatDiesWithItsChild:
+    """taskkill's victim: alive when the kill starts, gone when taskkill reports failure."""
+
+    pid = 4242
+    returncode = None
+
+    def __init__(self) -> None:
+        self.dead = False
+
+    def poll(self):
+        return 1 if self.dead else None
+
+    def kill(self) -> None:
+        self.dead = True
+
+    def wait(self, timeout=None):
+        self.dead = True
+        return 1
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="taskkill is the Windows path")
+def test_a_launcher_that_died_with_its_child_was_killed_not_self_ended(monkeypatch):
+    proc = _LauncherThatDiesWithItsChild()
+
+    def taskkill_that_lost_the_race(argv, **kwargs):
+        proc.dead = True  # the child went first, the launcher followed it
+        return subprocess.CompletedProcess(argv, 128, "", "not found")
+
+    monkeypatch.setattr(devwork.subprocess, "run", taskkill_that_lost_the_race)
+    monkeypatch.setattr(devwork, "_descendants", lambda pid: [9999], raising=False)  # it had a child when the kill began
+    monkeypatch.setattr(devwork, "_all_gone", lambda pids: True, raising=False)      # and the child is gone now
+    assert devwork._kill_tree(proc) == devwork._KILLED
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="taskkill is the Windows path")
+def test_a_process_with_no_children_that_vanished_is_still_self_ended(monkeypatch):
+    """The case the old branch was written for stays as it was: nothing to kill, nothing killed."""
+    proc = _LauncherThatDiesWithItsChild()
+
+    def taskkill_found_nothing(argv, **kwargs):
+        proc.dead = True
+        return subprocess.CompletedProcess(argv, 128, "", "not found")
+
+    monkeypatch.setattr(devwork.subprocess, "run", taskkill_found_nothing)
+    monkeypatch.setattr(devwork, "_descendants", lambda pid: [], raising=False)
+    monkeypatch.setattr(devwork, "_all_gone", lambda pids: True, raising=False)
+    assert devwork._kill_tree(proc) == devwork._ENDED
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="taskkill is the Windows path")
+def test_a_child_that_is_still_running_is_not_called_a_kill(monkeypatch):
+    proc = _LauncherThatDiesWithItsChild()
+
+    def taskkill_failed(argv, **kwargs):
+        proc.dead = True
+        return subprocess.CompletedProcess(argv, 1, "", "access denied")
+
+    monkeypatch.setattr(devwork.subprocess, "run", taskkill_failed)
+    monkeypatch.setattr(devwork, "_descendants", lambda pid: [9999], raising=False)
+    monkeypatch.setattr(devwork, "_all_gone", lambda pids: False, raising=False)
+    assert devwork._kill_tree(proc) != devwork._KILLED, "a child that survived is not a tree that was killed"
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="the venv launcher is a Windows thing")
+def test_the_real_launcher_is_killed_and_recorded_as_a_timeout(tmp_path, monkeypatch):
+    """The same property with real processes, repeated: the verdict must not depend on who wins the race."""
+    import sys
+
+    for n in range(5):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.3)
+        assert devwork._kill_tree(proc) == devwork._KILLED, f"round {n}"
