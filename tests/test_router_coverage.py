@@ -67,7 +67,9 @@ def test_battery_phrasing_routes_locally(router, phrase):
      "how much storage do i have", "how much space is left"],
 )
 def test_disk_space_phrasing_routes_locally(router, phrase):
-    assert route_tool(router, phrase) == "get_system_status"
+    # disk_report, not get_system_status: that one says "disk 95 percent
+    # full" and never how much is FREE (live QA 2026-10-01).
+    assert route_tool(router, phrase) == "disk_report"
 
 
 @pytest.mark.parametrize(
@@ -76,7 +78,8 @@ def test_disk_space_phrasing_routes_locally(router, phrase):
      "what's using my memory", "what's using up all my ram"],
 )
 def test_memory_phrasing_routes_locally(router, phrase):
-    assert route_tool(router, phrase) == "get_system_status"
+    # memory_report names the programs; get_system_status gave a percentage.
+    assert route_tool(router, phrase) == "memory_report"
 
 
 # --------------------------------------------------------- window control
@@ -220,10 +223,15 @@ def test_delete_a_named_file_is_not_rerouted_by_the_new_rules(router):
 
 
 # --------------------------------------------------------- web search
-# "search google for X" now routes to search_site instead — a strictly
-# better destination once the site is named explicitly (it knows each
-# site's real search grammar). Both still land on a Google results page.
-@pytest.mark.parametrize("phrase", ["search the web for python tutorials", "google python tutorials"])
+# "search google for X" routes to search_site instead — a strictly better
+# destination once the site is named explicitly (it knows each site's real
+# search grammar). "google X" still lands on a Google results page.
+#
+# "search the web for X" is no longer here. It opened the same Google tab and
+# read the whole address aloud, and the live QA of 2026-10-01 marked it WRONG:
+# he asked for an answer. It now reaches the brain (web_search); the test for
+# that is in test_research_phrasing_routing.py.
+@pytest.mark.parametrize("phrase", ["google python tutorials"])
 def test_web_search_routes_to_open_url(router, phrase):
     intent = route(router, phrase)
     assert intent.tool == "open_url"

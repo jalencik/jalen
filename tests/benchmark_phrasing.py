@@ -105,7 +105,9 @@ PHRASES: list[tuple[str, str]] = [
     ("open instagram", "open_url"),
     ("search for eco pulse", "search_files"),
     ("google eco pulse", "open_url"),
-    ("search the web for python tutorials", "open_url"),
+    # "search the web for X" is no longer a router phrase: it opened a Google
+    # tab and read the address aloud (live QA 2026-10-01). It reaches the
+    # brain, which reads pages and answers; see test_research_phrasing_routing.py.
     ("open gmail", "open_url"),
     ("open github", "open_url"),
 
@@ -120,9 +122,9 @@ PHRASES: list[tuple[str, str]] = [
 
     # ---- system ---------------------------------------------------------------
     ("what's my battery", "get_battery"),
-    ("how much space", "get_system_status"),
-    ("how much space do i have", "get_system_status"),
-    ("what's eating my memory", "get_system_status"),
+    ("how much space", "disk_report"),
+    ("how much space do i have", "disk_report"),
+    ("what's eating my memory", "memory_report"),
     ("lock the pc", "lock_workstation"),
     ("lock it", "lock_workstation"),
     ("take a screenshot", "screenshot"),

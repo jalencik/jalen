@@ -270,12 +270,48 @@ def close_app(name: str) -> str:
         window = auto.WindowControl(searchDepth=1, RegexName=_title_pattern(name))
         if not window.Exists(2, 0.3):
             return f"I can't find a window called {name}."
+        # The handle is read BEFORE the keys are sent: a closed window has
+        # none to give. It is also what makes the check below mean THIS
+        # window - a second Notepad with the same title is not this one.
+        handle = int(getattr(window, "NativeWindowHandle", 0) or 0)
         window.SendKeys("{Alt}{F4}")
+        # "Closed calculator." used to be said the instant the keys were sent
+        # (live QA, 2026-10-01), and the audit log recorded it as done. A
+        # window that asks "save changes?" is still there. Look, and say so.
+        if handle and _window_still_open(handle):
+            return (f"I asked {name} to close, but its window is still open. "
+                    "It may be waiting for you to save something.")
         return f"Closed {name}."
     except ImportError:
         return "Window control isn't installed yet."
     except Exception as exc:
         return f"Couldn't close {name}: {exc}"
+
+
+def _window_still_open(handle: int, wait_s: float = 1.5) -> bool:
+    """
+    True if this window is still on screen after up to `wait_s` seconds.
+
+    Polls every 100 ms and returns the moment it is gone, so an ordinary close
+    costs one poll, not the whole wait. Hidden counts as gone: Telegram and
+    Spotify "close" to the tray, the window still exists, and nobody means
+    that by "still open". 1.5 s is NOT MEASURED against a slow app; it is
+    longer than a normal window takes to go and shorter than a pause he would
+    notice.
+    """
+    import time as _time
+
+    if not IS_WINDOWS:
+        return False
+    user32 = ctypes.windll.user32
+    hwnd = ctypes.c_void_p(handle)
+    deadline = _time.monotonic() + wait_s
+    while True:
+        if not (user32.IsWindow(hwnd) and user32.IsWindowVisible(hwnd)):
+            return False
+        if _time.monotonic() >= deadline:
+            return True
+        _time.sleep(0.1)
 
 
 def open_folder(path: str) -> str:
@@ -300,9 +336,29 @@ def open_url(url: str) -> str:
         raw = "https://" + raw
     try:
         os.startfile(raw)  # noqa: S606
-        return f"Opening {raw}."
+        return f"Opening {_spoken_site(raw)}."
     except Exception as exc:
         return f"Couldn't open that URL: {exc}"
+
+
+def _spoken_site(address: str) -> str:
+    """
+    Where an address goes, in a form worth saying aloud: the site, never the
+    address. This reply is read out in voice mode, and "Opening https://www.
+    google.com/search?q=state+space+models+versus+transformers+for+long+
+    sequences." was read out in full (live QA, 2026-10-01). A query string
+    can also carry words he would rather not have said to the room, and a
+    link can carry a login (user:password@host), so only the host survives.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(address).hostname or "").lower()
+    except ValueError:
+        host = ""
+    if host.startswith("www."):
+        host = host[4:]
+    return host or "that page"
 
 
 def lock_workstation() -> str:

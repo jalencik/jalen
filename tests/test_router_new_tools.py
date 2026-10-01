@@ -183,13 +183,15 @@ def test_writing_as_him_stays_on_the_brain_path(router, phrase):
     assert tool is None, f"{phrase!r} routed to {tool} — nothing would be written"
 
 
-def test_the_old_web_search_rule_still_opens_a_page(router):
+def test_google_x_still_opens_a_page(router):
     """
-    "search the web for X" keeps meaning "put the results on screen" — he
-    asked for a page. Only research-shaped phrasings go to the brain to be
-    read and answered. Changing this would silently take away a working
-    command.
+    "google X" keeps meaning "put the results on screen": he named the
+    engine. (This test used to pin "search the web for X" as well, on the
+    argument that he had asked for a page. The live QA of 2026-10-01 marked
+    that WRONG - the page opened and the whole address was read aloud, where
+    he wanted an answer - so that phrase now reaches the brain, and
+    test_research_phrasing_routing.py pins it.)
     """
-    tool, args = route(router, "search the web for silero vad")
+    tool, args = route(router, "google silero vad")
     assert tool == "open_url"
     assert "silero" in args["url"]

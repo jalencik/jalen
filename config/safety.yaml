@@ -596,12 +596,48 @@ never_touch:
 # quoted back to him, never obeyed.
 injection_guard:
   enabled: true
-  # [NOT IMPLEMENTED] quote_and_ask is never read, and scan_for_injection()
-  # is never called by any tool — nothing currently tags its output as
-  # externally-sourced content. The hard protection below IS enforced:
-  # SafetyEngine.classify(origin="content") blocks RED/AMBER tools outright,
-  # and that path is covered by tests.
+  # [NOT READ] quote_and_ask is never read. (The old note here said
+  # scan_for_injection() was called by no tool; it is now called by the
+  # Telegram, mail and coding-job fences, and injection_alarm() by web pages.)
+  # The hard protection below IS enforced: SafetyEngine.classify(
+  # origin="content") blocks RED/AMBER tools outright, and that path is
+  # covered by tests.
   quote_and_ask: true              # surface the suspicious text, ask, never act
+  # THE LIST SERVES TWO DIFFERENT JOBS, and only one of them was narrowed.
+  #   1. TAINT: taint.mark() runs for every page whatever it says. It is what
+  #      makes the rest of the turn refuse RED/AMBER tools. NOT touched, not
+  #      conditional on this list.
+  #   2. THE SPOKEN WARNING: the "!!" line in the fence that makes Jalen say
+  #      "that page tried to give me instructions". Telegram, mail and
+  #      coding-job fences still raise it on any marker anywhere
+  #      (scan_for_injection). Web pages (web_read, read_browser_page) raise
+  #      it through SafetyEngine.injection_alarm: a marker at the START of a
+  #      line or sentence (for "ignore ..." / "disregard ..." the start of a
+  #      clause too), or after an address to the reader ("Note for
+  #      assistants:"), or two DIFFERENT markers within
+  #      alarm_cooccurrence_chars. A Title Case line is excused unless the
+  #      marker is a command opening it; "you are now logged in" is excused.
+  #      Why: "system prompt", "you are now" and "new instructions" are
+  #      everyday words in machine-learning titles, and reading arXiv's cs.CL
+  #      listing produced a spoken alarm on a clean page (live QA 2026-10-01).
+  # Measured 2026-10-01 on 13 real public pages read through web_read: four
+  # arXiv "new" listings (cs.CL, cs.CR, cs.LG, cs.AI), five abstract pages
+  # (Attention Is All You Need, Mamba, three prompt-injection papers), the
+  # Wikipedia article on prompt injection, two Simon Willison pages, OWASP
+  # LLM01.
+  #   Spoken warning on a clean page: the old scan of the whole page 7 of 13
+  #   (every one "system prompt"); the old scan of the text the model is
+  #   actually shown 2 of 13; injection_alarm 0 of 13. All 13 still tainted.
+  #   Missed warnings: 15 hostile paragraphs written for this measurement,
+  #   each placed at the start, middle and end of 3 of those pages: 0 of
+  #   135 missed. The same idea glued INTO a sentence, 6 forms x 3 pages:
+  #   6 of 18 missed (an "ignore ..." with no punctuation before it, and a
+  #   lone "you are now free to ..."). That is the price of the narrowing:
+  #   only the spoken warning is withheld; the page is still fenced and the
+  #   turn still tainted, so nothing it says can make a tool run.
+  #   NOT MEASURED: a month of real browsing; a page whose every paragraph
+  #   quotes attacks (a prompt-injection reading list) would speak the
+  #   warning, which is the intended direction.
   suspicious_markers:
     - "ignore previous instructions"
     - "ignore all previous"
@@ -611,6 +647,12 @@ injection_guard:
     - "new instructions"
     - "admin override"
     - "developer mode"
+  # Two different markers closer than this many characters count as one
+  # attack. NOT TUNED: on the 13 pages above there were 0 false alarms at
+  # every width from 50 to 3000, so those pages do not choose it; 300 is
+  # about two sentences. At 300 a two-marker attack with the markers 250
+  # characters apart is still spoken about, at 400 it is not.
+  alarm_cooccurrence_chars: 300
   # Any tool call whose arguments originated from read content and target a
   # RED tool is automatically blocked and reported, regardless of markers.
   block_red_tools_from_read_content: true

@@ -668,6 +668,134 @@ def looks_like_a_name(value: str) -> bool:
 _NAME_ARGS = frozenset({"name", "app"})
 
 
+# ----------------------------------------------------------------------------
+# "FIND ME RECENT ARXIV PAPERS ON X" IS NOT A FILE NAME.
+#
+# Live QA, 2026-10-01, typed mode, 55 requests. The two most natural requests
+# for a machine-learning engineer both searched his disk:
+#
+#   "find me recent arxiv papers on speculative decoding"
+#       -> search_files("me recent arxiv papers on speculative decoding")
+#          "No files matching 'me recent arxiv papers ...' found."
+#   "search for papers about diffusion transformers"
+#       -> search_files("papers about diffusion transformers"), same answer.
+#
+# The "find / search for X" rule is a greedy catch-all, and "search for eco
+# pulse" has always meant a file. What separates the two is the NOUN right
+# after the verb: "recent arxiv papers on ...", "articles about ...", "news
+# on ..." name something to read, while "my CV", "changes.pdf" and "the SAT TOP
+# folder" name something he owns. Research-shaped phrasings decline here and
+# reach the brain, which has web_search and web_read; an ambiguous bare
+# "search for eco pulse" stays a file search, exactly as before.
+#
+# Measured on the 55 QA phrasings plus 45 invented for this change (research
+# 24, files 21): see tests/test_research_phrasing_routing.py. NOT measured on
+# a month of real speech - data/router_misses.log holds no research-shaped
+# "find" sentence from before today to check it against.
+_RESEARCH_HEADS = (
+    r"arxiv|papers?|preprints?|publications?|articles?|research|studies|literature"
+    r"|surveys?|news|blogs?(?: posts?)?|tutorials?|information|info|benchmarks"
+    r"|datasets|guides?|courses|lectures"
+)
+# At most five words of adjectives ("the latest", "a good recent open source")
+# in front of the head noun, and a tail that is either empty or opens with a
+# word that introduces the TOPIC. "the paper called attention" has a head and
+# a tail that opens with "called", so it is a file name and stays one.
+_RESEARCH_SHAPE = re.compile(
+    r"^(?P<lead>(?:[a-z0-9+#'-]+ ){0,5}?)(?P<head>" + _RESEARCH_HEADS + r")\b"
+    r"(?P<tail>(?: (?:on|about|regarding|concerning|for|by|from|that|which|where"
+    r"|related|relating|covering|describing|introducing|proposing|using|with|in|to"
+    r"|of|published|written)\b.*)?)$",
+    re.I,
+)
+# Words in front of the head that make it HIS: "my paper draft", "the papers
+# folder", "the notes document".
+_BELONGS_TO_HIM = re.compile(
+    r"\b(?:my|files?|folders?|directory|directories|documents?|docs?|pdfs?|"
+    r"downloads?|desktop)\b", re.I)
+# A tail that points at a place on his machine: "papers in my downloads".
+_ON_HIS_MACHINE = re.compile(
+    r"^ (?:in|on|from|under|inside|within) (?:my|this|the) "
+    r"(?:computer|laptop|pc|machine|drive|disk|desktop|downloads?|documents?|"
+    r"folders?|files?)\b", re.I)
+# Said after a file noun and not part of the name: "the file called budget".
+_CALLED = re.compile(
+    r"^(?:(?:files?|documents?|docs?|folders?|projects?|pdfs?|papers?|"
+    r"spreadsheets?|presentations?|images?|pictures?|photos?|videos?|notes?) )?"
+    r"(?:called|named|titled)[,:]? ", re.I)
+# "find me" with nothing after it, or only a pronoun: nothing to look for.
+_NOTHING_TO_FIND = frozenset({"me", "it", "that", "this", "something", "anything", "one"})
+
+
+def _is_research_request(rest: str) -> bool:
+    """
+    True when what follows "find" / "search for" reads like a request to look
+    something up rather than a name to look for on this machine.
+    """
+    shape = _RESEARCH_SHAPE.match(rest.strip().lower())
+    if shape is None:
+        return False
+    if _BELONGS_TO_HIM.search(shape.group("lead") + shape.group("head")):
+        return False
+    return _ON_HIS_MACHINE.match(shape.group("tail")) is None
+
+
+def _file_search_args(m: "re.Match") -> dict | None:
+    """
+    Arguments for search_files, or None to let the sentence reach the brain.
+
+    Declines three things the greedy "find X" rule used to take: a research
+    request (above), a sentence too long to be a name (looks_like_a_name: the
+    same test every other catch-all passes), and a bare "find me".
+    """
+    query = _CALLED.sub("", m.group("what").strip(), count=1).strip()
+    if not query or query.lower() in _NOTHING_TO_FIND:
+        return None
+    if m.group("verb").lower() in ("find", "search for"):
+        rest = re.sub(r"^me\b\s*", "", m.string[m.end("verb"):].strip(), flags=re.I)
+        if _is_research_request(rest):
+            return None
+    if not looks_like_a_name(query):
+        return None
+    return {"query": query}
+
+
+# "close the calculator" reached close_app as name="the calculator", a window
+# title that does not exist ("I can't find a window called the calculator"),
+# while "close calculator" worked. The same rule shape serves "switch to the
+# calculator". An article, a possessive or a trailing "app" is not part of a
+# window title.
+_LEADING_ARTICLE = re.compile(r"^(?:the|my|a|an|this|that|your|our)(?: |$)", re.I)
+_TRAILING_KIND = re.compile(r"(?<=\w) (?:app|application|program|software)$", re.I)
+
+
+_GENERIC_NOUNS = frozenset({
+    "window", "windows", "tab", "tabs", "app", "apps", "application", "applications",
+    "program", "programs", "software", "browser", "page", "screen", "it", "this", "that",
+    "these", "those", "one", "thing", "something",
+})
+
+
+def _window_name(m: "re.Match", group: int) -> dict | None:
+    """The app or window he named, without the words around it; None if nothing is left."""
+    name = m.group(group).strip()
+    while True:
+        shorter = _LEADING_ARTICLE.sub("", name, count=1)
+        if shorter == name:
+            break
+        name = shorter
+    name = _TRAILING_KIND.sub("", name).strip()
+    # A generic noun is not the NAME of anything. close_app matches by
+    # substring on the window title and is GREEN, so close_app("window") closed
+    # "Windows PowerShell", close_app("app") closed "WhatsApp" - found by the
+    # independent re-check of the article-stripping that made this reachable.
+    # With nothing left to name, the rule yields None and the sentence falls
+    # through to the rules that close what is in front of him, or the brain.
+    if name.lower() in _GENERIC_NOUNS:
+        return None
+    return {"name": name} if name else None
+
+
 def _web_search_url(query: str) -> str:
     """
     Build a Google search URL for a spoken query.
@@ -1325,9 +1453,11 @@ def _rules() -> list[Rule]:
         (R(r"^save(?: it| that| this)?$", re.I),
          "keyboard_shortcut", lambda m: {"keys": "{Ctrl}s"}, None),
 
-        (R(r"^(close|quit|exit) (.+)$", re.I), "close_app", lambda m: {"name": m.group(2).strip()}, None),
+        # _window_name drops "the" / "my" / a trailing "app": "close the
+        # calculator" used to look for a window called "the calculator".
+        (R(r"^(close|quit|exit) (.+)$", re.I), "close_app", lambda m: _window_name(m, 2), None),
         (R(r"^(switch to|go to|focus|bring up) (.+)$", re.I),
-         "focus_window", lambda m: {"name": m.group(2).strip()}, None),
+         "focus_window", lambda m: _window_name(m, 2), None),
         # (?:this|the) ?  — the old group was `(this|the )?`, with the space
         # only on the "the" branch, so "minimize this window" never matched
         # (after consuming "this" the pattern still expected a space that the
@@ -1377,10 +1507,18 @@ def _rules() -> list[Rule]:
          "get_system_status", n, None),
         (R(r"^what(?:'s| is) my battery( level| percentage)?\??$", re.I),
          "get_battery", n, None),
+        # Free space and memory hogs go to the reports that NAME things.
+        # get_system_status answered both with "CPU 55 percent, memory 78
+        # percent used with 1.7 gigabytes free, disk 95 percent full" (live QA
+        # 2026-10-01): no free-space figure for the drive he asked about, and
+        # no program for the memory he asked about. disk_report says how much
+        # is free on each drive; memory_report names the biggest users.
         (R(r"^how much (?:free )?(?:disk )?(?:space|storage)(?: do i have| is (?:left|free))?\??$", re.I),
-         "get_system_status", n, None),
-        (R(r"^what(?:'s| is) (?:eating|using|hogging)(?: up)?(?: all)? my (?:memory|ram)\??$", re.I),
-         "get_system_status", n, None),
+         "disk_report", n, None),
+        (R(r"^what(?:'s| is) (?:eating|using|hogging|taking)(?: up)?(?: all)? my (?:memory|ram)\??$"
+           r"|^which (?:programs|apps|applications|processes) (?:are |is )?"
+           r"(?:eating|using|hogging|taking up)(?: up)?(?: all)?(?: of)?(?: the most| my)? (?:memory|ram)\??$", re.I),
+         "memory_report", n, None),
 
         # ---- Jalen's own settings (mute/sleep/quit live at the top) --------
         (R(r"^private mode( on)?$", re.I), "private_mode",
@@ -1401,11 +1539,13 @@ def _rules() -> list[Rule]:
          "Relaxed. I'll only ask before things I can't undo."),
 
         # ---- web search ------------------------------------------------------
-        # "the web"/"google" is required, not optional, precisely so this
-        # never overlaps bare "search for X" below — that stays local file
-        # search, exactly as before. ("search google for X" is the same
-        # phrase with the engine named explicitly.)
-        (R(r"^(?:search the web for|search google for|google) (.+)$", re.I),
+        # Only "google X" is a command to PUT a results page on screen: he
+        # named the engine. "search the web for X" used to open the same
+        # Google tab and read the whole address out, and the live QA of
+        # 2026-10-01 marked it WRONG - he asked for an answer, and the brain
+        # has web_search, which reads pages. So that phrase is no longer
+        # claimed here; "search google for X" is a search_site rule far above.
+        (R(r"^google (.+)$", re.I),
          "open_url", lambda m: {"url": _web_search_url(m.group(1).strip())}, None),
 
         # ---- Gmail / Calendar / Telegram: answers, not summaries ------------
@@ -1688,8 +1828,12 @@ def _rules() -> list[Rule]:
         # being useless at the exact moment he asked it to research
         # something. Pre-existing; only visible once research existed as a
         # real alternative.
-        (R(r"^(find(?! out\b)|search for|where is|locate) (?:my |the )?(?:file |document |folder |project )?(.+?)(?: (?:file|folder|project))?$", re.I),
-         "search_files", lambda m: {"query": m.group(2).strip()}, None),
+        # "find me recent arxiv papers on X" is research, not a file name, and a
+        # sentence too long to be a name is an instruction: _file_search_args
+        # declines both and the brain answers. See _is_research_request.
+        (R(r"^(?P<verb>find(?! out\b)|search for|where is|locate)(?: me)? (?:my |the )?"
+           r"(?:file |document |folder |project )?(?P<what>.+?)(?: (?:file|folder|project))?$", re.I),
+         "search_files", _file_search_args, None),
 
 
         # ---- conversation control ------------------------------------------
