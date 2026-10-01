@@ -38,6 +38,8 @@ PLATFORM_VARS = frozenset({
     "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "USER", "USERNAME", "PATH",
     "PATHEXT", "SYSTEMROOT", "WINDIR", "HOME", "USERPROFILE", "COMSPEC",
     "PROGRAMFILES", "PROGRAMDATA",
+    # safety.py refuses \\<this computer>\C$\... as this computer by another name.
+    "COMPUTERNAME",
 })
 
 # Development and test seams. A user is never told to set these, and documenting

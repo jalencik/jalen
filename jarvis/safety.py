@@ -60,7 +60,7 @@ _PATHISH_KEYS = ("path", "file", "dir", "folder", "target", "source", "dest")
 # - anchored at the START, so a sentence that mentions C:/Windows halfway
 # through is not one.
 _LOOKS_LIKE_A_PATH = re.compile(
-    r"^(?:[a-zA-Z]:[\\/]|~(?:[\\/]|$)|%[^%\s]+%|\\\\|//|\.{1,2}[\\/]|file:)",
+    r"^(?:[a-zA-Z]:[\\/]|~(?:[\\/]|$)|%[^%\s]+%|\\\\|//|\\\?\?\\|\.{1,2}[\\/]|file:)",
     re.IGNORECASE)
 
 # Any other URL is not a path, even in a path-ish argument:
@@ -109,15 +109,65 @@ def _expanded_path(raw: str) -> str:
 
         s = unquote(s[5:])
         s = re.sub(r"^[\\/]+(?=[a-zA-Z]:)", "", s)
-    for prefix in ("\\\\?\\", "//?/", "\\\\.\\", "//./"):
-        if s.startswith(prefix):
-            s = s[len(prefix):]
-    return os.path.normpath(os.path.expandvars(os.path.expanduser(s)))
+    if s[:2] == "//":
+        s = s.replace("/", "\\")        # //?/C:/x and //host/share spell the same
+    # \\?\C:\x is C:\x and \\?\UNC\host\share is \\host\share. EVERY OTHER
+    # \\?\ or \\.\ or \??\ form is a device path (\\?\GLOBALROOT\Device\...,
+    # \\.\C:\...) that names a disk without going through any folder the
+    # list knows, so it is refused as unreadable rather than guessed at.
+    if s.startswith(("\\\\?\\", "\\\\.\\", "\\??\\")):
+        rest = s[4:]
+        if s.startswith("\\\\?\\") and re.match(r"^[a-zA-Z]:[\\/]", rest):
+            s = rest
+        elif s.startswith("\\\\?\\") and rest[:4].lower() == "unc\\":
+            s = "\\\\" + rest[4:]
+        else:
+            raise ValueError("a device path")
+    if s.startswith("\\\\"):
+        host = re.split(r"[\\/]", s[2:], maxsplit=1)[0].lower()
+        if (host in ("localhost", "::1", "[::1]", ".", "?")
+                or host.startswith("127.")
+                or host == os.environ.get("COMPUTERNAME", "\0").lower()):
+            # This computer by another name: \\localhost\C$\... IS C:\...
+            raise ValueError("this computer's own network name")
+    return os.path.normpath(_clean_names(os.path.expandvars(os.path.expanduser(s))))
+
+
+def _clean_names(s: str) -> str:
+    """
+    Drop what Windows ignores at the end of a name, from EVERY component:
+    trailing dots and spaces ("vault.json.") and an alternate-data-stream
+    suffix ("server.pem::$DATA", "x.pem:Zone.Identifier"). The filename
+    patterns compared the raw ending, so every one of these was a way to
+    open a protected file the patterns never matched.
+    """
+    drive = ""
+    m = re.match(r"^([a-zA-Z]:)(.*)$", s, re.DOTALL)
+    if m:
+        drive, s = m.groups()
+    parts = []
+    for part in re.split(r"([\\/])", s):
+        if part in ("", "\\", "/", ".", ".."):
+            parts.append(part)
+        else:
+            parts.append(part.split(":", 1)[0].rstrip(". "))
+    return drive + "".join(parts)
 
 
 def _canonical_path(raw: str) -> str:
-    """The path a tool would actually open, as a comparable string."""
+    """
+    The path a tool would actually open, as a comparable string - resolved
+    the way Windows resolves it: junctions, links and 8.3 short names
+    (os.path.realpath; measured 263 us per call on 2026-10-01). "C:\\Documents
+    and Settings\\<user>" is the user profile, PASSWO~1.TXT is passwords.txt.
+    Never for a network share: resolving one contacts the server.
+    """
     s = os.path.normpath(os.path.abspath(_expanded_path(raw)))
+    if not s.startswith("\\\\"):
+        try:
+            s = os.path.realpath(s)
+        except (OSError, ValueError):
+            pass
     return s.replace("\\", "/").rstrip("/").lower()
 
 
@@ -165,6 +215,16 @@ class SafetyEngine:
         }
         never = tiers.get("never_touch") or {}
         self._never_paths = [self._norm(p) for p in never.get("paths", [])]
+        # ...and each as Windows resolves it, so a profile reached through a
+        # junction or a short name is the same protected folder.
+        for listed in list(self._never_paths):
+            try:
+                real = os.path.realpath(listed.replace("/", os.sep))
+            except (OSError, ValueError):
+                continue
+            real = real.replace("\\", "/").rstrip("/").lower()
+            if real and real not in self._never_paths:
+                self._never_paths.append(real)
         self._never_patterns = never.get("patterns", []) or []
         self._never_apps = [a.lower() for a in never.get("apps", []) or []]
         self._never_domains = never.get("domains", []) or []
@@ -173,6 +233,9 @@ class SafetyEngine:
         self.guard_enabled = guard.get("enabled", True)
         self._markers = [m.lower() for m in guard.get("suspicious_markers", []) or []]
         self._block_red_from_content = guard.get("block_red_tools_from_read_content", True)
+        self._read_hosts = tuple(
+            str(h).strip().lower().lstrip(".")
+            for h in (guard.get("allow_unseen_urls_on_hosts", []) or []) if str(h).strip())
         self._acts_on_the_world = frozenset(guard.get("refuse_from_content", []) or [])
 
         self.posture = cfg.get_path("safety.posture", "irreversible_only")
@@ -233,16 +296,24 @@ class SafetyEngine:
                 if norm == blocked or norm.startswith(blocked + "/"):
                     return f"path is on the never-touch list ({blocked})"
             # Every component, not only the final name: a protected name
-        self._read_hosts = tuple(
-            str(h).strip().lower().lstrip(".")
-            for h in (guard.get("allow_unseen_urls_on_hosts", []) or []) if str(h).strip())
             # used as a FOLDER ("Mother credentials" moved off the Desktop,
             # a "passwords" folder of plain .txt files) protects what is
             # inside it too. Only the components he WROTE (after expansion),
             # never the working directory a relative path is resolved
             # against - or Jalen started from a folder called
             # "credentials-app" would refuse every relative path.
-            for part in written.split("/"):
+            #
+            # The RESOLVED names count too (a short name PASSWO~1.TXT is
+            # passwords.txt once Windows has resolved it) - minus the
+            # working directory, for the same reason.
+            names = set(written.split("/"))
+            resolved = norm.split("/")
+            if not os.path.isabs(os.path.expandvars(os.path.expanduser(str(raw).strip()))):
+                base = _canonical_path(".").split("/")
+                if resolved[:len(base)] == base:
+                    resolved = resolved[len(base):]
+            names.update(resolved)
+            for part in names:
                 for pattern in self._never_patterns:
                     if fnmatch.fnmatch(part, pattern.lower()):
                         return f"filename matches protected pattern '{pattern}'"
@@ -293,6 +364,27 @@ class SafetyEngine:
             elif host == pattern or host.endswith("." + pattern):
                 return domain
         return None
+
+    def unseen_url_is_harmless(self, address: str) -> bool:
+        """
+        May web_read fetch this address after a read although it was never
+        SHOWN to Jalen (taint.url_was_read)? Only a plain reference page on
+        a host no stranger controls (injection_guard.
+        allow_unseen_urls_on_hosts in safety.yaml): no query, no fragment,
+        no credentials, short. Even there the path stays short, so the
+        address cannot carry what was just read.
+        """
+        from urllib.parse import urlsplit
+
+        try:
+            parts = urlsplit(address if "://" in address else "https://" + address)
+            host = (parts.hostname or "").rstrip(".").lower()
+        except ValueError:
+            return False
+        if (not host or parts.query or parts.fragment or parts.username
+                or parts.password or len(address) > _MAX_HARMLESS_URL):
+            return False
+        return any(host == h or host.endswith("." + h) for h in self._read_hosts)
 
     def protected_path(self, path: Any) -> str | None:
         """
@@ -365,27 +457,6 @@ class SafetyEngine:
             # tool can be classified properly later.
             base = Tier.AMBER
             detail["unclassified"] = True
-    def unseen_url_is_harmless(self, address: str) -> bool:
-        """
-        May web_read fetch this address after a read although it was never
-        SHOWN to Jalen (taint.url_was_read)? Only a plain reference page on
-        a host no stranger controls (injection_guard.
-        allow_unseen_urls_on_hosts in safety.yaml): no query, no fragment,
-        no credentials, short. Even there the path stays short, so the
-        address cannot carry what was just read.
-        """
-        from urllib.parse import urlsplit
-
-        try:
-            parts = urlsplit(address if "://" in address else "https://" + address)
-            host = (parts.hostname or "").rstrip(".").lower()
-        except ValueError:
-            return False
-        if (not host or parts.query or parts.fragment or parts.username
-                or parts.password or len(address) > _MAX_HARMLESS_URL):
-            return False
-        return any(host == h or host.endswith("." + h) for h in self._read_hosts)
-
 
         if base is Tier.BLACK:
             return Verdict(
