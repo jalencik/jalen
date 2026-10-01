@@ -533,6 +533,34 @@ def _closed(page) -> bool:
         return True
 
 
+# One round trip to the page's renderer. See _responds.
+_PING = "() => 1"
+
+
+def _responds(page) -> bool:
+    """
+    Is this page REALLY alive - not just "not marked closed"?
+
+    Measured against a real Chrome on 2026-10-01: after chrome.exe was
+    killed (Task Manager, a crash, a forced shutdown), page.is_closed()
+    still said False and the context still listed the old tab, so the next
+    job ran on a dead page, read as "loading" for READY_WAIT_S, and he heard
+    "ChatGPT didn't finish loading... ask me again" - again and again. A
+    clean close of a tab or window IS noticed; a kill is not, for a while.
+
+    Only an error that says the target or connection is CLOSED counts as
+    dead. A page in mid-navigation also throws ("Execution context was
+    destroyed") and is alive - relaunching Chrome for that would tear down
+    his work.
+    """
+    try:
+        page.evaluate(_PING)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        said = f"{type(exc).__name__} {exc}".lower()
+        return not any(word in said for word in ("closed", "disconnected", "crash"))
+
+
 def _connected(browser) -> bool:
     if browser is None:
         return False
@@ -552,7 +580,7 @@ def _fresh_page(browser):
     """
     ctx = browser.contexts[0] if browser.contexts else browser.new_context()
     for page in list(ctx.pages):
-        if not _closed(page):
+        if not _closed(page) and _responds(page):
             return page
     return ctx.new_page()
 
@@ -727,7 +755,7 @@ class _Session:
         job gets its own single attempt, so the session heals the moment
         Chrome can be started again, without spinning while it cannot.
         """
-        if not _closed(page):
+        if not _closed(page) and _responds(page):
             return pw, browser, page, ""
 
         if _connected(browser):

@@ -123,7 +123,7 @@ class FakePage:
         self.clicks: list[tuple[str, str]] = []
 
     def _alive(self) -> None:
-        if self.closed:
+        if self.closed or getattr(self, "dead", False):
             raise TargetClosedError("Target page, context or browser has been closed")
 
     def goto(self, url, timeout=None, wait_until=None):
@@ -139,6 +139,8 @@ class FakePage:
     def evaluate(self, script, *args):
         self._alive()
         from jarvis.tools import webforms
+        if script == wa._PING:
+            return 1
         if script == webforms._SCAN:
             return [dict(f) for f in self.fields]
         if script == webforms._ERRORS:
@@ -201,6 +203,23 @@ class FakeBrowser:
         for ctx in self.contexts:
             for page in list(ctx.pages):
                 page.close()
+
+    def vanish(self) -> None:
+        """
+        chrome.exe was KILLED (Task Manager, a crash, a forced shutdown) -
+        and for a while Playwright has not noticed. Measured against a real
+        Chrome on 2026-10-01: after the kill, page.is_closed() still said
+        False and the context still listed the old tab, while every real
+        call on it failed. die() above models a clean close, which Playwright
+        does notice; this is the case it does not.
+        """
+        for ctx in self.contexts:
+            for page in ctx.pages:
+                page.dead = True
+
+            def refuse():
+                raise TargetClosedError("Browser has been closed")
+            ctx.new_page = refuse
 
 
 class FakeChrome:
@@ -327,6 +346,25 @@ class TestAClosedPageIsReplaced:
         assert not page.is_closed()
         assert chrome.launches == 2
         assert chrome.attaches == 2
+        assert page.ctx is chrome.browsers[-1].contexts[0]
+
+    def test_a_killed_chrome_is_relaunched_not_waited_on(self, session, chrome):
+        """
+        Live, 2026-10-01: Jalen's Chrome was killed, and the next request
+        ran on the dead tab - it read as "loading" for READY_WAIT_S and he
+        heard "ChatGPT didn't finish loading... ask me again". Every request
+        after it did the same. That is "the browser keeps failing".
+        """
+        session.do(_touch, timeout=5)
+        chrome.browsers[-1].vanish()        # killed; Playwright hasn't noticed
+
+        def a_real_call(page):
+            page.title()                    # raises on a dead page
+            return page
+
+        page = session.do(a_real_call, timeout=5)
+
+        assert chrome.launches == 2, "a killed Chrome must be relaunched"
         assert page.ctx is chrome.browsers[-1].contexts[0]
 
     def test_recovery_is_bounded_and_ends_in_a_sentence(self, session, chrome):
