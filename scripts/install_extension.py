@@ -1,20 +1,17 @@
 """
-Register Jalen's native-messaging host with Chrome. Run once, after loading
-the unpacked extension.
+Register Jalen's native-messaging host with Chrome. Run once, from the MAIN
+checkout (it needs .venv there), before or after loading the extension:
 
-WHY AN EXTENSION ID IS NEEDED
------------------------------
-Chrome only lets a native host talk to extensions named in its manifest's
-allowed_origins, and an unpacked extension's id is assigned by Chrome when
-you load it. So the order is: load the extension (chrome://extensions,
-Developer mode, Load unpacked -> browser_extension/), copy the Extension ID
-it shows, then:
+    .venv\\Scripts\\python.exe scripts\\install_extension.py
 
-    .venv\\Scripts\\python.exe scripts\\install_extension.py <EXTENSION_ID>
+No extension ID is needed: the "key" in browser_extension/manifest.json pins
+it. Pass one only if Chrome shows a different ID for the extension.
 
-This writes the host manifest and the launcher, and registers both with
-Chrome for the CURRENT user only (HKCU) - never machine-wide, so it needs no
-admin rights and touches nothing outside this account.
+Writes jalen_bridge_host.bat and native_host_manifest.json in this folder and
+registers them for the CURRENT user only
+(HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.jalen.bridge), with
+no admin rights. The launcher always starts the bridge from this folder, so
+Jalen must run from this same folder for the extension to connect.
 """
 from __future__ import annotations
 
@@ -87,6 +84,10 @@ def _register() -> str:
 
 
 def main(argv) -> int:
+    # Without this, "--help" was taken as an extension id and refused.
+    if len(argv) > 1 and argv[1] in ("-h", "--help"):
+        print(__doc__)
+        return 0
     # The id is pinned, so no argument is needed. One is still accepted, for
     # the rare case the extension was loaded without the key (e.g. packed
     # differently) and shows a different id.
