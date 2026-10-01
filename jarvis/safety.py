@@ -69,6 +69,11 @@ _LOOKS_LIKE_A_PATH = re.compile(
     r"^(?:[a-zA-Z]:[\\/]|~(?:[\\/]|$)|%[^%\s]+%|\\\\|//|\\\?\?\\|\.{1,2}[\\/]|file:)",
     re.IGNORECASE)
 
+# A path that starts partway through a spoken name: after a space or at the
+# start, a drive letter, ~\, %VAR% or a UNC prefix. The capture starts at the
+# path and runs to the end of the value (paths contain spaces).
+_EMBEDDED_PATH = re.compile(r"(?:^|(?<=\s))([a-zA-Z]:[\\/]|~[\\/]|%[^%\s]+%|\\\\)")
+
 # Any other URL is not a path, even in a path-ish argument:
 # remember_alias(target="https://passwords.google.com") names a web page.
 # Two or more scheme letters, so "C://Windows" is still a drive.
@@ -496,6 +501,16 @@ class SafetyEngine:
             elif (any(hint in key.lower() for hint in _PATHISH_KEYS)
                     and not _WEB_URL.match(v)):
                 candidates.append(value)
+            elif key.lower() == "name" and (embedded := _EMBEDDED_PATH.search(v)):
+                # A SPOKEN NAME WITH A PATH INSIDE IT. open_target strips
+                # "file", "the folder", "document named" off the front of
+                # `name` and opens what is left, so "open file C:\Windows\
+                # System32\cmd.exe" classified GREEN (the value did not START
+                # like a path) while the bare path is BLACK. Found by the
+                # collaborator's adversarial review (R5-1). `name` is a spoken
+                # name, not prose, so looking inside it cannot misfire on a
+                # sentence; the path that is found goes through the same check.
+                candidates.append(v[embedded.start(1):])
         for raw in candidates:
             try:
                 norm = _canonical_path(raw)

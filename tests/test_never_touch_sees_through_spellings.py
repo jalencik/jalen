@@ -156,3 +156,27 @@ def test_the_check_still_runs_before_the_tier_lookup(engine):
 
     source = inspect.getsource(SafetyEngine.classify)
     assert source.index("_touches_forbidden_path") < source.index('origin == "content"')
+
+
+# ---------------------------------------------------------------------------
+# A path inside a spoken NAME (R5-1 of the collaborator's adversarial review)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("tool, name", [
+    ("open_target", "file C:\\Windows\\System32\\cmd.exe"),
+    ("open_target", "the folder ~\\.ssh"),
+    ("open_target", "document named %USERPROFILE%\\.aws\\credentials"),
+    ("open_app", "please C:/Windows/System32/cmd.exe"),
+])
+def test_a_protected_path_inside_a_spoken_name_is_refused(engine, tool, name):
+    assert engine.classify(tool, {"name": name}).tier is Tier.BLACK, (tool, name)
+
+
+@pytest.mark.parametrize("tool, name", [
+    ("open_target", "spotify"),
+    ("open_target", "my resume"),
+    ("open_target", "notes about the C drive"),
+    ("open_target", "file C:\\Users\\someone\\Desktop\\report.pdf"),
+    ("remember_alias", "work folder"),
+])
+def test_an_ordinary_spoken_name_is_still_allowed(engine, tool, name):
+    assert engine.classify(tool, {"name": name}).tier is not Tier.BLACK, (tool, name)
