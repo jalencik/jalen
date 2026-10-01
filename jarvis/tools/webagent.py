@@ -523,6 +523,23 @@ def _quietly(fn) -> None:
         pass
 
 
+def _test_headless_flag() -> list[str]:
+    """
+    ["--headless=new"] under the test suite, [] for him.
+
+    Jalen's Chrome is headed on purpose - a headless window cannot be signed
+    into by a human. But the tests that start the REAL Chrome (test_cdp_browser
+    and three others) popped a visible window on every run and killed it a
+    second later; with several agents running the suite in parallel on
+    2026-10-01 that looked, from his chair, exactly like "the browser keeps
+    failing". tests/conftest.py sets JALEN_TEST_HEADLESS_CHROME for the whole
+    run. A test seam only: never set it for real use.
+    """
+    import os
+
+    return ["--headless=new"] if os.environ.get("JALEN_TEST_HEADLESS_CHROME") == "1" else []
+
+
 def _closed(page) -> bool:
     """Is this page gone? A page we cannot even ask about counts as gone."""
     if page is None:
@@ -694,6 +711,7 @@ class _Session:
                  f"--remote-debugging-port={port}",
                  "--no-first-run", "--no-default-browser-check",
                  "--no-service-autorun", "--password-store=basic",
+                 *_test_headless_flag(),
                  "about:blank"],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,

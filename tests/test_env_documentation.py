@@ -45,6 +45,9 @@ PLATFORM_VARS = frozenset({
 # Development and test seams. A user is never told to set these, and documenting
 # them in .env.example would invite exactly that.
 INTERNAL_SWITCHES = frozenset({
+    # tests/conftest.py runs the tests that start Jalen's real Chrome headless,
+    # so a test run never pops a browser window on his screen.
+    "JALEN_TEST_HEADLESS_CHROME",
     # tests/test_bridge.py and test_native_host_process.py point the bridge at a
     # temp file so a test cannot publish over data/bridge.json and steal the
     # extension out of his live Chrome. That happened; it is why the seam exists.

@@ -157,9 +157,15 @@ def test_a_folder_named_like_a_pattern_is_not_a_reason_to_refuse_relative_paths(
 def test_the_check_is_fast_enough_to_run_on_every_file_a_search_reads(engine, tmp_path):
     import time
 
+    # The FASTEST of five batches: what the code costs, not what a busy
+    # machine adds. Measured 0.5 ms alone; one batch read 3+ ms while six
+    # agents ran the suite in parallel (2026-10-01), so a single batch made
+    # this a test of the machine's load.
     target = str(tmp_path / "some" / "deep" / "folder" / "file.txt")
-    start = time.perf_counter()
-    for _ in range(300):
-        engine.protected_path(target)
-    per_call_ms = (time.perf_counter() - start) / 300 * 1000
-    assert per_call_ms < 3.0, f"{per_call_ms:.2f} ms per path"
+    batches = []
+    for _ in range(5):
+        start = time.perf_counter()
+        for _ in range(100):
+            engine.protected_path(target)
+        batches.append((time.perf_counter() - start) / 100 * 1000)
+    assert min(batches) < 3.0, f"{min(batches):.2f} ms per path at best"

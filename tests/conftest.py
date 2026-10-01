@@ -38,6 +38,24 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_browser_window_on_his_screen():
+    """
+    Tests that start Jalen's REAL Chrome run it headless. Without this, every
+    test run popped a Chrome window on his screen and killed it a second later
+    - see webagent._test_headless_flag and tests/test_tests_never_show_a_browser.py.
+    """
+    import os
+
+    before = os.environ.get("JALEN_TEST_HEADLESS_CHROME")
+    os.environ["JALEN_TEST_HEADLESS_CHROME"] = "1"
+    yield
+    if before is None:
+        os.environ.pop("JALEN_TEST_HEADLESS_CHROME", None)
+    else:
+        os.environ["JALEN_TEST_HEADLESS_CHROME"] = before
+
+
 @pytest.fixture(autouse=True)
 def _every_test_starts_and_ends_untainted():
     """
