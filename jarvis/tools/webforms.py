@@ -26,6 +26,8 @@ The rules that follow from that, and that the tests hold:
     anything merely *called* password
   * only on a host the vault has an explicit approval for, matched exactly —
     `accounts.google.com.evil.tld` is not `accounts.google.com`
+  * only a saved login TIED to that host (vault.secret_binding) - approving a
+    site never lent it another site's password
   * exactly one password field on the page, or it refuses and asks him
   * the value never appears in a return value, an audit line, or the model's
     context
@@ -425,14 +427,31 @@ def fill_login_field(site: str = "") -> str:
     and the typing are a single job on the tab the work was in (tab="same":
     a replaced tab is refused, never used), and the host is read again
     immediately before typing and must still be the one that was approved.
+
+    AND THE PASSWORD HAS TO BE THIS SITE'S. The approval above says Jalen may
+    type on this host; it never said WHICH password. `site` names the saved
+    login, so fill_login_field(site="accounts.google.com") on an "always"
+    lookalike typed his Google password into it - reproduced in
+    tests/test_a_secret_goes_only_where_he_said.py. Now the login must be tied
+    to this host (vault.secret_binding), checked before it is read and again
+    at the typing. A login saved under the page's own host is that host's by
+    its name, so the default call needs nothing new. One saved before tying
+    existed is tied on first use: the job stops WITHOUT typing, he is asked
+    outside it - never while holding the browser thread for twenty seconds -
+    whether to tie it to the host it saw, and on his yes the whole job runs
+    again from the top, refusing unless the page is still on that host.
     """
     from . import vault
 
-    def job(page):
+    def job(page, expect_host: str = ""):
         url = page.url or ""
         host = _host(url)
         if not host:
             return "There's no page open to sign into."
+        if expect_host and host != expect_host:
+            return (f"The page moved off {expect_host} while I was asking you, "
+                    f"so I didn't type your password anywhere. Open the sign-in "
+                    f"page again and ask me once it's there.")
         refusal = _never_touch(url, "type a password")
         if refusal:
             return refusal
@@ -447,6 +466,13 @@ def fill_login_field(site: str = "") -> str:
         # is the correct caller - the value goes straight from the vault
         # into the page.
         name = (site or host).strip()
+        # Whose password it is, before it is even read. No approval of this
+        # host and no spoken yes moves a login tied to another site here.
+        if vault.secret_binding(name, url) == "elsewhere":
+            return (f"Your saved {name} belongs to "
+                    f"{vault.describe_secret_sites(name)}, not {host}, so I "
+                    f"didn't type it. If it's really used here too, add {host} "
+                    f"to it in scripts\\vault_setup.py.")
         try:
             secret = vault.get_secret(name)
         except vault.VaultLocked:
@@ -476,6 +502,12 @@ def fill_login_field(site: str = "") -> str:
                         f"that usually means it's a sign-up form asking you "
                         f"to confirm. I won't guess which is which; type it "
                         f"yourself this once.")
+            where = vault.secret_binding(name, now)
+            if where == "unbound":
+                return _TieFirst(name, host)        # nothing typed; ask outside
+            if where != "here":
+                return (f"Your saved {name} isn't tied to {host} any more, so "
+                        f"I didn't type it.")
             boxes.first.fill(secret)
             return ("Typed your password in. If there's a code or a "
                     "checkbox, that part's yours — tell me when to carry on.")
@@ -483,11 +515,54 @@ def fill_login_field(site: str = "") -> str:
             del secret          # out of scope with this frame, always
 
     try:
-        return _do(job, tab="same")
+        outcome = _do(job, tab="same")
     except BrowserUnavailable as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"I couldn't see the page: {type(exc).__name__}"
+    if not isinstance(outcome, _TieFirst):
+        return outcome
+
+    # Tie on first use. Asked here, off the browser thread, and ONLY his
+    # own spoken yes (app.confirm, through interaction.confirm) ties it.
+    from . import interaction
+
+    name, host = outcome
+    answer = interaction.confirm(
+        f"Your saved {name} is not tied to any site yet. "
+        f"Tie it to {host} and type it in?")
+    if not answer.yes:
+        if answer.outcome == "unavailable":
+            return (f"Your saved {name} isn't tied to a site yet, and there's "
+                    f"no way to ask you right now, so I didn't type it.")
+        if answer.outcome == "correction":
+            return (f'Nothing typed. He answered with something else: '
+                    f'"{answer.words}". If that tells you what he wants '
+                    f'instead, do that.')
+        if answer.outcome == "timeout":
+            return (f"No answer, so I didn't type your {name}. He may not have "
+                    f"heard the question - don't say he refused.")
+        return f"Okay - I didn't type your {name}, and it isn't tied to {host}."
+    if not vault.tie_secret(name, [host]):
+        return (f"I couldn't write down that your {name} belongs to {host}, so "
+                f"I didn't type it.")
+    try:
+        # Every check again, from the top, on the page as it is NOW.
+        outcome = _do(lambda page: job(page, expect_host=host), tab="same")
+    except BrowserUnavailable as exc:
+        return str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return f"I couldn't see the page: {type(exc).__name__}"
+    if isinstance(outcome, _TieFirst):
+        return "I couldn't tie it to that site, so nothing was typed."
+    return outcome
+
+
+class _TieFirst(tuple):
+    """A login job that stopped before typing: (secret name, host) to ask about."""
+
+    def __new__(cls, name: str, host: str):
+        return super().__new__(cls, (name, host))
 
 
 REGISTRY: dict[str, Any] = {

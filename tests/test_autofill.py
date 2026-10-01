@@ -19,18 +19,46 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import autofill, vault
+from jarvis.tools import autofill, interaction, vault
 
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(vault, "VAULT_PATH", tmp_path / "vault.json")
     monkeypatch.setattr(vault, "APPROVALS_PATH", tmp_path / "approvals.json")
+    monkeypatch.setattr(vault, "SECRET_SITES_PATH", tmp_path / "secret_sites.json")
     vault.lock_vault()
+    interaction.uninstall()
     typed: list[str] = []
     monkeypatch.setattr(autofill, "_type", lambda text: typed.append(text) or True)
+    # Never his real screen: an unpatched test would read whichever window
+    # is in front of him right now.
+    _looking_at(monkeypatch, "")
     yield typed
+    interaction.uninstall()
     vault.lock_vault()
+
+
+def _looking_at(monkeypatch, url: str) -> None:
+    """The browser window in front of him is showing `url`."""
+    monkeypatch.setattr(autofill, "_focused_page",
+                        lambda: (1, url) if url else (0, ""))
+    monkeypatch.setattr(autofill, "_read_url", lambda: url)
+
+
+class _Said:
+    def __init__(self, outcome: str) -> None:
+        self.outcome, self.words = outcome, outcome
+
+    def __bool__(self) -> bool:
+        return self.outcome == "yes"
+
+
+def _he_answers(outcome: str) -> list[str]:
+    """He answers the tool's own question. Returns what he was asked."""
+    asked: list[str] = []
+    interaction.install_confirm(lambda q: asked.append(q) or _Said(outcome))
+    return asked
 
 
 def _unlocked(secrets):
@@ -45,7 +73,7 @@ def test_nothing_is_typed_when_the_page_is_unknown(monkeypatch, isolated):
     is not a trusted one. Typing anyway would be filling a password into a
     page nobody identified.
     """
-    monkeypatch.setattr(autofill, "_read_url", lambda: "")
+    _looking_at(monkeypatch, "")
     _unlocked({"sign_in_code": "SECRET"})
     reply = autofill.fill_credential("sign_in_code")
     assert "can't read which page" in reply
@@ -53,32 +81,41 @@ def test_nothing_is_typed_when_the_page_is_unknown(monkeypatch, isolated):
 
 
 def test_a_blocked_site_is_refused(monkeypatch, isolated):
-    monkeypatch.setattr(autofill, "_read_url", lambda: "https://sketchy.example/login")
+    _looking_at(monkeypatch, "https://sketchy.example/login")
     vault.remember_site_decision("sketchy.example", "never")
     _unlocked({"sign_in_code": "SECRET"})
+    asked = _he_answers("yes")
     reply = autofill.fill_credential("sign_in_code")
     assert "never" in reply and "sketchy.example" in reply
     assert isolated == []
+    assert asked == [], "a site he blocked is not a question"
 
 
 def test_an_unapproved_site_asks_rather_than_typing(monkeypatch, isolated):
     """
     His three-way choice, enforced in the tool rather than left to the
-    model's judgement.
+    model's judgement - and now ASKED by the tool too, naming the site it
+    read, because a flag the model set after asking in its own words was
+    the whole approval (tests/test_a_secret_goes_only_where_he_said.py).
     """
-    monkeypatch.setattr(autofill, "_read_url", lambda: "https://newsite.example/apply")
+    _looking_at(monkeypatch, "https://newsite.example/apply")
     _unlocked({"sign_in_code": "SECRET"})
+    vault.tie_secret("sign_in_code", ["*"])
+    asked = _he_answers("no")
     reply = autofill.fill_credential("sign_in_code")
-    assert "haven't approved" in reply
-    assert "just this once or from now on" in reply
+    assert len(asked) == 1
+    assert "newsite.example" in asked[0] and "just this once" in asked[0]
+    assert "nothing typed" in reply.lower()
     assert isolated == []
 
 
 def test_just_this_once_types_but_records_nothing(monkeypatch, isolated):
-    monkeypatch.setattr(autofill, "_read_url", lambda: "https://newsite.example/apply")
+    _looking_at(monkeypatch, "https://newsite.example/apply")
     _unlocked({"sign_in_code": "SECRET"})
+    vault.tie_secret("sign_in_code", ["*"])
+    _he_answers("yes")
 
-    reply = autofill.fill_credential("sign_in_code", approved_once=True)
+    reply = autofill.fill_credential("sign_in_code")
     assert isolated == ["SECRET"]
     assert "just this once" in reply
     # Nothing written down — that is what makes it once.
@@ -86,13 +123,16 @@ def test_just_this_once_types_but_records_nothing(monkeypatch, isolated):
 
 
 def test_an_always_approved_site_types_without_asking(monkeypatch, isolated):
-    monkeypatch.setattr(autofill, "_read_url", lambda: "https://commonapp.org/apply")
+    _looking_at(monkeypatch, "https://commonapp.org/apply")
     vault.remember_site_decision("commonapp.org", "always")
     _unlocked({"sign_in_code": "SECRET"})
+    vault.tie_secret("sign_in_code", ["commonapp.org"])
+    asked = _he_answers("no")
 
     reply = autofill.fill_credential("sign_in_code")
     assert isolated == ["SECRET"]
     assert "as agreed" in reply
+    assert asked == []
 
 
 def test_a_lookalike_domain_does_not_inherit_approval(monkeypatch, isolated):
@@ -101,13 +141,11 @@ def test_a_lookalike_domain_does_not_inherit_approval(monkeypatch, isolated):
     password be typed into "login.google.com.evil.tld".
     """
     vault.remember_site_decision("google.com", "always")
-    monkeypatch.setattr(
-        autofill, "_read_url", lambda: "https://login.google.com.evil.tld/signin"
-    )
+    _looking_at(monkeypatch, "https://login.google.com.evil.tld/signin")
     _unlocked({"sign_in_code": "SECRET"})
 
     reply = autofill.fill_credential("sign_in_code")
-    assert "haven't approved" in reply
+    assert "login.google.com.evil.tld" in reply
     assert isolated == [], "a password was typed into a lookalike domain"
 
 
@@ -117,17 +155,19 @@ def test_the_secret_never_appears_in_the_reply(monkeypatch, isolated):
     The reply reaches the model, the transcript window, the audit log and
     possibly the speakers. The value must not be in it.
     """
-    monkeypatch.setattr(autofill, "_read_url", lambda: "https://commonapp.org/apply")
+    _looking_at(monkeypatch, "https://commonapp.org/apply")
     vault.remember_site_decision("commonapp.org", "always")
     _unlocked({"sign_in_code": "Jalol2009applicant***"})
+    vault.tie_secret("sign_in_code", ["commonapp.org"])
 
     reply = autofill.fill_credential("sign_in_code")
+    assert isolated == ["Jalol2009applicant***"]
     assert "Jalol2009applicant" not in reply
     assert "sign_in_code" in reply, "he isn't told WHICH secret went in"
 
 
 def test_a_locked_vault_says_so(monkeypatch, isolated):
-    monkeypatch.setattr(autofill, "_read_url", lambda: "https://commonapp.org/apply")
+    _looking_at(monkeypatch, "https://commonapp.org/apply")
     vault.remember_site_decision("commonapp.org", "always")
     vault._save_blob(vault._seal({"sign_in_code": "SECRET"}, "pass"))
 
@@ -137,7 +177,7 @@ def test_a_locked_vault_says_so(monkeypatch, isolated):
 
 
 def test_an_unknown_secret_lists_what_there_is(monkeypatch, isolated):
-    monkeypatch.setattr(autofill, "_read_url", lambda: "https://commonapp.org/apply")
+    _looking_at(monkeypatch, "https://commonapp.org/apply")
     vault.remember_site_decision("commonapp.org", "always")
     _unlocked({"phone": "12345"})
 

@@ -51,6 +51,16 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent.parent
 VAULT_PATH = ROOT / "data" / "vault.json"
 APPROVALS_PATH = ROOT / "data" / "site_approvals.json"
+# Which site each secret belongs to - see "WHICH SITE A SECRET IS FOR" below.
+# THE FILE NAME IS LOAD-BEARING: it matches the never_touch pattern
+# "*secret*" in config/safety.yaml, so read_file, edit_file, create_file,
+# move_file and delete_file are all refused on it. A binding the brain could
+# rewrite with edit_file would be no binding at all.
+# tests/test_a_secret_goes_only_where_he_said.py pins that.
+SECRET_SITES_PATH = ROOT / "data" / "secret_sites.json"
+# He said this secret is not a site login - a phone number, an email address
+# typed into every application form. Written by scripts/vault_setup.py only.
+ANY_SITE = "*"
 
 # Passphrase -> key. 200k rounds is the cost of one unlock per session,
 # which is imperceptible to him and expensive for anyone brute-forcing the
@@ -392,7 +402,22 @@ def list_secrets() -> str:
         return "Vault is locked, so I can't tell you what's in it."
     if not _SESSION.secrets:
         return "The vault is empty."
-    return "Stored: " + ", ".join(sorted(_SESSION.secrets))
+    # Where each one may be typed, so he can audit it the way he audits
+    # list_site_decisions. Sites are not secret; the values stay out.
+    return "Stored: " + ", ".join(
+        f"{name} ({_where_it_goes(name)})" for name in sorted(_SESSION.secrets))
+
+
+def has_secret(name: str) -> bool:
+    """
+    INTERNAL ONLY. Is something stored under this name? Raises VaultLocked.
+
+    So the code that types can refuse a name that does not exist BEFORE it
+    asks him anything, without holding the value while he answers.
+    """
+    if not _SESSION.live:
+        raise VaultLocked("vault is locked")
+    return name in _SESSION.secrets
 
 
 def get_secret(name: str) -> str:
@@ -503,6 +528,196 @@ def list_site_decisions() -> str:
     if blocked:
         parts.append("Never touch: " + ", ".join(blocked))
     return ". ".join(parts) + "."
+
+
+# ------------------------------------------------- which site a secret is for
+#
+# A SITE APPROVAL SAYS WHERE JALEN MAY TYPE. IT NEVER SAID WHAT. Approval is
+# per domain, not per secret, so the moment any site was "always", EVERY
+# stored secret could be typed there - a lookalike he had once approved got
+# his Google password, through fill_credential and through
+# fill_login_field(site="accounts.google.com") alike. Reproduced in
+# tests/test_a_secret_goes_only_where_he_said.py against the code before this.
+#
+# So each secret now carries the site(s) it belongs to, and every path that
+# types one checks it on the host the page is on AT THE TYPING:
+#
+#   tied    a list of hosts. Typed there (or on a subdomain of one) and
+#           nowhere else - no site approval and no spoken yes overrides it.
+#           Adding a site is deliberate: scripts/vault_setup.py.
+#   "*"     he said it is not a site login (a phone number, an email for
+#           application forms). The site approval alone decides.
+#   untied  stored before binding existed, or never told. See below.
+#
+# A NAME THAT IS A HOST IS THAT HOST'S. fill_login_field looks a login up by
+# the page's host, so a secret stored as "accounts.google.com" was always
+# meant for accounts.google.com; its name is its binding until he says
+# otherwise, and it is typed on a lookalike by nobody.
+#
+# SECRETS STORED BEFORE THIS - "sign_in_code", "gmail" - are UNTIED, and are
+# tied on first use: the first time one is about to be typed, he is asked a
+# question naming the secret AND the host, and only his own yes (app.confirm,
+# through interaction.confirm) ties it there and types it. Not refused until
+# bound, because that would break every stored secret until he found a
+# terminal; not typed with a warning, because a warning is exactly what the
+# lookalike he approved would get. The question names the lookalike out
+# loud, and one good answer ends it: from then on no other site gets it.
+#
+# Plain JSON, not inside the encrypted blob, because tying on first use has
+# to write without the passphrase, which is never kept - and the keystream
+# here has no nonce, so re-sealing under the old key is not an option.
+# Nothing in it is secret: names are what list_secrets shows, sites are what
+# list_site_decisions shows.
+def _host_of(url_or_host: str) -> str:
+    """
+    The host a browser would go to, PARSED, never split on "/": lowercased,
+    no port, no user:pass@, no trailing dot. "" for anything that is not a
+    web address (about:blank, chrome://, file:) or cannot be read.
+
+    Backslashes count as slashes, as they do in Chrome for http(s):
+    "https://evil.tld\\@accounts.google.com" goes to evil.tld.
+    """
+    from urllib.parse import urlsplit
+
+    text = (url_or_host or "").strip().replace("\\", "/")
+    if not text or any(ch.isspace() for ch in text):
+        return ""
+    scheme = re.match(r"^([a-zA-Z][a-zA-Z0-9+.\-]*):(?!\d)", text)
+    if scheme:
+        if scheme.group(1).lower() not in ("http", "https"):
+            return ""
+    else:
+        text = "//" + text          # "accounts.google.com/signin", as Chrome shows it
+    try:
+        return (urlsplit(text).hostname or "").rstrip(".").lower()
+    except ValueError:
+        return ""
+
+
+def _on_host(host: str, site: str) -> bool:
+    """That exact host or a subdomain of it. NEVER a substring."""
+    return bool(host and site) and (host == site or host.endswith("." + site))
+
+
+def _host_named(name: str) -> str:
+    """The host a secret's NAME spells, or "" when the name is not a host."""
+    text = (name or "").strip().lower().rstrip(".")
+    if "." not in text or any(ch in text for ch in " _/@:\\"):
+        return ""
+    return text if _host_of(text) == text else ""
+
+
+def _load_secret_sites() -> dict:
+    try:
+        data = json.loads(SECRET_SITES_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def secret_sites(name: str) -> list[str] | None:
+    """
+    INTERNAL. The sites a secret may be typed on - [ANY_SITE] for "any" - or
+    None when it is untied.
+    """
+    entry = _load_secret_sites().get(name)
+    sites = entry.get("sites") if isinstance(entry, dict) else None
+    if isinstance(sites, list):
+        clean = [s for s in (str(x).strip().lower() for x in sites) if s]
+        if clean:
+            return clean
+    named = _host_named(name)
+    return [named] if named else None
+
+
+def secret_binding(name: str, url: str) -> str:
+    """
+    INTERNAL. May this secret be typed on the page at `url`?
+
+        "here"       yes - it is tied to this host, or to any site
+        "elsewhere"  no - it belongs to another site, or the page is nowhere
+        "unbound"    nobody has said; ask him before typing (tie on first use)
+
+    A page with no readable host is "elsewhere" even for an untied secret:
+    there is no site to tie it to, and no site is not a site it belongs on.
+    """
+    host = _host_of(url)
+    if not host:
+        return "elsewhere"
+    sites = secret_sites(name)
+    if sites is None:
+        return "unbound"
+    if ANY_SITE in sites:
+        return "here"
+    return "here" if any(_on_host(host, site) for site in sites) else "elsewhere"
+
+
+def _where_it_goes(name: str) -> str:
+    """Spoken: where a secret may be typed."""
+    sites = secret_sites(name)
+    if sites is None:
+        return "not tied to a site yet"
+    if ANY_SITE in sites:
+        return "any site"
+    return "only on " + " or ".join(sites)
+
+
+def describe_secret_sites(name: str) -> str:
+    """INTERNAL. "accounts.google.com", "any site", or "no site yet"."""
+    sites = secret_sites(name)
+    if sites is None:
+        return "no site yet"
+    if ANY_SITE in sites:
+        return "any site"
+    return " or ".join(sites)
+
+
+def tie_secret(name: str, sites: list[str], how: str = "first use") -> bool:
+    """
+    INTERNAL ONLY - and it must never become a tool. Say which site(s) a
+    secret belongs to. True if it was written down.
+
+    Called by the code that types, AFTER his own spoken yes to a question
+    naming the secret and the host, and by scripts/vault_setup.py where he
+    types the sites himself. A tool would let the model move his Google
+    password to whichever site it was reading - the exact failure this is
+    here to end. An empty list unties it.
+    """
+    clean: list[str] = []
+    for site in sites or []:
+        text = str(site).strip()
+        host = ANY_SITE if text == ANY_SITE else _host_of(text)
+        if not host:
+            return False            # one unreadable site and nothing is written
+        if host not in clean:
+            clean.append(host)
+    data = _load_secret_sites()
+    if clean:
+        data[name] = {"sites": clean, "how": how,
+                      "tied_at": time.strftime("%Y-%m-%d %H:%M")}
+    else:
+        data.pop(name, None)
+    try:
+        SECRET_SITES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SECRET_SITES_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def forget_secret_sites_except(names) -> None:
+    """INTERNAL. Drop bindings for secrets the vault no longer holds."""
+    keep = set(names)
+    data = _load_secret_sites()
+    stale = [name for name in data if name not in keep]
+    if not stale:
+        return
+    for name in stale:
+        del data[name]
+    try:
+        SECRET_SITES_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 REGISTRY: dict[str, Any] = {

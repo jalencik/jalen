@@ -211,6 +211,35 @@ def test_the_names_it_offers_are_names_the_autofill_path_can_use(isolated, monke
         assert name in listed, f"{name} was stored but list_secrets cannot see it"
 
 
+def test_he_says_which_site_each_secret_is_for_here(isolated, monkeypatch,
+                                                    tmp_path):
+    """
+    The one deliberate place a secret is tied to its site - no tool can do
+    it (tests/test_a_secret_goes_only_where_he_said.py). Asked after the
+    vault is saved, one input() per secret in name order; Enter keeps what
+    is there, so re-running to add one secret costs no retyping.
+    """
+    monkeypatch.setattr(vault, "SECRET_SITES_PATH", tmp_path / "secret_sites.json")
+    drive(monkeypatch,
+          secrets=["a-good-passphrase", "a-good-passphrase", "CODE", "PHONE", ""],
+          typed=["",                   # no extra secrets
+                 "*",                  # phone: any application form
+                 "commonapp.org"])     # sign_in_code
+    assert vault.secret_binding("phone", "https://anything.example/") == "here"
+    assert vault.secret_binding("sign_in_code", "https://apply.commonapp.org/") == "here"
+    assert vault.secret_binding("sign_in_code", "https://evil.example/") == "elsewhere"
+
+    # Again, pressing Enter at every site: the ties survive.
+    drive(monkeypatch, secrets=["a-good-passphrase", "", "", ""],
+          typed=["", "", ""])
+    assert vault.secret_binding("sign_in_code", "https://evil.example/") == "elsewhere"
+
+    # Something that is not a site changes nothing.
+    drive(monkeypatch, secrets=["a-good-passphrase", "", "", ""],
+          typed=["", "", "not a site at all"])
+    assert vault.secret_binding("sign_in_code", "https://commonapp.org/") == "here"
+
+
 def test_the_setup_script_reads_and_writes_through_the_vault_module():
     """
     Everything the script does to disk must go through jarvis.tools.vault.

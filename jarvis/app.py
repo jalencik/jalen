@@ -474,6 +474,15 @@ class Jalen:
                 self.ask_user(question, timeout_s)
             )
         )
+        # ...and a yes/no, through the same confirm() a RED action gets. For
+        # the code that types his secrets: it asks a question naming the
+        # site IT read from the address bar, and only his own yes to that
+        # question lets it type. fill_credential's approved_once used to be
+        # the whole approval - a flag the model set, about a site nobody
+        # named. See interaction.confirm.
+        interaction.install_confirm(
+            lambda question: self._run_coro(self.confirm(question))
+        )
 
         # Per-turn stopwatch. "Why is it so slow" had no answer before this,
         # because the only evidence was the wall-clock gap between his

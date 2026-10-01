@@ -328,17 +328,23 @@ amber:
     # A page can hold unsaved work — a half-written application, a form,
     # a draft. The browser's own "leave site?" prompt is not a substitute
     # for him hearing which window is about to close.
-    # Types a stored secret. AMBER, not RED, because the REAL gate is the
-    # per-domain permission the tool checks itself — RED would ask out
-    # loud on every field even for a site he approved forever, which is
-    # the friction the allowlist exists to remove. He still hears which
-    # secret is going into which domain, and has the stop window.
+    # Types a stored secret. AMBER, not RED, because the REAL gates are in
+    # the tool: the per-domain permission, and which site the secret is
+    # tied to (vault.secret_binding). RED would ask out loud on every field
+    # even for a site he approved forever, which is the friction the
+    # allowlist exists to remove. The announcement does NOT name the domain
+    # (safety.py describes it from the args, and the domain is read from
+    # the address bar inside the tool) - so when the site is not approved
+    # for good, or the secret is not tied yet, the TOOL asks him itself,
+    # naming the host, through app.confirm. That question, not a flag the
+    # model sets, is the approval.
     - fill_credential
     # Reads his one-time login code from his own email and types it into the
     # 2FA box. AMBER for the same reason as fill_credential: the value is
     # secret-like, so it is never returned or logged, but the code is gated
-    # hard by sender and by recency before it is ever fetched - it completes
-    # his own security step, it does not defeat one - and he hears it happen.
+    # hard by sender and by recency before it is ever fetched, and typed
+    # only into that service's own sign-in host - it completes his own
+    # security step, it does not defeat one - and he hears it happen.
     - fill_login_code
     - close_browser_tab
     - fix_wifi_power_saving
@@ -360,9 +366,12 @@ red:
     # whose whole cost lands the instant it happens.
     - submit_form
     # Types a real password into a real page. RED for the obvious reason,
-    # and gated three more ways inside the tool itself: only into an actual
-    # input[type=password], only when there is exactly one of them, and only
-    # on a host with an EXACT vault approval.
+    # and gated four more ways inside the tool itself: only into an actual
+    # input[type=password], only when there is exactly one of them, only
+    # on a host with an EXACT vault approval, and only a saved login tied
+    # to that host. The RED question is "fill login field. Confirm?" - it
+    # names neither - which is why the tie-on-first-use question inside the
+    # tool names both.
     - fill_login_field
     # Deleting files, even files that are safe to delete by definition.
     # An application writing to its temp file right now can lose work — but

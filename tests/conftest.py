@@ -130,9 +130,24 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     webagent_module.CHATS_PATH = scratch / "web_chats.json"
     webagent_module.PROFILE_DIR = scratch / "browser_profile"
 
+    # --- the vault, its site approvals and which site each secret is for --
+    # Most vault tests point these at tmp_path themselves; this is for the
+    # ones that do not. A test that ties "gmail" to a site, or approves one,
+    # must never write that into his real data/, and a secret typed by a
+    # fixture must never come out of his real vault.
+    from jarvis.tools import vault as vault_module
+
+    saved_vault = (vault_module.VAULT_PATH, vault_module.APPROVALS_PATH,
+                   vault_module.SECRET_SITES_PATH)
+    vault_module.VAULT_PATH = scratch / "vault.json"
+    vault_module.APPROVALS_PATH = scratch / "site_approvals.json"
+    vault_module.SECRET_SITES_PATH = scratch / "secret_sites.json"
+
     try:
         yield scratch
     finally:
+        (vault_module.VAULT_PATH, vault_module.APPROVALS_PATH,
+         vault_module.SECRET_SITES_PATH) = saved_vault
         webagent_module.CHATS_PATH, webagent_module.PROFILE_DIR = saved_webagent
         (
             crashlog_module.DATA_DIR,

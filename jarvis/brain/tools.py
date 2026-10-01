@@ -473,9 +473,10 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "into the verification-code box on the page. Use this when a sign-in "
         "asks for an emailed 2FA code. It only reads a code from the last few "
         "minutes, only from the service's real sender (OpenAI for ChatGPT, "
-        "Google for Gemini), and NEVER tells you the code - it types it "
-        "straight in. If it can't find a fresh code it says so; do not invent "
-        "one or ask him to read it out unless it fails.",
+        "Google for Gemini), only into that service's own sign-in page, and "
+        "NEVER tells you the code - it types it straight in. If it can't find "
+        "a fresh code it says so; do not invent one or ask him to read it out "
+        "unless it fails.",
         {
             "service": ("string", "chatgpt or gemini", True),
             "within_minutes": ("number", "how recent the code must be; "
@@ -486,13 +487,16 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "Type a stored secret into the field HE HAS FOCUSED. He clicks the "
         "box; you type. You never choose the field — that is what stops a "
         "password landing somewhere unintended.\n"
-        "Checks the site itself. If it comes back saying he has not approved "
-        "the domain, ASK HIM out loud whether it is just this once or from "
-        "now on. Just this once: call again with approved_once=true. From now "
-        "on: call remember_site_decision first, then call again.\n"
+        "Checks the site itself, and ASKS HIM ITSELF when it has to - naming "
+        "the site it read from the address bar - so do not ask him first and "
+        "do not try to approve it for him. A site he has not trusted for good "
+        "gets the secret only after his own yes to that question, just this "
+        "once. If he wants the site trusted from now on, that is "
+        "remember_site_decision. A secret belongs to its site: one tied to "
+        "another site is refused here whatever he says, and one not tied yet "
+        "is tied to this site by his yes the first time it is used.\n"
         "NEVER say the secret out loud and never repeat it back.",
-        {"secret": ("string", "which stored secret, by name (list_secrets shows them)", True),
-         "approved_once": ("boolean", "true only after he said 'just this once'", False)},
+        {"secret": ("string", "which stored secret, by name (list_secrets shows them)", True)},
     ),
     "fill_field": (
         "Type ordinary text into the focused field — a name, a phone number, "
@@ -699,10 +703,12 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     ),
     "fill_login_field": (
         "Type his saved password into this page's password box. Only works "
-        "when the host has an explicit vault approval, when there is exactly "
-        "one password box, and only into a real input[type=password]. The "
-        "value never reaches you. If a code or a checkbox follows, that part "
-        "is his.",
+        "when the host has an explicit vault approval, when the saved login "
+        "is tied to this host, when there is exactly one password box, and "
+        "only into a real input[type=password]. A login tied to another site "
+        "is refused; one not tied yet, he is asked about once. The value "
+        "never reaches you. If a code or a checkbox follows, that part is "
+        "his.",
         {"site": ("string", "which saved login; defaults to the page's host", False)},
     ),
     # ---- driving ChatGPT / Gemini in an actual browser --------------------

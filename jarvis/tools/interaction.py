@@ -28,10 +28,22 @@ exists to prevent.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 # Installed by Jalen.__init__. Signature: (question, timeout_s) -> answer.
 _ASK: Callable[[str, float], str] | None = None
+
+# Installed beside it. Signature: (question) -> app.ConfirmAnswer, which is
+# truthy ONLY on a real spoken yes. See confirm() below.
+_CONFIRM: Callable[[str], Any] | None = None
+
+
+class Answer(NamedTuple):
+    """His yes or no, as the code that asked sees it."""
+
+    yes: bool
+    outcome: str        # yes | no | timeout | correction | unavailable | failed
+    words: str = ""
 
 # Long by design. A yes/no gets 20 seconds; looking up a passport number or
 # a referee's email address does not, and a form filled with a guess is
@@ -45,9 +57,51 @@ def install(ask: Callable[[str, float], str]) -> None:
     _ASK = ask
 
 
+def install_confirm(confirm_fn: Callable[[str], Any] | None) -> None:
+    """Called once by the app: Jalen.confirm, the one a RED action uses."""
+    global _CONFIRM
+    _CONFIRM = confirm_fn
+
+
 def uninstall() -> None:
-    global _ASK
+    global _ASK, _CONFIRM
     _ASK = None
+    _CONFIRM = None
+
+
+def confirm(question: str) -> Answer:
+    """
+    Ask HIM a yes/no question and wait - for CODE, never for the model.
+
+    Deliberately absent from REGISTRY. The point is that the question is
+    written by the code that is about to act, naming what IT read - "type
+    your gmail into accounts-google.evil.example?" - so his answer is to the
+    thing that will actually happen. A flag the model sets after asking
+    something in its own words is not that; it is how fill_credential's
+    approved_once typed into a page nobody named.
+
+    Not a second confirmation mechanism: this is Jalen.confirm(), the one a
+    RED action gets - the echo defence that stops "...Confirm?" coming back
+    through the speakers from approving itself, the correction handling, the
+    timeout. Only a real yes counts. A string, a correction, a timeout, or
+    nobody to ask are all no, and the caller must treat them as "do nothing".
+    """
+    text = (question or "").strip()
+    if not text:
+        return Answer(False, "failed")
+    if _CONFIRM is None:
+        return Answer(False, "unavailable")
+    try:
+        answer = _CONFIRM(text)
+    except Exception:  # noqa: BLE001 - failing to ask is a no, never a crash
+        return Answer(False, "failed")
+    if answer is True:
+        return Answer(True, "yes")
+    outcome = getattr(answer, "outcome", None)
+    words = str(getattr(answer, "words", "") or "")
+    if outcome == "yes" and bool(answer):
+        return Answer(True, "yes", words)
+    return Answer(False, str(outcome or "no"), words)
 
 
 def ask_user(question: str, timeout_s: float = DEFAULT_TIMEOUT_S) -> str:

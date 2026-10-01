@@ -10,6 +10,13 @@ it protects, and the vault would be decoration.
 
 Everything is typed with getpass, so nothing appears on screen and nothing
 lands in the shell history.
+
+It is also where he says WHICH SITE each secret is for. Jalen types a secret
+only on the site(s) it is tied to (jarvis/tools/vault.py, "which site a
+secret is for"), and this is the one place a tie is added or changed on
+purpose - no tool can do it, because a tool the model could call would let a
+page he was reading move his Google password to itself. The sites are typed
+here with input(), not getpass: they are not secret.
 """
 from __future__ import annotations
 
@@ -20,7 +27,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis.tools.vault import VAULT_PATH, _load_blob, _open, _save_blob, _seal  # noqa: E402
+from jarvis.tools.vault import (  # noqa: E402
+    VAULT_PATH,
+    _load_blob,
+    _open,
+    _save_blob,
+    _seal,
+    describe_secret_sites,
+    forget_secret_sites_except,
+    tie_secret,
+)
 
 # The ones he actually named. Anything else can be added by typing a name.
 SUGGESTED = [
@@ -28,6 +44,29 @@ SUGGESTED = [
     ("phone", "your phone number, for application forms"),
     ("email", "the email address you apply with"),
 ]
+
+
+def tie_to_sites(names: list[str]) -> None:
+    """
+    Which site each secret is for. Enter keeps what is there - so running
+    this again to add one secret does not ask him to retype every site.
+    """
+    print()
+    print("  Which site is each one for? Jalen will only ever type it there.")
+    print("  Type the site (accounts.google.com), several with commas, or *")
+    print("  if it goes into forms anywhere, like a phone number. Enter leaves")
+    print("  it as it is; one not tied yet is tied to the first site you say")
+    print("  yes to using it on.")
+    for name in names:
+        answer = input(f"  {name} [{describe_secret_sites(name)}]: ").strip()
+        if not answer:
+            continue
+        sites = [part.strip() for part in answer.replace(";", ",").split(",")
+                 if part.strip()]
+        if tie_secret(name, sites, how="vault_setup"):
+            print(f"    {name}: {describe_secret_sites(name)}")
+        else:
+            print(f"    I couldn't read that as a site, so {name} is as it was.")
 
 
 def main() -> int:
@@ -88,6 +127,10 @@ def main() -> int:
 
     _save_blob(_seal(secrets, passphrase))
     print(f"\n  Saved {len(secrets)} entries to {VAULT_PATH}")
+    # After the save, so nothing below can cost him the vault itself.
+    forget_secret_sites_except(secrets)
+    tie_to_sites(sorted(secrets))
+    print()
     print("  Say \"unlock the vault\" and give Jalen the passphrase when he asks.")
     print()
     print("  Jalen will still ask before typing anything into a site he has")

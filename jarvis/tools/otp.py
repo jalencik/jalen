@@ -10,7 +10,7 @@ bypass of the security step - it IS the security step, done by the person it
 was sent to.
 
 BUT A SIX-DIGIT NUMBER IN AN EMAIL IS NOT AUTOMATICALLY A LOGIN CODE, and
-treating it as one is how this feature turns dangerous. So three gates, all
+treating it as one is how this feature turns dangerous. So four gates, all
 required, none optional:
 
   RECENT. Only a code from the last few minutes. A login code is a live
@@ -21,6 +21,12 @@ required, none optional:
   FROM THE RIGHT SENDER. Only from the service actually being signed into -
   OpenAI for ChatGPT, Google for Gemini. A code-shaped number in a
   newsletter is not his login code, and the sender is what tells them apart.
+  The sender is the parsed From ADDRESS, not a substring of the header.
+
+  INTO THE RIGHT PAGE. Only into that service's own sign-in page, checked
+  on the page's host when the box is found and again at the typing. A page
+  that asks for "the code we just sent you" and is not Google is the whole
+  of a relay phishing attack, and a code typed there is his account.
 
   NEVER SURFACED. The code is extracted by code and typed by code, straight
   into the page. It never becomes a tool result the model can see, never
@@ -44,6 +50,24 @@ _CODE_SENDERS = {
     "openai": ("openai.com", "chatgpt.com"),
     "gemini": ("google.com", "accounts.google.com"),
     "google": ("google.com", "accounts.google.com"),
+}
+
+# Where a code may be TYPED, per service: that service's own sign-in, matched
+# as the host or a subdomain of it, never as a substring. The sender gate
+# above says whose code it is; nothing said where it may go, so a Google
+# code read from his inbox was typed into whatever page was open - which is
+# the whole of a relay phishing page: "enter the code we just sent you".
+# Reproduced in tests/test_a_secret_goes_only_where_he_said.py.
+#
+# Narrower than the senders on purpose. Google's code box is on
+# accounts.google.com, and "google.com" would admit sites.google.com, where
+# anyone can publish a page. ChatGPT's is on auth.openai.com (auth0 on older
+# flows) or chatgpt.com itself.
+_CODE_PAGES = {
+    "chatgpt": ("auth.openai.com", "auth0.openai.com", "chatgpt.com"),
+    "openai": ("auth.openai.com", "auth0.openai.com", "chatgpt.com"),
+    "gemini": ("accounts.google.com",),
+    "google": ("accounts.google.com",),
 }
 
 # Words that mark a message as being ABOUT a login code, so a random number
@@ -94,9 +118,28 @@ def _looks_like_code_mail(subject: str, snippet: str) -> bool:
 
 
 def _from_trusted_sender(sender: str, service: str) -> bool:
-    domains = _CODE_SENDERS.get(service, ())
-    low = (sender or "").lower()
-    return any(domain in low for domain in domains)
+    """
+    Is the From ADDRESS on one of the service's domains, or a subdomain?
+
+    It was `domain in sender`, a substring of the whole header, so
+    "openai.com <attacker@evil.example>" - a display name anyone can type -
+    and help@openai.com.evil.example and x@notopenai.com were all OpenAI.
+    """
+    from email.utils import parseaddr
+
+    _name, address = parseaddr(sender or "")
+    if address.count("@") != 1:
+        return False
+    domain = address.rsplit("@", 1)[1].strip().rstrip(".").lower()
+    return any(domain == d or domain.endswith("." + d)
+               for d in _CODE_SENDERS.get(service, ()))
+
+
+def _on_code_page(url: str, service: str) -> bool:
+    """Is this page the service's own sign-in, where its code belongs?"""
+    from .webagent import _on_site
+
+    return any(_on_site(url or "", site) for site in _CODE_PAGES.get(service, ()))
 
 
 def _recent_code(service: str, within_minutes: float) -> tuple[str, str]:
@@ -189,17 +232,23 @@ def fill_login_code(service: str = "", within_minutes: float = 10.0) -> str:
     if not code:
         return reason
 
-    from .webagent import BrowserUnavailable, _Session, _first_visible, _never_touch
+    from .webagent import BrowserUnavailable, _host, _Session, _first_visible, _never_touch
 
     def job(page):
         refusal = _never_touch(page.url, "type a code")
         if refusal:
             return "REFUSED:" + refusal
+        if not _on_code_page(page.url, key):
+            return "ELSEWHERE:" + (_host(page.url or "") or "this page")
         box = _first_visible(page, _OTP_FIELD, timeout=5.0)
         if box is None:
             return "NOBOX"
         try:
             box.click()
+            # AT THE TYPING: finding the box waited up to five seconds and
+            # the click itself can navigate.
+            if not _on_code_page(page.url, key):
+                return "ELSEWHERE:" + (_host(page.url or "") or "this page")
             box.fill(code)
             return "OK"
         except Exception as exc:  # noqa: BLE001
@@ -217,6 +266,11 @@ def fill_login_code(service: str = "", within_minutes: float = 10.0) -> str:
 
     if outcome.startswith("REFUSED:"):
         return outcome[8:]
+    if outcome.startswith("ELSEWHERE:"):
+        return (f"This page is on {outcome[10:]}, not {key}'s own sign-in, so I "
+                f"didn't type your code into it. A {key} code only goes into "
+                f"{key}'s sign-in page - if a site you didn't expect is asking "
+                f"for it, that's the classic way codes get stolen.")
     if outcome == "OK":
         return ("I filled in the code from your email. Check the box and "
                 "submit it - or say 'submit' and I will.")

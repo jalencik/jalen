@@ -36,18 +36,43 @@ I will give my answer it should remember and act accordingly."
 
   never    -> refused, and says which site.
   always   -> types it.
-  ask      -> refuses THIS call and tells the brain to ask him. If he says
-              "just this once", the brain passes approved_once=True and
-              nothing is written down. If he says "from now on", the brain
-              calls remember_site_decision first.
+  ask      -> THIS TOOL asks him, out loud, naming the site it read from the
+              address bar: "Type your sign_in_code into newsite.example just
+              this once?" Only his own yes types it, and nothing is written
+              down. "From now on" is remember_site_decision, which asks him
+              too.
+
+IT USED TO BE THE BRAIN'S FLAG. "ask" refused and told the model to ask him
+and call back with approved_once=True - and nothing checked that he had been
+asked, what the question named, or that the page was still that site. The
+model could set the flag and his password went into whatever had focus
+(tests/test_a_secret_goes_only_where_he_said.py reproduced it). The AMBER
+announcement never named a site either: "fill credential. Say stop..."
+
+AND A SECRET BELONGS TO A SITE. Approval says where Jalen may type, never
+what; see "which site a secret is for" in vault.py. A secret tied to
+accounts.google.com is refused on every other host whatever he approved
+there, and one stored before tying existed is tied on first use - after his
+yes to a question naming it and the host.
 """
 from __future__ import annotations
 
 import time
 from typing import Any
 
+from . import interaction
 from .system import IS_WINDOWS
-from .vault import VaultLocked, _normalise_domain, get_secret, site_permission
+from .vault import (
+    VaultLocked,
+    _host_of,
+    _normalise_domain,
+    describe_secret_sites,
+    get_secret,
+    has_secret,
+    secret_binding,
+    site_permission,
+    tie_secret,
+)
 
 
 def current_page_url() -> str:
@@ -69,28 +94,39 @@ def current_page_url() -> str:
 
 def _read_url() -> str:
     """The raw URL, or "" if it cannot be read. Never raises."""
+    return _focused_page()[1]
+
+
+def _focused_page() -> tuple[int, str]:
+    """
+    (window, URL) of the browser window IN FRONT, or (0, "") if the window
+    in front is not a browser or its address bar cannot be read. Never raises.
+
+    The foreground window or nothing. This used to fall back to the FIRST
+    browser window enumerated when the one in front was not a browser at all,
+    so with Notepad or Telegram in front and Chrome behind it, Chrome's
+    address bar was checked and approved and the keystrokes - which go to
+    whatever has focus - went into Notepad or the chat box. The window comes
+    back too, so the typing can check it is still the one he was looking at.
+    """
     try:
+        import ctypes
+
         import uiautomation as auto
 
         from .browsertabs import _windows
 
-        windows = _windows()
-        if not windows:
-            return ""
-        # The FOREGROUND browser window, not the first one enumerated — he is
-        # looking at one particular page and typing into that.
-        import ctypes
-
         foreground = ctypes.windll.user32.GetForegroundWindow()
-        hwnd = next((h for h, _t, _b in windows if h == foreground), windows[0][0])
-
-        control = auto.ControlFromHandle(hwnd)
+        if not foreground or not any(h == foreground for h, _t, _b in _windows()):
+            return 0, ""
+        control = auto.ControlFromHandle(foreground)
         edit = control.EditControl(searchDepth=10)
         if not edit.Exists(1, 0.2):
-            return ""
-        return (edit.GetValuePattern().Value or "").strip()
+            return 0, ""
+        url = (edit.GetValuePattern().Value or "").strip()
+        return (int(foreground), url) if url else (0, "")
     except Exception:
-        return ""
+        return 0, ""
 
 
 def _type(text: str) -> bool:
@@ -118,56 +154,142 @@ def _escape(text: str) -> str:
     return "".join(out)
 
 
+def _question(secret: str, host: str, decision: str, where: str) -> str:
+    """
+    What he is asked before a secret goes into `host`. It names the secret
+    and the host as read from the address bar - so a lookalike is said out
+    loud - and it carries no agreement word ("approved", "right", "fine"):
+    Jalen's own voice coming back through the speakers is parsed by the same
+    _parse_yes_no as his answer, and " approved " is on its YES list.
+    """
+    if decision == "always":
+        return (f"Your {secret} is not tied to any site yet. "
+                f"Tie it to {host} and type it in?")
+    if where == "unbound":
+        return (f"{host} is not on your trusted list, and your {secret} is not "
+                f"tied to any site. Type it into {host} just this once, and "
+                f"tie it to {host}?")
+    return (f"{host} is not on your trusted list. Type your {secret} into it "
+            f"just this once?")
+
+
+def _not_typed(secret: str, host: str, answer: "interaction.Answer") -> str:
+    """Anything but his yes, said as what happened - never as a refusal he did not make."""
+    if answer.outcome == "unavailable":
+        return (f"I have to ask you before typing your {secret} into {host}, "
+                f"and there's no way to ask you right now, so nothing was typed.")
+    if answer.outcome == "timeout":
+        return (f"No answer, so nothing was typed into {host}. He may not have "
+                f"heard the question - don't say he refused.")
+    if answer.outcome == "correction":
+        return (f"Nothing typed. He answered with something else: "
+                f'"{answer.words}". If that tells you what he wants instead, '
+                f"do that - it goes through the safety gate like anything else.")
+    if answer.outcome == "failed":
+        return f"I couldn't ask you about {host}, so nothing was typed."
+    return f"Okay - nothing typed into {host}."
+
+
 def fill_credential(secret: str, approved_once: bool = False) -> str:
     """
     Type a stored secret into the FOCUSED field — AMBER.
 
     He must click the field first. Jalen never picks the field, so this
     cannot put a password somewhere unintended.
+
+    approved_once is [NOT READ]. It was the whole approval for a site he had
+    not approved for good, and it was the model's to set. Accepted so a stale
+    call gets a sentence rather than a TypeError; it grants nothing. What
+    grants a one-time use now is his own spoken yes to a question this tool
+    asks, naming the host it read.
     """
+    del approved_once           # deliberately ignored - see the docstring
     if not IS_WINDOWS:
         return "Windows only."
 
-    url = _read_url()
+    name = (secret or "").strip()
+    window, url = _focused_page()
     if not url:
         return (
             "I can't read which page you're on, so I haven't typed anything. "
             "Click into the browser window and ask again."
         )
-    domain = _normalise_domain(url) or url
+    host = _host_of(url)
+    # site_permission is keyed by _normalise_domain, the binding by the
+    # parsed host. On any address Chrome shows they agree; if they ever do
+    # not, the approval being checked is not the page's, so nothing is typed.
+    if not host or host != _normalise_domain(url):
+        return ("I can't tell for certain which site this page is on, so I "
+                "haven't typed anything.")
 
     decision = site_permission(url)
     if decision == "never":
-        return f"You told me never to fill anything on {domain}. Nothing typed."
-    if decision != "always" and not approved_once:
-        return (
-            f"You haven't approved {domain} yet, so I've typed nothing. Ask him "
-            "whether this is just this once or from now on. If just this once, "
-            "call me again with approved_once. If from now on, call "
-            "remember_site_decision first."
-        )
+        return f"You told me never to fill anything on {host}. Nothing typed."
 
+    # Before he is asked anything: is there something to type at all?
     try:
-        value = get_secret(secret)
+        stored = has_secret(name)
     except VaultLocked:
         return "The vault is locked, so I have nothing to type. Unlock it first."
-    except KeyError:
+    if not stored:
         from .vault import list_secrets
 
-        return f"There's nothing stored called {secret!r}. {list_secrets()}"
+        return f"There's nothing stored called {name!r}. {list_secrets()}"
 
-    if not _type(value):
-        return (
-            f"I couldn't send the keystrokes for {secret}. Nothing was typed — "
-            "check the field still has focus."
-        )
+    where = secret_binding(name, url)
+    if where == "elsewhere":
+        # No spoken yes moves a secret to another site: that yes is exactly
+        # what a lookalike page he once approved would be fishing for.
+        return (f"Your {name} belongs to {describe_secret_sites(name)}, and "
+                f"this page is on {host}, so I haven't typed it. If it really "
+                f"is used here too, add {host} to it in scripts\\vault_setup.py.")
+
+    if decision != "always" or where == "unbound":
+        answer = interaction.confirm(_question(name, host, decision, where))
+        if not answer.yes:
+            return _not_typed(name, host, answer)
+        if where == "unbound" and not tie_secret(name, [host]):
+            return (f"I couldn't write down that your {name} belongs to {host}, "
+                    f"so I didn't type it.")
+
+    # AT THE TYPING, not a question ago: the same window, still on the same
+    # site, and the secret still belongs there. He answered by voice, so
+    # nothing he did should have moved the page - anything that did is not
+    # something he said yes to.
+    now_window, now_url = _focused_page()
+    if (now_window != window or _host_of(now_url) != host
+            or site_permission(now_url) == "never"
+            or secret_binding(name, now_url) != "here"):
+        return (f"The page changed while I was checking, so I didn't type your "
+                f"{name} anywhere. Click into the field on {host} again and ask me.")
+
+    try:
+        value = get_secret(name)
+    except VaultLocked:
+        return "The vault locked itself while I was asking, so nothing was typed."
+    except KeyError:
+        return f"Your {name} isn't in the vault any more, so nothing was typed."
+    try:
+        if not _type(value):
+            return (
+                f"I couldn't send the keystrokes for {name}. Nothing was typed — "
+                "check the field still has focus."
+            )
+    finally:
+        del value               # out of scope with this frame, always
     # The VALUE never appears here. This string reaches the model, the
     # transcript window, the audit log and possibly the speakers.
     lasting = "as agreed" if decision == "always" else "just this once"
-    return (
-        f"Typed your {secret} into the focused field on {domain} ({lasting}). "
+    reply = (
+        f"Typed your {name} into the focused field on {host} ({lasting}). "
         "Check it looks right before you submit."
     )
+    if where == "unbound":
+        reply += f" It's tied to {host} now, so no other site gets it."
+    if decision != "always":
+        reply += (f" If you want {host} trusted from now on, say so and I'll "
+                  f"remember it.")
+    return reply
 
 
 def fill_field(text: str) -> str:

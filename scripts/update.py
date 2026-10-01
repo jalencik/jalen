@@ -48,6 +48,9 @@ PRECIOUS = [
     "data/google_token.json",
     "data/telegram_user.session",
     "data/site_approvals.json",
+    # Which site each secret belongs to. Lost, every secret is untied and
+    # he is asked about each one again - safe, but his answers were real.
+    "data/secret_sites.json",
     "models/hey_jalen.onnx",
 ]
 
