@@ -12,7 +12,7 @@ anyone can re-run, not in a commit message nobody can check. Everything it
 reports comes from data/audit.jsonl and the real Jalen.should_act_on; nothing
 is estimated by a second implementation of the gate.
 
-SIX MEASUREMENTS
+NINE MEASUREMENTS
 
     1. REPLAY. Each logged "ignored" row is put back through should_act_on
        with the state Jalen was in at that moment, rebuilt from the rows
@@ -36,13 +36,29 @@ SIX MEASUREMENTS
     5. ECHO WHILE HE SPEAKS, AND AFTER. The same replies, every form a door
        would admit, fed back 5s and 10s after the reply began, half way
        through, and 2s and 8s after it stopped. 157 of the 823 take 12s or
-       more to say. Anything accepted is Jalen obeying himself. A last line
-       measures what is NOT fixed: the answer path's own 3s tail.
+       more to say. Anything accepted is Jalen obeying himself.
     6. THE CURRENT ERA. The answer window shipped on 2026-09-20 (commit
        05378c4); 97 of the 105 rows are older than it and were refused by a
        gate that no longer exists. The last 8 are the rows the gate as it
        stood just before this change really produced, and they are reported
        on their own line.
+    7. THE ANSWER PATH, BY WHEN THE SOUND BEGAN. Every question of Jalen's,
+       whole, from its middle and its last five words, fed back to the window
+       it opens: a sound that began while he was still on air or inside the
+       3s tail must never be taken for the answer, and the same words that
+       began after the tail must be ("just the last message"). The gate is
+       asked at several delays after the sound, because it is asked after
+       the sentence, the endpoint silence and the transcription.
+    8. HIS REAL REQUESTS AGAINST A REPLY IN THE ROOM. The real sentences a
+       door's shape matches (103), each with the reply that came before it,
+       the longest reply in the log, the one nearest 200 words and a 2,300
+       word read: how many does the echo test refuse? Run the script from an
+       older checkout to get the "before" - the gate is asked only what it
+       knows.
+    9. WHAT WAS ON AIR, COMING BACK. Every reply on a timeline; the sentence
+       playing at five moments of it, that and the next, its last five words,
+       each whole and mangled: how many are taken for him (the number that
+       must be 0). And the cost side: how soon his real answers began.
 
 WHAT IT CANNOT KNOW. Why a microphone window opened, and when his sentence
 began, are not logged, so both are estimated from timing (see _started_at);
@@ -234,7 +250,8 @@ def _overrun_s() -> float:
     return float(CONFIG.get_path("vad.max_utterance_s", 30)) + getattr(app, "ANSWER_STT_SLACK_S", 0.0)
 
 
-def _ask(gate, text: str, *, opened_by: str = "", vouched_by=None) -> bool:
+def _ask(gate, text: str, *, opened_by: str = "", vouched_by=None,
+         began_at: float | None = None) -> bool:
     """Ask with whatever the checkout's gate understands (older ones know less)."""
     params = inspect.signature(type(gate).should_act_on).parameters
     kwargs = {}
@@ -242,6 +259,8 @@ def _ask(gate, text: str, *, opened_by: str = "", vouched_by=None) -> bool:
         kwargs["opened_by"] = opened_by
     if "vouched_by" in params:
         kwargs["vouched_by"] = vouched_by
+    if "began_at" in params and began_at is not None:
+        kwargs["began_at"] = began_at
     return bool(gate.should_act_on(text, False, **kwargs))
 
 
@@ -501,15 +520,22 @@ def echo_while_speaking(rows: list[dict]) -> dict:
     return out
 
 
-def answer_path_echo(rows: list[dict], after_s: float) -> tuple[int, int]:
+def answer_path_echo(rows: list[dict], began_s: float, gate_s: float) -> tuple[int, int]:
     """
-    NOT FIXED, MEASURED. The answer path - the window a QUESTION opens, which
-    has no name and no door - looks back ECHO_TAIL_S (3s) from the end of the
-    question. A question's own words, fed to it `after_s` seconds after the
-    speaker went quiet, with the window open: (forms tried, forms acted on as
-    an answer). At 1s it is the 'echo' figure above; at 3.5s - the median
-    distance between a sound and the gate, endpoint plus transcription - the
-    tail has shut.
+    The answer path - the window a QUESTION opens, which has no name and no
+    door - and a question's own words coming back through the microphone.
+
+    `began_s`  the sound began this many seconds AFTER he stopped talking; a
+               negative number is a sound that began that long BEFORE he
+               stopped, i.e. while he was still on air.
+    `gate_s`   the sentence reached the address gate this many seconds after
+               he stopped: the sentence itself, the endpoint silence and the
+               transcription, so about `began_s` + 3.2 at the median.
+
+    Returns (forms tried, forms acted on as an answer). The gate used to be
+    asked only when it was reached, so a sound that began at 0.5s was judged at
+    3.7s and had left the 3s tail behind: 718 of 718 acted on. It is now told
+    when the sound began (should_act_on's `began_at`).
     """
     from jarvis.app import Expectation
     from jarvis.brain.router import solicits_an_answer
@@ -526,7 +552,8 @@ def answer_path_echo(rows: list[dict], after_s: float) -> tuple[int, int]:
             reply = row["summary"]
             if len(reply.split()) < 3 or not solicits_an_answer(reply):
                 continue
-            ended = clock.now - after_s
+            ended = clock.now - gate_s
+            began = ended + began_s
             for form in {reply, " ".join(reply.split()[len(reply.split()) // 2:]),
                          " ".join(reply.split()[-5:])}:
                 if len(form.split()) < 3:
@@ -538,8 +565,340 @@ def answer_path_echo(rows: list[dict], after_s: float) -> tuple[int, int]:
                 gate._expecting = Expectation(question=reply, turn_id=0, opened_at=ended,
                                               expires_at=ended + answer_s)
                 tried += 1
-                accepted += _ask(gate, form, opened_by="answer", vouched_by=gate._expecting)
+                accepted += _ask(gate, form, opened_by="answer", vouched_by=gate._expecting,
+                                 began_at=began)
     return tried, accepted
+
+
+# ---------------------------------------------------------------------------
+# A SPEAKER WITH A PAST. The gate asks the speaker three things: is he on air,
+# how long since he stopped, and (new) which sentences were on air since a
+# moment. Everything below puts a reply on a timeline at the measured speaking
+# rate (app.SPOKEN_CHARS_PER_SECOND, sentence by sentence as the speaker plays
+# it) and asks the gate about a sound that began at a chosen moment of it.
+# ---------------------------------------------------------------------------
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+# How long one of HIS sentences takes to say, endpoint and transcription: the
+# same figures as _started_at (2.6 words a second NOT MEASURED, 1.4s fast
+# endpoint, 1.8s median transcription over the 349 timing rows).
+_PIPELINE_S = _ENDPOINT_S + _TRANSCRIPTION_S
+
+
+class _Timeline:
+    """A reply being spoken from `began`, sentence by sentence, as the speaker plays it."""
+
+    def __init__(self, reply: str, began: float) -> None:
+        from jarvis.app import SPOKEN_CHARS_PER_SECOND
+        from jarvis.audio.tts import clean_for_speech, split_sentences
+
+        self.began = began
+        self.sentences: list[tuple[str, float, float]] = []
+        at = began
+        for sentence in split_sentences(clean_for_speech(reply)):
+            took = len(sentence) / SPOKEN_CHARS_PER_SECOND
+            self.sentences.append((sentence, at, at + took))
+            at += took
+        self.ends = at
+
+    @property
+    def speaking(self) -> bool:
+        return self.began <= time.monotonic() < self.ends
+
+    def quiet_for(self) -> float:
+        now = time.monotonic()
+        if self.speaking:
+            return 0.0
+        return float("inf") if now < self.began else now - self.ends
+
+    def spoken_since(self, since: float) -> str:
+        now = time.monotonic()
+        return " ".join(text for text, began, ended in self.sentences
+                        if began <= now and ended >= since)
+
+
+_GATE_CLASS = None
+
+
+def _gate_after(reply: str, timeline: "_Timeline", at: float):
+    """A gate in the state it would be in at `at`, with `timeline` as its speaker."""
+    global _GATE_CLASS
+    if _GATE_CLASS is None:
+        _GATE_CLASS = _make_gate_class()
+    gate = _GATE_CLASS()
+    gate.speaker = timeline
+    if at < timeline.ends:
+        # Still being spoken: handed over, not yet filed (the streamed path).
+        gate._last_reply_text = "Okay."
+        gate._last_reply_at = timeline.began - 600.0
+        gate._voice_so_far = reply
+    else:
+        gate._last_reply_text = reply
+        gate._last_reply_at = timeline.ends
+        gate._voice_so_far = ""
+    return gate
+
+
+def paired_door_requests(rows: list[dict]) -> list[tuple[str, str]]:
+    """
+    (what he said, the reply Jalen said just before it) for every sentence of
+    his that a door's SHAPE matches and that does not start with his name - the
+    sentences the doors exist for, and so the ones an echo test must not
+    refuse. All of them were acted on (they are rows of `utterance`, who=user).
+    """
+    from jarvis.brain import router
+
+    last_reply: dict[str, str] = {}
+    out = []
+    for row in rows:
+        if row["kind"] != "utterance":
+            continue
+        if _details(row).get("who") != "user":
+            last_reply[row["session_id"]] = row["summary"]
+            continue
+        text = row["summary"]
+        if router.widened_door(text, "follow_up") and not router.addressed_to_jalen(text):
+            out.append((text, last_reply.get(row["session_id"], "")))
+    return out
+
+
+def _read_aloud_of(replies: list[str], how_many: int = 6) -> str:
+    """The `how_many` longest replies one after the other: what 'read it all' of a long thread sounds like."""
+    longest = sorted(replies, key=lambda r: len(r.split()), reverse=True)[:how_many]
+    return " ".join(longest)
+
+
+def requests_against_replies(rows: list[dict]) -> dict:
+    """
+    HOW MANY REAL REQUESTS DOES THE ECHO TEST REFUSE? Each of the sentences
+    `paired_door_requests` returns is asked of the gate with a reply in the
+    room, in the follow-up window, twice: while the reply is on air (the sound
+    began 60% of the way through it) and after it (the sound began 2s after it
+    stopped, which is inside ECHO_TAIL_S). The same request is paired with
+
+      own        the reply that really came before it
+      longest    the longest reply in the log
+      200 words  the reply nearest 200 words
+      read       the six longest replies one after the other - 'read it all'
+
+    Anything refused is refused by the echo test and nothing else: every one
+    of them was acted on when he said it. {pairing: (asked, refused, [examples])}.
+    """
+    pairs = paired_door_requests(rows)
+    replies = [r["summary"] for r in rows
+               if r["kind"] == "utterance" and _details(r).get("who") != "user"]
+    pairings = {
+        "own": None,
+        "longest": max(replies, key=lambda r: len(r.split())),
+        "200 words": min(replies, key=lambda r: abs(len(r.split()) - 200)),
+        "read": _read_aloud_of(replies),
+    }
+    out: dict = {}
+    with _Clock() as clock:
+        for name, fixed in pairings.items():
+            asked = refused = 0
+            examples: list[str] = []
+            for request, own in pairs:
+                reply = fixed if fixed is not None else own
+                if not reply:
+                    continue
+                for scenario in ("on air", "just after"):
+                    clock.now = 1_000_000.0
+                    probe = _Timeline(reply, clock.now)
+                    sentence_s = len(request.split()) / _WORDS_PER_S
+                    began = (probe.began + 0.6 * (probe.ends - probe.began)
+                             if scenario == "on air" else probe.ends + 2.0)
+                    arrives = began + sentence_s + _PIPELINE_S
+                    clock.now = arrives
+                    gate = _gate_after(reply, probe, arrives)
+                    asked += 1
+                    if not _ask(gate, request, opened_by="follow_up", began_at=began):
+                        refused += 1
+                        examples.append(request[:60])
+            out[name] = (asked, refused, examples)
+    return out
+
+
+def _mangled(form: str) -> list[str]:
+    """What speech recognition makes of a speaker bleeding into a microphone: a word dropped, two dropped, one replaced."""
+    # WORDS, not whitespace tokens: a dash or a "+" standing alone is a token
+    # and not a word, and "- no window is running" has four words to mangle,
+    # not five. The first version split on whitespace and 71 of its "leaks"
+    # were sentences with a dash in them whose one replaced word left 3 of 4.
+    words = _WORD.findall(form)
+    out = []
+    # Only variants of four words or more: below that the leaky rule is not
+    # applied by design (three words are echo only as an exact run), so a
+    # three-word remnant measures the floor and not the rule.
+    for variant in (words[:1] + words[2:],
+                    words[:1] + words[2:3] + words[4:],
+                    words[:2] + ["uh"] + words[3:]):
+        if len(words) >= 5 and len(variant) >= 4:
+            out.append(" ".join(variant))
+    return out
+
+
+def echoes_of_what_is_on_air(rows: list[dict]) -> dict:
+    """
+    HOW MANY ECHOES DOES THE GATE TAKE FOR HIM? Every reply in the log is put on
+    a timeline and what is on air at five moments of it - 15%, 50% and 85% of the
+    way through, and 1s and 2.5s after it stops - comes back through the
+    microphone: the sentence that is playing, that and the next one, its last
+    five words, each whole and with a word dropped, two dropped, one replaced.
+    Forms of fewer than three words are skipped (below the floor nothing is
+    echo, by design).
+
+      doors    only the forms a door would admit (the rest are refused for lacking
+               his name whatever the echo test says), in the follow-up window
+      answer   the forms of a QUESTION, in the answer window that question opens
+               (after it), or - while it is still on air - in barge-in with
+               the previous question's window open
+
+    {"doors": [asked, taken], "answer": [asked, taken], "named": n, "leaked": [...]}
+    `named` counts door forms left out because they start with his name.
+    """
+    from jarvis.app import Expectation
+    from jarvis.brain import router
+    from jarvis.brain.router import solicits_an_answer
+    from jarvis.config import CONFIG
+
+    answer_s = float(CONFIG.get_path("conversation.answer_window_s", 30))
+    replies = [r["summary"] for r in rows
+               if r["kind"] == "utterance" and _details(r).get("who") != "user"]
+    out = {"doors": [0, 0], "answer": [0, 0], "named": 0, "leaked": []}
+    with _Clock() as clock:
+        for reply in replies:
+            clock.now = 1_000_000.0
+            probe = _Timeline(reply, clock.now)
+            if not probe.sentences:
+                continue
+            span = probe.ends - probe.began
+            for point in (0.15 * span, 0.5 * span, 0.85 * span, span + 1.0, span + 2.5):
+                moment = probe.began + point
+                # The sentence playing at `moment` (the last one that had begun), and the next.
+                playing = max((i for i, s in enumerate(probe.sentences) if s[1] <= moment),
+                              default=0)
+                heard = probe.sentences[playing:playing + 2]
+                texts = [heard[0][0], " ".join(s[0] for s in heard)]
+                texts.append(" ".join(_WORD.findall(texts[0])[-5:]))
+                forms = []
+                for text in texts:
+                    forms.append(text)
+                    forms.extend(_mangled(text))
+                for form in forms:
+                    spoken_words = len(_WORD.findall(form))
+                    if spoken_words < 3:
+                        continue
+                    arrives = moment + spoken_words / _WORDS_PER_S + _PIPELINE_S
+                    clock.now = arrives
+                    if router.widened_door(form, "follow_up") is not None:
+                        if router.addressed_to_jalen(form):
+                            # Starts with his name, so the gate never echo-tests
+                            # it: the design premise is that Jalen never begins a
+                            # sentence with it, and 2 real replies ("Hey, Jarvis,
+                            # not Joris...") do. Known, owner-accepted, counted.
+                            out["named"] += 1
+                            continue
+                        gate = _gate_after(reply, probe, arrives)
+                        out["doors"][0] += 1
+                        if _ask(gate, form, opened_by="follow_up", began_at=moment):
+                            out["doors"][1] += 1
+                            out["leaked"].append(("door", round(point, 1), form[:60]))
+                    if solicits_an_answer(reply):
+                        gate = _gate_after(reply, probe, arrives)
+                        if moment >= probe.ends:
+                            # The window the question opened, after it.
+                            gate._expecting = Expectation(
+                                question=reply, turn_id=0, opened_at=probe.ends,
+                                expires_at=probe.ends + answer_s)
+                            window = "answer"
+                        else:
+                            # Still on air: only barge-in opens a window now,
+                            # and the open one is the PREVIOUS question's.
+                            gate._expecting = Expectation(
+                                question="Which one did you mean?", turn_id=0,
+                                opened_at=probe.began - 10.0, expires_at=probe.began + 20.0)
+                            window = "barge"
+                        out["answer"][0] += 1
+                        vouched = gate._expecting if window == "answer" else None
+                        if _ask(gate, form, opened_by=window, vouched_by=vouched, began_at=moment):
+                            out["answer"][1] += 1
+                            out["leaked"].append((window, round(point, 1), form[:60]))
+    return out
+
+
+def how_soon_real_answers_began(rows: list[dict]) -> dict:
+    """
+    THE COST SIDE OF JUDGING BY WHEN THE SOUND BEGAN. A real answer that begins
+    within ECHO_TAIL_S of the end of the question, and that repeats three or
+    more of its words in order (or four-fifths of a four-word answer's
+    vocabulary), is now taken for the question coming back. How many of his
+    real answers are in that position?
+
+    For every sentence of his that follows a question of Jalen's with nothing
+    said in between, within the answer window: when it began (written time
+    minus its length at 2.6 words a second NOT MEASURED, the 1.4s endpoint and
+    the 1.8s median transcription) after the reply ended, and what the gate
+    does with it when it is asked with that onset.
+
+    {"answers": n, "within_tail": n, "refused": n, "gaps": sorted list}
+    """
+    from jarvis.app import ECHO_TAIL_S, Expectation
+    from jarvis.brain.router import solicits_an_answer
+    from jarvis.config import CONFIG
+
+    Gate = _make_gate_class()
+    answer_s = float(CONFIG.get_path("conversation.answer_window_s", 30))
+    reply_end_of: dict[int, float] = {}
+    for i, row in enumerate(rows):
+        if row["kind"] == "utterance" and _details(row).get("who") != "user":
+            end = _epoch(row)
+            for j in range(i + 1, min(i + 8, len(rows))):
+                nxt = rows[j]
+                if nxt["session_id"] != row["session_id"] or nxt["kind"] == "utterance":
+                    break
+                if nxt["summary"].startswith("timing"):
+                    end = max(end, _epoch(nxt))
+                    break
+            reply_end_of[i] = end
+    out = {"answers": 0, "within_tail": 0, "refused": 0, "gaps": [], "refused_examples": []}
+    open_question: dict[str, tuple[str, float]] = {}
+    with _Clock() as clock:
+        for i, row in enumerate(rows):
+            if row["kind"] != "utterance":
+                continue
+            sid = row["session_id"]
+            if _details(row).get("who") != "user":
+                if solicits_an_answer(row["summary"]):
+                    open_question[sid] = (row["summary"], reply_end_of.get(i, _epoch(row)))
+                else:
+                    open_question.pop(sid, None)
+                continue
+            asked = open_question.pop(sid, None)
+            if asked is None:
+                continue
+            question, ended = asked
+            written = _epoch(row)
+            began = _started_at(written, row["summary"], _WORDS_PER_S)
+            gap = began - ended
+            if not 0.0 <= gap < answer_s:
+                continue
+            out["answers"] += 1
+            out["gaps"].append(round(gap, 1))
+            if gap <= ECHO_TAIL_S:
+                out["within_tail"] += 1
+            clock.now = written
+            gate = Gate()
+            gate.speaker = _Voice(ended_at=ended)
+            gate._last_reply_text = question
+            gate._last_reply_at = ended
+            gate._expecting = Expectation(question=question, turn_id=0, opened_at=ended,
+                                          expires_at=ended + answer_s)
+            if not _ask(gate, row["summary"], opened_by="answer", vouched_by=gate._expecting,
+                        began_at=began):
+                out["refused"] += 1
+                out["refused_examples"].append((round(gap, 1), row["summary"][:60]))
+    out["gaps"].sort()
+    return out
 
 
 DOORS = ("misheard-name", "greeting-last", "polite-request")
@@ -753,10 +1112,29 @@ def main() -> int:
               f"to say), every form a door would admit fed back at 5s, 10s, half way, and 2s and 8s after "
               f"it stops: {spoken['tried']} asked ({spoken['on_air']} while he was still on air), "
               f"{spoken['admitted']} acted on")
-        for after_s in (1.0, 3.5, 6.0):
-            asked, took = answer_path_echo(rows, after_s)
-            print(f"answer path (NOT FIXED): a question's own words {after_s:g}s after he stopped, "
-                  f"window open: {took} of {asked} taken for an answer")
+        for began_s, gate_s in ((-1.0, 3.5), (0.5, 3.7), (0.5, 6.0), (0.5, 11.0), (2.5, 6.0),
+                                (3.5, 6.7), (6.0, 9.2)):
+            asked, took = answer_path_echo(rows, began_s, gate_s)
+            where = (f"began {-began_s:g}s before he stopped (still on air)" if began_s < 0
+                     else f"began {began_s:g}s after he stopped")
+            print(f"answer path: a question's own words, {where}, reached the gate "
+                  f"{gate_s:g}s after he stopped, window open: {took} of {asked} taken for an answer")
+        late = how_soon_real_answers_began(rows)
+        if late["answers"]:
+            gaps = late["gaps"]
+            print(f"real answers: {late['answers']} sentences of his that followed a question of "
+                  f"Jalen's within the answer window; by the timing estimate {late['within_tail']} began "
+                  f"within the 3s tail (median gap {gaps[len(gaps) // 2]:g}s); the gate refuses "
+                  f"{late['refused']} of them as his own voice"
+                  + (f": {late['refused_examples']}" if late["refused_examples"] else ""))
+        for name, (asked, refused, examples) in requests_against_replies(rows).items():
+            print(f"real requests vs a reply in the room ({name}): {refused} of {asked} refused"
+                  + (f" - e.g. {examples[:3]}" if examples else ""))
+        taken = echoes_of_what_is_on_air(rows)
+        print(f"echoes of what is on air, whole and mangled: doors {taken['doors'][1]} of "
+              f"{taken['doors'][0]} taken for him, answer path {taken['answer'][1]} of "
+              f"{taken['answer'][0]}" + (f" - e.g. {taken['leaked'][:3]}" if taken["leaked"] else "")
+              + f" ({taken['named']} door forms begin with his name and are never echo-tested)")
 
     if args.show:
         for r in results:

@@ -188,7 +188,11 @@ def test_the_one_line_status_questions_still_get_the_one_line_status(router, phr
 @pytest.mark.parametrize("phrase, name", [
     ("close the calculator", "calculator"),
     ("close calculator", "calculator"),
-    ("close my browser", "browser"),
+    # "my browser" was here until "browser" became a generic noun
+    # (test_close_commands_never_name_a_generic_noun): close_app matches window
+    # TITLES and no title says "browser", so it could only answer "I can't find
+    # a window called browser". Same article, a real name:
+    ("close my chrome", "chrome"),
     ("quit the notepad", "notepad"),
     ("close the calculator app", "calculator"),
     ("exit a calculator", "calculator"),
@@ -202,7 +206,7 @@ def test_close_names_the_app_without_the_article(router, phrase, name):
 @pytest.mark.parametrize("phrase, name", [
     ("switch to the calculator", "calculator"),
     ("bring up the calculator", "calculator"),
-    ("focus my browser", "browser"),
+    ("focus my chrome", "chrome"),   # was "my browser": now a generic noun, see above
     ("switch to chrome", "chrome"),
 ])
 def test_switch_names_the_window_without_the_article(router, phrase, name):

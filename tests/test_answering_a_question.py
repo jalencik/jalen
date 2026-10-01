@@ -107,6 +107,7 @@ class _Gate:
     _expect_an_answer = Jalen._expect_an_answer
     _forget_expectation = Jalen._forget_expectation
     _sounds_like_its_own_voice = Jalen._sounds_like_its_own_voice
+    _echoes_the_confirmation = Jalen._echoes_the_confirmation
 
     def asked(self, question: str, *, window_s: float = 30.0, turn_id: int = 1):
         """Jalen finished saying `question` just now."""

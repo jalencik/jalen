@@ -240,6 +240,10 @@ SPOKEN_CHARS_PER_SECOND = 22.4
 # unicode speech recognition emits — is a separator.
 _SPOKEN_WORD = re.compile(r"[\w']+", re.UNICODE)
 
+# "Yes, Boss?" as the words the echo test compares - the one two-word reply
+# that is refused when it comes back whole. See _sounds_like_its_own_voice.
+_NAME_ACK_WORDS = tuple(_SPOKEN_WORD.findall(NAME_ACK.lower()))
+
 # HOW LONG JALEN'S OWN VOICE CAN STILL BE ARRIVING.
 #
 # Echo is an ACOUSTIC event with a physical bound, and that bound is the
@@ -251,9 +255,25 @@ _SPOKEN_WORD = re.compile(r"[\w']+", re.UNICODE)
 # without saying the name, so the corpus contains almost no bare
 # option-answers to be wrong about.
 #
-# Three seconds covers the tail of playback plus whatever the microphone
-# had buffered. A person answering a question takes longer than that
-# essentially always; a speaker bleeding into a microphone never does.
+# Three seconds is meant to cover the tail of playback plus whatever the
+# microphone had buffered. NOT MEASURED: the audio is not kept, so the real
+# tail of this room cannot be read from data/audit.jsonl - three seconds is a
+# judgement, and so is "a person answering takes longer than that
+# essentially always". What the log does give is how soon his real answers
+# begin: of the 124 that followed a question within its window, the timing
+# estimate puts 17 inside this tail, and none of the 17 repeats the question
+# (scripts/measure_address_gate.py, how_soon_real_answers_began).
+#
+# IT IS APPLIED TO WHEN THE SOUND BEGAN, NOT TO WHEN THE GATE IS ASKED. The
+# gate is asked after the sentence has ended, the endpoint silence and the
+# transcription - 3.2s after the sound ENDS at the median (1.4s of endpoint,
+# 1.8s of transcription), and the sentence itself comes before that - so a
+# tail counted from the moment of asking had shut before a question's own
+# echo reached it, and Jalen took his own question for the answer to itself:
+# 718 of 718 question echoes that began 0.5s after he stopped, once 3.7s had
+# passed. run() now stamps when the microphone window opened (`began_at`) and
+# the gate asks whether his voice was on air, or had stopped less than this
+# long before, at THAT moment. See Jalen._sounds_like_its_own_voice.
 ECHO_TAIL_S = 3.0
 
 # HOW LONG AFTER AN ANSWER WINDOW CLOSES A SENTENCE THAT BEGAN INSIDE IT CAN
@@ -294,6 +314,12 @@ ANSWER_STT_SLACK_S = 5.0
 # the ANSWER path would refuse "just the last message" to "...or just the last
 # message?" for twelve seconds. Jalen.__init__ recomputes it from the shipped
 # vad.silence_ms.
+#
+# run() now tells the gate WHEN THE SOUND BEGAN (`began_at`), which is what
+# the endpoint and the transcription were being allowed for. The doors keep
+# this tail as their floor - nothing refused before is let in - and the answer
+# path, which cannot have it, counts ECHO_TAIL_S from the sound's onset
+# instead. It is the whole tail for a caller that does not say.
 ECHO_REACHES_THE_GATE_S = ECHO_TAIL_S + 4.0 + ANSWER_STT_SLACK_S
 
 # THE LEAKY ECHO RULE, FOR AN ANSWER TO "...Confirm?". Four or more words of
@@ -724,6 +750,31 @@ class Jalen:
         self._note_said(text)
         threading.Thread(target=self.speaker.say, args=(spoken,), daemon=True).start()
 
+    def _read_aloud(self, text: str) -> None:
+        """
+        "Read it all": speak the whole of `text`, and tell the address gate.
+
+        This used to call speaker.say() directly, so for as long as it was on
+        air - minutes, for a long thread - the gate's only record of what
+        Jalen was saying was whatever short line a turn had said since: a
+        door sentence quoted from the read was compared against the wrong
+        text. It goes through _note_voice like a streamed reply, and
+        what the speaker really plays is recorded by the speaker itself
+        (Speaker.spoken_since), whatever is said.
+
+        Not filed as the last reply: nothing was asked, and a read that ends
+        in a question must not open an answer window. Handed over, and taken
+        back when the read is over - unless a reply that began meanwhile has
+        replaced it, which is then left alone.
+        """
+        self._note_voice(text)
+        handed = self._voice_so_far
+        try:
+            self.speaker.say(text)
+        finally:
+            if self._voice_so_far == handed:
+                self._voice_so_far = ""
+
     def say_blocking(self, text: str) -> None:
         """
         Say it and wait until it has actually been said.
@@ -807,7 +858,7 @@ class Jalen:
         if stopped:
             raise RuntimeError("cancelled by user")
 
-    def _echoes_the_confirmation(self, text: str) -> bool:
+    def _echoes_the_confirmation(self, text: str, began_at: float | None = None) -> bool:
         """
         Is this the tail of "...Confirm?" coming back through the microphone?
 
@@ -823,14 +874,33 @@ class Jalen:
         THE ENDING NEED NOT BE EXACT. Four or more words, 80% of them the
         question's own, is the echo too, for the door's longer window: see
         _CONFIRM_ECHO_SHARE for why, and for what was measured.
+
+        TWO CLOCKS. When the sound's onset is known (`began_at`, as in
+        _sounds_like_its_own_voice) every rule below is counted to when the
+        SOUND began, within ECHO_TAIL_S, and not to when this is asked, which
+        is after the endpoint silence and the transcription: counted from
+        there, an echo that began half a second after the question finished
+        arrived at 3.2 s, had left the 3 s behind, and approved the action;
+        and a "confirm" that began after the tail was really him. When it is
+        not known (typed text, or process() asking after the gate did) the
+        gate's clock is all there is, and the door's longer window
+        (_door_echo_tail_s, sized to include the endpoint and the STT)
+        applies: the safe way to be wrong, since an ignored "confirm" only
+        times out and cancels.
         """
-        waited = time.monotonic() - getattr(self, "_confirm_asked_at", 0.0)
+        now = time.monotonic()
+        asked_at = getattr(self, "_confirm_asked_at", 0.0)
+        if began_at is None:
+            waited = now - asked_at
+            window = getattr(self, "_door_echo_tail_s", ECHO_REACHES_THE_GATE_S)
+        else:
+            waited = began_at - asked_at
+            window = ECHO_TAIL_S
         heard = _SPOKEN_WORD.findall((text or "").lower())
         if not heard:
             return False
         asked = _SPOKEN_WORD.findall((getattr(self, "_confirm_question", "") or "").lower())
         vocabulary = set(asked)
-        window = getattr(self, "_door_echo_tail_s", ECHO_REACHES_THE_GATE_S)
 
         # AN ECHO OF THE QUESTION CANNOT CONTAIN A PLAIN YES OR NO THAT THE
         # QUESTION DOES NOT. A real answer usually does. So a yes/no word
@@ -842,6 +912,16 @@ class Jalen:
             return False
         if (waited <= ECHO_TAIL_S and len(heard) <= len(asked)
                 and asked[-len(heard):] == heard):
+            return True
+        # A MANGLED echo of "...Confirm?" is still the word "confirm", and
+        # " confirm " is on the YES list: "Confirmed.", "confirm it" and
+        # "close app notepad confirm" (one word off the exact tail) all
+        # reached _parse_yes_no and approved the RED action, found by the
+        # second independent review of the listening work. A word that starts
+        # with "confirm" and no plain yes/no beside it, inside the window, is
+        # the question coming back; he says "yes". Cost: a bare "confirm" as
+        # the answer is ignored, the confirmation times out and cancels.
+        if waited <= window and any(word.startswith("confirm") for word in heard):
             return True
         if waited <= window:
             # Every word is the question's own: it is the question coming
@@ -1277,7 +1357,7 @@ class Jalen:
             if not self._last_full_text:
                 return "There's nothing on screen I cut short."
             threading.Thread(
-                target=self.speaker.say, args=(self._last_full_text,),
+                target=self._read_aloud, args=(self._last_full_text,),
                 daemon=True, name="jalen-read-all",
             ).start()
             return None
@@ -2099,6 +2179,14 @@ class Jalen:
         # that began inside it has outlived it by then. Reset at every place
         # `listening` becomes True, exactly like `opened_by`.
         vouched_by = None
+        # AND WHEN THE SOUND BEGAN, which the address gate cannot see for
+        # itself: it is asked after the sentence, the endpoint silence and the
+        # transcription, 3.2s later at the median. The echo test is a question
+        # about whether his voice was in the room WHEN THE SOUND BEGAN, so
+        # this is handed to it (the `began_at` of the address gate). Stamped
+        # at every place `listening` becomes True, next to `opened_by`: a
+        # window opened without it would be judged by the last one's moment.
+        sound_began_at = time.monotonic()
         follow_up_until = 0.0
         follow_up_s = float(self.cfg.get_path("conversation.follow_up_timeout_s", 12))
         barge_in = bool(self.cfg.get_path("conversation.barge_in", True))
@@ -2243,6 +2331,7 @@ class Jalen:
                         wake_initiated = True
                         opened_by = "wake"
                         vouched_by = None
+                        sound_began_at = time.monotonic()
                         self.orb.set_state("listening")
                         self.collector._reset()
                         continue
@@ -2259,6 +2348,7 @@ class Jalen:
                         wake_initiated = True
                         opened_by = "wake"
                         vouched_by = None
+                        sound_began_at = time.monotonic()
                         self.orb.set_state("listening")
                         self.collector._reset()
                     continue
@@ -2340,6 +2430,9 @@ class Jalen:
                     listening = True
                     opened_by = "barge"
                     vouched_by = None     # a barge-in vouches for nothing
+                    # He was on air when it began: the sound is the one that
+                    # cut him off.
+                    sound_began_at = time.monotonic()
                     # NOT wake_initiated. This used to be True, reasoning
                     # that he had "talked over it on purpose" — but
                     # barge-in fires on any SOUND above the threshold, not
@@ -2396,6 +2489,8 @@ class Jalen:
                         # reasons above let it in. Taken here, not when the
                         # sentence is over: by then it may have closed.
                         vouched_by = self._open_expectation()
+                        # And WHEN: this frame is the first of the sound.
+                        sound_began_at = time.monotonic()
                         # _refresh_orb, NOT set_state("listening"). This is
                         # the line he saw: a noise during the follow-up window
                         # painted the orb blue while a turn was still working,
@@ -2406,6 +2501,7 @@ class Jalen:
                         wake_initiated = True
                         opened_by = "wake"
                         vouched_by = None
+                        sound_began_at = time.monotonic()
                         follow_up_until = 0.0
                         self.orb.set_state("listening")
                         # Do NOT drain here. The frames still queued behind
@@ -2545,7 +2641,7 @@ class Jalen:
                     self._awaiting_confirmation or self._awaiting_stop
                     or self._awaiting_reply or self._rating_is_pending()
                     or self._expectation_open() or outlived
-                    or self._continues_last_utterance(text)
+                    or self._continues_last_utterance(text, began_at=sound_began_at)
                 )
                 # WHICH question it answers, taken before the gate closes it,
                 # so the row below can say whether it came through the window
@@ -2573,14 +2669,15 @@ class Jalen:
                 # was, and not held on to for four more seconds.
                 if (not self.collector.was_patient and looks_unfinished(text)
                         and self.should_act_on(text, wake_initiated, opened_by=opened_by,
-                                               vouched_by=vouched_by, consume=False)):
+                                               vouched_by=vouched_by, consume=False,
+                                               began_at=sound_began_at)):
                     self.collector.resume(utterance)
                     listening = True
                     self.orb.set_state("listening")
                     continue
 
                 if not self.should_act_on(text, wake_initiated, opened_by=opened_by,
-                                          vouched_by=vouched_by):
+                                          vouched_by=vouched_by, began_at=sound_began_at):
                     self.audit.write(
                         "system",
                         summary="ignored - not addressed to Jalen",
@@ -2733,7 +2830,7 @@ class Jalen:
     # can defeat.
     def should_act_on(self, text: str, wake_initiated: bool,
                       opened_by: str = "", vouched_by=None,
-                      consume: bool = True) -> bool:
+                      consume: bool = True, began_at: float | None = None) -> bool:
         """
         Three ways through, and the middle one is the one he chose when asked.
 
@@ -2771,6 +2868,15 @@ class Jalen:
         question he is answering. run() asks that first of a sentence that
         looks unfinished, which it may put back and ask about again whole.
 
+        `began_at` is when the SOUND began (time.monotonic), which the gate
+        cannot see for itself: it is asked after the sentence, the endpoint
+        silence and the transcription. Every way in that has no name to vouch
+        for it - the answer window, the stitched continuation, the doors, an
+        answer that outlived its window - refuses his own voice, and his voice
+        is judged as it was when the sound began. See
+        _sounds_like_its_own_voice. Callers that do not know pass nothing and
+        get the older clock, which starts when the gate is asked.
+
         Rejection is SILENT at the call site, deliberately. Announcing "I
         didn't catch that" to a room that was not talking to him is the
         exact self-inflicted interruption this exists to end — and the
@@ -2779,6 +2885,21 @@ class Jalen:
         """
         if wake_initiated:
             return True
+        # THE QUESTION'S OWN ENDING is not the answer to it. process() asks
+        # this too, but only with the clock of the moment it is asked; here
+        # the sound's own onset is known, and "Confirm" is on the YES list.
+        if self._awaiting_confirmation and self._echoes_the_confirmation(
+                text, began_at=began_at):
+            return False
+        # The ask_user question and the AMBER "say stop" window used to admit
+        # ANY sound, so the question coming back through the speakers was
+        # taken for the answer (reproduced at the gate at 0.3, 1 and 3.5 s;
+        # not seen in the log: 0 of 11 ask_user, 0 of 50 announcements). The
+        # same test every other way in without his name already runs; "stop"
+        # and a one-word answer are under its three-word floor and pass.
+        if (self._awaiting_stop or self._awaiting_reply) and not self._awaiting_confirmation \
+                and self._sounds_like_its_own_voice(text, began_at=began_at):
+            return False
         if self._awaiting_confirmation or self._awaiting_stop or self._awaiting_reply:
             return True
         # NEVER ITS OWN VOICE, whatever comes below. Checked before the two
@@ -2790,7 +2911,7 @@ class Jalen:
         # whereas a non-numeric utterance here falls straight through to the
         # router and the brain as a command.
         if (self._rating_is_pending() or self._expectation_open()) \
-                and self._sounds_like_its_own_voice(text):
+                and self._sounds_like_its_own_voice(text, began_at=began_at):
             return False
         if self._rating_is_pending():
             return True
@@ -2841,7 +2962,7 @@ class Jalen:
         # this needs.
         door_tail = getattr(self, "_door_echo_tail_s", ECHO_REACHES_THE_GATE_S)
         if vouched_by is not None and self._window_outlived_by_the_sentence(vouched_by):
-            if self._sounds_like_its_own_voice(text, tail_s=door_tail):
+            if self._sounds_like_its_own_voice(text, tail_s=door_tail, began_at=began_at):
                 return False
             if consume:
                 self._forget_expectation()
@@ -2858,7 +2979,7 @@ class Jalen:
         # the fragment OPENS like a continuation ("and also...", "to my
         # channel") or what he said last ENDED like one ("...send it to").
         # Noise satisfies neither.
-        if self._continues_last_utterance(text):
+        if self._continues_last_utterance(text, began_at=began_at):
             return True
         # THE EMERGENCY STOP IS EXEMPT, and it has to be.
         #
@@ -2887,10 +3008,11 @@ class Jalen:
         # (ECHO_REACHES_THE_GATE_S). The test runs only for a sentence a door
         # would admit, so the ordinary refusal stays as cheap as it was.
         if widened_door(text, opened_by) is not None:
-            return not self._sounds_like_its_own_voice(text, tail_s=door_tail)
+            return not self._sounds_like_its_own_voice(
+                text, tail_s=door_tail, began_at=began_at)
         return False
 
-    def _continues_last_utterance(self, text: str) -> bool:
+    def _continues_last_utterance(self, text: str, began_at: float | None = None) -> bool:
         """Is this the rest of the sentence he was already saying?"""
         window = float(self.cfg.get_path("conversation.stitch_window_s", 8))
         if not self._last_user_text:
@@ -2900,8 +3022,10 @@ class Jalen:
         # NEVER ITS OWN VOICE, whatever else is true. Checked first because
         # the dangling-tail branch below is the one place a sentence can get
         # through without opening like a continuation at all, and the echo
-        # is the failure that feeds itself.
-        if self._sounds_like_its_own_voice(text):
+        # is the failure that feeds itself. Judged when the sound began, like
+        # every other way in without his name: a reply that opens with "and"
+        # ("And that is the end of the letter.") is a continuation by shape.
+        if self._sounds_like_its_own_voice(text, began_at=began_at):
             return False
         if is_continuation(text):
             return True
@@ -3165,7 +3289,8 @@ class Jalen:
         return time.monotonic() <= pending.expires_at + self._answer_overrun_s
 
     # ------------------------------------------------- is that him, or us?
-    def _sounds_like_its_own_voice(self, text: str, tail_s: float | None = None) -> bool:
+    def _sounds_like_its_own_voice(self, text: str, tail_s: float | None = None,
+                                   began_at: float | None = None) -> bool:
         """
         Is this the question coming back through the microphone?
 
@@ -3180,25 +3305,44 @@ class Jalen:
         TWO RULES, AND THE THREE-WORD FLOOR IS THE IMPORTANT PART.
 
             contiguous  three or more words appearing in that order inside
-                        the reply. Catches both the whole sentence and any
-                        tail of it.
-            leaky       four or more words of which 85% appear in the reply
-                        at all. Speech recognition of a speaker bleeding
+                        what Jalen said - the reply as filed, what has been
+                        handed to the speaker so far, the question, and what
+                        the speaker really played. Catches both the whole
+                        sentence and any tail of it.
+            leaky       four or more words of which 80% appear in what was
+                        ON AIR in the last few seconds: the sentences the
+                        speaker played (Speaker.spoken_since), not the whole
+                        reply. Speech recognition of a speaker bleeding
                         through a microphone drops and mangles words, so an
-                        exact run is not always there to find.
+                        exact run is not always there to find. Against the
+                        whole reply it refused a request whenever its words
+                        were somewhere in a long read - 60 of 206 real ones
+                        after a 2,300 word read - because the vocabulary of a
+                        long text is most of English.
 
-        Under three words, nothing is treated as echo. "ChatGPT or Gemini?"
-        invites the answer "ChatGPT", and a filter eager enough to catch a
-        two-word echo would reject the one answer the question asked for.
+        Under three words, nothing is treated as echo - "ChatGPT or Gemini?"
+        invites the answer "ChatGPT", and "Send it?" is answered "Send it." -
+        with ONE exception, the reply the rule was written for: "Yes, Boss?"
+        (router.NAME_ACK), which nobody answers by saying it back, and which
+        a speaker bleeding into a microphone returns as "Yes, boss." and cost
+        a model turn. It used to apply to any reply of two words, and refused
+        "Send it." five seconds after "Send it?".
 
-        Measured against the real corpus in data/audit.jsonl: 0 of the 853
-        genuine user utterances is refused when paired with the reply that
-        actually preceded it, and every one of the 725 question-shaped
-        replies is refused when fed back whole, from its midpoint, and as
-        its last five words. That second figure is reproducible from the
-        log; an earlier version of this docstring cited "978 of 978" from a
-        scratch script that is not in the repository, which a review
-        correctly called unauditable.
+        Measured against the real corpus in data/audit.jsonl (scripts/
+        measure_address_gate.py prints every figure below; each is a test
+        that skips without the log, $JALEN_AUDIT_LOG). His 103 real
+        door-shaped requests, each asked twice - while a reply is on air and
+        2s after it - are refused 0 of 166 times against the reply that
+        really came before them (83 have one) and 0 of 206 against a 200
+        word reply, the longest in the log and a 2,300 word read: 2, 5 and
+        60 before the speaker kept what it played. What was on air - the
+        sentence playing, that and the next, its last five words, whole and
+        with a word dropped, two dropped or one replaced - comes back as
+        12,296 forms in the answer window and in barge-in, from 15% of the
+        way through a reply to 2.5s after it: 0 taken for an answer (8,663
+        before the sound's onset was known), and 0 of 18 door forms. Of the
+        124 real answers that followed a question, 17 began inside the tail
+        by the timing estimate and none of them is refused.
 
         TIME IS THE GATE, AND TEXT IS ONLY THE TEST. An independent review
         of the first version of this found both halves of that wrong:
@@ -3229,27 +3373,47 @@ class Jalen:
         filed when it has finished, what has been handed over so far
         (`_voice_so_far`) is compared too.
 
+        WHEN THE SOUND BEGAN, NOT WHEN THE GATE IS ASKED. A second independent
+        review found the answer path still counting its 3 seconds from the
+        moment of asking: the gate is asked after the sentence, the endpoint
+        silence and the transcription - 3.2s after the sound ends at the
+        median, and the sentence itself comes first - so an echo of a
+        QUESTION that began half a second after he stopped was
+        judged at 3.7s, had left the tail behind, and was taken for the
+        answer to itself: 718 of 718 in the log from 3.5s on. `began_at` is
+        when run() saw the sound that opened the window, and his voice is a
+        candidate when the sound began while he was on air or less than
+        `tail` after he stopped:
+
+            near  <=>  he stopped (or was still speaking) less than `tail`
+                       before the sound began
+                  <=>  quiet_for() <= tail + (now - began_at)
+
+        "Just the last message" said after the tail is an answer, whatever
+        the pipeline takes; said inside it, it is his question coming back.
+        No new constant: ECHO_TAIL_S is the same 3 seconds, now counted from
+        the right moment. The doors keep the longer `tail_s` they were given
+        and never get less than the onset says (max of the two), so no tail
+        is shorter than it was. A caller that does not know when the sound
+        began passes nothing and gets the older clock.
+
         `tail_s` is ECHO_TAIL_S for the answer path, and the doors pass the
-        longer ECHO_REACHES_THE_GATE_S. NOT FIXED, found while measuring it:
-        even 3s from the end is shorter than the pipeline - endpoint silence
-        and transcription put the gate 3.2s after the sound at the median - so
-        an echo of a QUESTION usually reaches the gate after the answer path's
-        tail has shut. Lengthening it would refuse "just the last message" as
-        an answer to "...or just the last message?"; the fix is to judge by
-        when the sound BEGAN, which needs a measured physical tail the log
-        cannot give (the audio is not kept).
+        longer ECHO_REACHES_THE_GATE_S.
         """
         now = time.monotonic()
         tail = ECHO_TAIL_S if tail_s is None else tail_s
-        # The longest any rule below looks back. Only the two-word rule uses
-        # more than `tail`: it can afford to, because no answer is a two-word
-        # reply said back.
+        if began_at is not None:
+            tail = max(tail, ECHO_TAIL_S + max(0.0, now - began_at))
+        # The longest any rule below looks back. Only the "Yes, Boss?" rule
+        # uses more than `tail`: it can afford to, because nobody answers
+        # that by saying it back.
         far = max(tail, getattr(self, "_door_echo_tail_s", ECHO_REACHES_THE_GATE_S))
         # `getattr`, not attribute access: the speaker and the streamed text
         # are new, and every test double built before them has neither. A
         # double without a speaker keeps the older clock - since the reply
         # was handed over - which is exactly what it always had.
-        quiet_for = getattr(getattr(self, "speaker", None), "quiet_for", None)
+        speaker = getattr(self, "speaker", None)
+        quiet_for = getattr(speaker, "quiet_for", None)
         since_voice = quiet_for() if callable(quiet_for) else now - self._last_reply_at
         since_voice = min(since_voice, now - self._last_reply_at)
         candidates = []                       # (what he said, within `tail`?)
@@ -3262,46 +3426,65 @@ class Jalen:
         pending = self._expecting
         if pending is not None and now - pending.opened_at <= far:
             candidates.append((pending.question, now - pending.opened_at <= tail))
+        # WHAT WAS REALLY ON AIR since `tail` ago: the sentences the speaker
+        # played, which is what can be in the room. The reply as filed is
+        # often longer than what was spoken (the short version of a long
+        # read, "a link" for an address) and always more than what is in the
+        # air now. "" from a speaker that keeps no record.
+        spoken_since = getattr(speaker, "spoken_since", None)
+        on_air = spoken_since(now - tail) if callable(spoken_since) else ""
+        if not isinstance(on_air, str):
+            on_air = ""
 
         heard_words = _SPOKEN_WORD.findall((text or "").lower())
         span = len(heard_words)
 
-        for said, near in candidates:
+        # "YES, BOSS?" HEARD BACK WHOLE, and only that. It is what a bare wake
+        # word is answered with, and its echo - "Yes, boss." - is two words,
+        # below the floor under which nothing is echo, so it was accepted as
+        # the answer to its own question and cost a model turn. The floor
+        # protects an ANSWER that happens to use the words the question
+        # offered ("ChatGPT" to "ChatGPT or Gemini?", "Send it." to "Send
+        # it?"), so the rule names the one reply it was written for rather
+        # than a length. Real log: 0 of 50 two-word replies were followed by
+        # the reply said back. It looks back as far as the doors do.
+        if span and span % 2 == 0:
+            for said, _near in candidates:
+                if tuple(_SPOKEN_WORD.findall((said or "").lower())) == _NAME_ACK_WORDS \
+                        and heard_words == list(_NAME_ACK_WORDS) * (span // 2):
+                    return True
+        if span < 3:
+            return False
+
+        # AN EXACT RUN of three or more words, anywhere in what he said.
+        near_texts = [said for said, near in candidates if near]
+        if on_air:
+            near_texts.append(on_air)
+        for said in near_texts:
             said_words = _SPOKEN_WORD.findall((said or "").lower())
-            if not said_words:
-                continue
-            # A TWO-WORD REPLY HEARD BACK WHOLE. "Yes, Boss?" is what a bare
-            # wake word is answered with, and its echo - "Yes, boss." - is two
-            # words, below the floor under which nothing is echo, so it was
-            # accepted as the answer to its own question and cost a model turn.
-            # The floor protects an ANSWER that happens to use words the
-            # question offered ("ChatGPT" to "ChatGPT or Gemini?"); nobody
-            # answers a two-word reply by saying it back, so this one looks
-            # back as far as the doors do.
-            if len(said_words) == 2 and span and span % 2 == 0 \
-                    and heard_words == said_words * (span // 2):
-                return True
-            if not near or span < 3:
-                continue
             for start in range(len(said_words) - span + 1):
                 if said_words[start:start + span] == heard_words:
                     return True
-            # EIGHTY PERCENT, AND THE TWO DECIMAL PLACES ARE THE WHOLE
-            # POINT. At 85% a five-word echo with one mangled word scores
-            # 0.83 and got through — "um which one did you mean" was not
-            # caught, which is precisely the case the rule exists for. At
-            # "one word of slack" a genuine four-word answer gets caught:
-            # "eight out of ten" shares out/of/ten with "how do you rate my
-            # work out of ten?", scores 3 of 4, and would have been refused
-            # as Jalen's own voice. 0.80 separates them:
-            #
-            #     um which one did you mean      5/6 = 0.83   echo
-            #     witch one did you mean         4/5 = 0.80   echo
-            #     eight out of ten               3/4 = 0.75   his answer
-            if span >= 4:
-                vocabulary = set(said_words)
-                hits = sum(1 for word in heard_words if word in vocabulary)
-                if hits / span >= 0.80:
+
+        # EIGHTY PERCENT, AND THE TWO DECIMAL PLACES ARE THE WHOLE POINT. At
+        # 85% a five-word echo with one mangled word scores 0.83 and got
+        # through - "um which one did you mean" was not caught, which is
+        # precisely the case the rule exists for. At "one word of slack" a
+        # genuine four-word answer gets caught: "eight out of ten" shares
+        # out/of/ten with "how do you rate my work out of ten?", scores 3 of
+        # 4, and would have been refused as Jalen's own voice. 0.80
+        # separates them:
+        #
+        #     um which one did you mean      5/6 = 0.83   echo
+        #     witch one did you mean         4/5 = 0.80   echo
+        #     eight out of ten               3/4 = 0.75   his answer
+        #
+        # AGAINST WHAT WAS ON AIR, not the whole reply, whenever the speaker
+        # can say what that was: a long read has most of English in it.
+        if span >= 4:
+            for said in ([on_air] if on_air else near_texts):
+                vocabulary = set(_SPOKEN_WORD.findall((said or "").lower()))
+                if vocabulary and sum(1 for w in heard_words if w in vocabulary) / span >= 0.80:
                     return True
         return False
 

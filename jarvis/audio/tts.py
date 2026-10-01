@@ -15,6 +15,7 @@ Two edge-tts realities worth knowing:
 from __future__ import annotations
 
 import asyncio
+import collections
 import concurrent.futures as _cf
 import io
 import queue
@@ -121,6 +122,18 @@ class Speaker:
         # know, because during a streamed reply that thread is the only one
         # that can speak. See say_now() for the deadlock this prevents.
         self._active_stream: "SpeechStream | None" = None
+        # WHAT WAS PLAYED, a sentence at a time, and when - see spoken_since.
+        # Each entry is [text, began, ended]; `ended` is None while it plays.
+        self._played: "collections.deque[list]" = collections.deque(maxlen=self.PLAYED_KEPT)
+        self._played_lock = threading.Lock()
+
+    # How many played sentences are remembered. A sentence is at most 240
+    # characters (split_sentences) - 11 seconds at the measured 22.4 characters
+    # a second - and the address gate asks about the last 3 to 12 seconds, or
+    # up to 36 for the slowest transcription in the log. 200 sentences is
+    # minutes of speech at any length of sentence, a few kilobytes. NOT
+    # MEASURED beyond that: it only has to be longer than the look-back.
+    PLAYED_KEPT = 200
 
     # --------------------------------------------------------------- control
     @property
@@ -245,6 +258,45 @@ class Speaker:
         return pcm, rate
 
     # ------------------------------------------------------------------ play
+    def _play_sentence(self, text: str, pcm: np.ndarray, rate: int) -> bool:
+        """
+        Play one sentence AND KEEP A RECORD THAT IT WAS ON AIR.
+
+        The address gate refuses a sentence that is Jalen's own voice coming
+        back through the microphone, and it can only do that against what was
+        really in the room. It used to compare with the reply as a whole, which
+        for a long read is most of the English language: every word of an
+        ordinary request is somewhere in 2,300 words, so requests were refused
+        as echo (60 of 206 real ones against a long read, in the replay in
+        scripts/measure_address_gate.py). What was on air in the last few
+        seconds is a handful of sentences.
+
+        Every sentence the speaker plays goes through here - say(), a stream, an
+        urgent line - and `_play` is called from nowhere else. `text` is what
+        was SPOKEN, not what the reply said: the short version of a long reply,
+        "a link" for an address.
+        """
+        entry = [text, time.monotonic(), None]
+        with self._played_lock:
+            self._played.append(entry)
+        try:
+            return self._play(pcm, rate)
+        finally:
+            # Also when it was cut off: that is when it left the room.
+            entry[2] = time.monotonic()
+
+    def spoken_since(self, since: float) -> str:
+        """
+        The sentences that were on air at any moment from `since` (a
+        time.monotonic value) until now, in the order they were said, one
+        space between them. A sentence still being played is on air; one that
+        was cut off by barge-in ended when it was cut. "" if there are none.
+        """
+        with self._played_lock:
+            kept = list(self._played)
+        return " ".join(text for text, _began, ended in kept
+                        if ended is None or ended >= since)
+
     def _play(self, pcm: np.ndarray, rate: int) -> bool:
         """Play, checking for interrupt between chunks. False = interrupted."""
         import sounddevice as sd
@@ -516,7 +568,7 @@ class Speaker:
             if rendered is None:
                 continue  # one bad sentence shouldn't kill the whole reply
             pcm, rate = rendered
-            if not self._play(pcm, rate):
+            if not self._play_sentence(sentence, pcm, rate):
                 return False
         return True
 
@@ -550,7 +602,7 @@ class Speaker:
                 if rendered is None:
                     continue
                 pcm, rate = rendered
-                if not self._play(pcm, rate):
+                if not self._play_sentence(sentences[index], pcm, rate):
                     return False
             return True
 
@@ -773,7 +825,7 @@ class SpeechStream:
                 if rendered is not None:
                     pcm, rate = rendered
                     self._first_audio.set()
-                    sp._play(pcm, rate)
+                    sp._play_sentence(item.text, pcm, rate)
                     item.spoken = True
             except Exception:
                 # A confirmation that cannot be rendered must not take the
@@ -844,7 +896,7 @@ class SpeechStream:
                         if rendered is not None:
                             pcm, rate = rendered
                             self._first_audio.set()
-                            if not sp._play(pcm, rate):
+                            if not sp._play_sentence(text, pcm, rate):
                                 self.interrupted = True
                                 break
                         self._spoken.append(text)

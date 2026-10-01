@@ -106,7 +106,11 @@ There is no linter, no type checker, no CI and no git remote.
   sentences do not begin with his name. Any exemption you add has to call
   `_sounds_like_its_own_voice()` or it is a self-triggering loop — the
   microphone cannot tell his voice from the speakers, and there is no
-  acoustic echo cancellation on this machine.
+  acoustic echo cancellation on this machine. It is judged from when the sound
+  BEGAN (`began_at`, which `run()` stamps wherever it opens a window), never
+  from when the gate is asked: the gate runs 3.2s after the sound ends at the median,
+  and a 3s tail counted from there had shut before a question's own echo
+  arrived (718 of 718 taken for the answer to itself).
 - **`timing.wait_s` is not the wait.** It starts *after* the endpointer's
   1400ms of silence and it stops on the "Give me a second." filler, which
   fires on 65% of brain turns. `felt_wait_s` is the number a stopwatch in

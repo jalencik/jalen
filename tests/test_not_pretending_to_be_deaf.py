@@ -521,7 +521,7 @@ def test_an_answer_is_never_rewritten():
     assert decided < gate < rewrite
     assert "if not was_an_answer:" in source[rewrite - 120:rewrite]
     for state in ("_awaiting_confirmation", "_awaiting_reply", "_expectation_open()",
-                  "_rating_is_pending()", "_continues_last_utterance(text)", "outlived"):
+                  "_rating_is_pending()", "_continues_last_utterance(text", "outlived"):
         assert state in source[decided:gate], f"{state} no longer counts as answering"
     # The name for it is not `answering`: that is the backlog guard's, further
     # down, and means something narrower. Two variables of one name was how a

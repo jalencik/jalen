@@ -286,9 +286,11 @@ conversation:
   #   - a sound inside it opens a listening window, and a POLITE REQUEST
   #     that comes out of that window - "could you please...", "I would like
   #     you to..." and no other form of asking - is acted on without his name;
-  #     anything else is not. Measured: 12 of the 78 sentences the gate
-  #     refused that were meant for him open with one of the two (4 are acted
-  #     on only because of this door), and 0 of the 27 background or ambiguous
+  #     anything else is not. Measured: of the 78 refused sentences meant for
+  #     him, 12 open with one of the two; 11 of them came out of this window
+  #     (the twelfth came out of barge-in, where the door does not apply, and
+  #     is acted on by another route) and 4 are acted on only because of this
+  #     door; 0 of the 27 background or ambiguous
   #     ones do. THAT 0 BOUNDS LITTLE: the 27 are hallucinated silence, his
   #     own voice and fragments, and the log holds no sentence of one person
   #     asking another in earshot - which is what this door admits by

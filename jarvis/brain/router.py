@@ -275,8 +275,12 @@ _FLAT_QUOTES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
 # door is the two forms he uses and no others. Deliberately NOT bare "please",
 # "can you", "would you like" or "I want you to" either: each of those opens
 # ordinary dialogue and song lyrics, which is what the 12 background rows are.
+#
+# "could you kindly" was in this pattern for one release and in no row of the
+# log at all (0 of the 5,182 rows of data/audit.jsonl on 2026-10-01), so it was
+# a way in that nothing measured. Dropped: a door is a form he is seen to use.
 _POLITE_REQUEST = (
-    r"(?:could\s+you\s+(?:please|kindly)\b"
+    r"(?:could\s+you\s+please\b"
     r"|i\s+would\s+like\s+you\s+to\b)"
 )
 

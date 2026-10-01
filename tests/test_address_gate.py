@@ -81,6 +81,7 @@ class _Gate:
     _rating_is_pending = Jalen._rating_is_pending
     RATING_EXPIRES_S = Jalen.RATING_EXPIRES_S
     _sounds_like_its_own_voice = Jalen._sounds_like_its_own_voice
+    _echoes_the_confirmation = Jalen._echoes_the_confirmation
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +241,10 @@ def test_rejection_is_silent():
 
     source = inspect.getsource(Jalen.run)
     start = source.index("should_act_on")
-    after = source[start:start + 700]
+    # 900, not 700: the two calls to the gate now each say when the sound
+    # began, which is a line each; the audit row is still the first thing
+    # after the second one.
+    after = source[start:start + 900]
     assert "self.say(" not in after, (
         "something speaks when an utterance is rejected - that is the "
         "self-inflicted interruption again"

@@ -434,10 +434,17 @@ class _Vad:
 
 
 class _Wake:
+    def __init__(self, fires=0):
+        """`fires`: how many times the wake word fires, on the first frames - 0 for never."""
+        self.fires = fires
+
     def load(self):
         pass
 
     def feed(self, frame):
+        if self.fires > 0:
+            self.fires -= 1
+            return True
         return False
 
 
@@ -554,11 +561,26 @@ class Room:
     out. The clock is a number the test moves.
     """
 
-    def __init__(self, monkeypatch, script, *, barge=False):
+    def __init__(self, monkeypatch, script, *, barge=False, speaker=None, sync_turns=False,
+                 wake_first=False):
         """
         `barge`: Jalen is mid-sentence when the microphone hears him, so the
         window that opens is the barge-in one - the only way, in this harness,
         to get a window with no question open behind it.
+
+        `wake_first`: the wake word fires on the first frame, so the first
+        utterance is one he began with "hey Jalen" - the way, with `sync_turns`,
+        to get a follow-up window behind it.
+
+        `speaker`: a speaker of the test's own, or a function that is given the
+        room's clock and returns one (a speaker with a past - see
+        test_his_own_voice_is_judged_when_it_began.OnAir).
+
+        `sync_turns`: run each turn the loop dispatches straight away on this
+        thread, with the turn's own work (process, playback, the rating) left
+        out. The ONLY way to get a follow-up window in this harness, because
+        `follow_up_until` is a local variable of run() that dispatch_turn sets
+        when a turn finishes, and the fake Thread used to never run it.
         """
         frames_extra = 8 if barge else 0
         self.clock = _Clock()
@@ -566,16 +588,26 @@ class Room:
         monkeypatch.setattr(app_module.runtime, "stop_requested", lambda: False)
         monkeypatch.setattr(app_module.runtime, "take_signal", lambda: None)
         self.dispatched = []
+        self.processed = []
         room = self
 
         class _Thread:
             def __init__(self, target=None, args=(), kwargs=None, daemon=None, name=None):
+                self.target = target
                 self.args = args
 
             def start(self):
                 room.dispatched.append(self.args)
+                if sync_turns and self.target is not None:
+                    self.target(*self.args)
 
         monkeypatch.setattr(app_module.threading, "Thread", _Thread)
+        if sync_turns:
+            import contextlib
+
+            monkeypatch.setattr(app_module.systools, "com_initialized",
+                                lambda: contextlib.nullcontext())
+            frames_extra += 2 * len(script)
 
         jalen = Jalen.__new__(Jalen)
         self.audit = _Audit()
@@ -583,13 +615,15 @@ class Room:
         jalen.cfg = CONFIG
         jalen.running = type("E", (), {"set": lambda s: None})()
         jalen.orb = _Orb()
-        jalen.wake = _Wake()
+        jalen.wake = _Wake(fires=1 if wake_first else 0)
         jalen.vad = _Vad()
         jalen.mic = _Mic(len(script) + 1 + frames_extra)
         jalen.audit = self.audit
         jalen.collector = self.collector
         jalen.stt = _Stt(self.collector)
-        jalen.speaker = _Speaker(on_air=barge)
+        if callable(speaker) and not hasattr(speaker, "quiet_for"):
+            speaker = speaker(self.clock)
+        jalen.speaker = speaker if speaker is not None else _Speaker(on_air=barge)
         jalen.session_id = "test"
         jalen.muted = False
         jalen.paused = False
@@ -619,6 +653,13 @@ class Room:
         jalen._answer_overrun_s = float(CONFIG.get_path("vad.max_utterance_s", 30)) + app_module.ANSWER_STT_SLACK_S
         jalen._follow_up_s = float(CONFIG.get_path("conversation.follow_up_timeout_s", 12))
         jalen.kill_phrases = set(CONFIG.get_path("safety.kill_phrases"))
+        if sync_turns:
+            jalen.process = lambda text, from_him=True, door="": self.processed.append(
+                (text, from_him, door))
+            jalen._await_playback = lambda *a, **k: None
+            jalen._finish_timing = lambda *a, **k: None
+            jalen._check_the_plan = lambda *a, **k: None
+            jalen._maybe_ask_for_a_rating = lambda *a, **k: None
         self.jalen = jalen
 
     # -- what Jalen asked ----------------------------------------------------
@@ -1041,10 +1082,13 @@ def test_the_answer_path_measurement_runs_on_a_question_made_up_here():
     module = _measure()
     rows = _made_up((0, "utterance", "Do you want the whole thread read out, or just the last message?",
                      {"who": "jarvis"}))
-    asked, took = module.answer_path_echo(rows, 1.0)
-    assert asked == 3 and took == 0
-    asked, took = module.answer_path_echo(rows, 3.5)
-    assert asked == 3 and took == 3     # NOT FIXED: see Jalen._sounds_like_its_own_voice
+    # The sound began 0.5s after he stopped and reached the gate 1s after, 3.7s after: both inside the tail.
+    for gate_s in (1.0, 3.7):
+        asked, took = module.answer_path_echo(rows, 0.5, gate_s)
+        assert asked == 3 and took == 0, (gate_s, asked, took)
+    # The same words, begun after the tail: an answer (see test_his_own_voice_is_judged_when_it_began).
+    asked, took = module.answer_path_echo(rows, 3.5, 6.7)
+    assert asked == 3 and took == 3
 
 
 def test_the_real_log_a_long_reply_read_back_at_5s_and_10s_is_never_acted_on():
@@ -1154,18 +1198,8 @@ def test_the_real_log_the_script_and_the_test_agree_that_none_of_his_own_voice_g
     assert spoken["admitted"] == 0, spoken["leaked"][:5]
 
 
-def test_the_real_log_the_answer_paths_own_tail_is_measured_and_said_to_be_unfixed():
-    """
-    NOT FIXED, and measured so that it is not forgotten. Within the 3s tail the
-    answer path refuses every echo of a question; past it, none. The doors have
-    the long tail; the answer path cannot, without refusing the answer
-    "just the last message" to "...or just the last message?"
-    """
-    module, rows, _ = _real_log()
-    asked, took = module.answer_path_echo(rows, 1.0)
-    assert asked > 500 and took == 0, (asked, took)
-    asked, took = module.answer_path_echo(rows, 3.5)
-    assert took == asked, (
-        "the answer path now refuses echo past 3s - good, but then the "
-        "'NOT FIXED' in Jalen._sounds_like_its_own_voice and in the report is stale"
-    )
+# The answer path's own tail used to be pinned HERE as an unfixed defect
+# (test_the_real_log_the_answer_paths_own_tail_is_measured_and_said_to_be_unfixed:
+# 718 of 718 question echoes taken for an answer once 3.5s had passed). It is
+# fixed - the gate is told when the sound began - and the corpus tests that say
+# so are in tests/test_his_own_voice_is_judged_when_it_began.py.
