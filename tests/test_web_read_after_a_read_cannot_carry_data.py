@@ -127,7 +127,16 @@ def test_every_fence_that_makes_text_untrusted_also_records_its_addresses():
     'read my email and open the link in it' into a refusal."""
     import inspect
 
-    from jarvis.tools import gmail
+    from jarvis.tools import devwork, gmail
 
-    for fn in (research._fence, gmail._fence):
+    for fn in (research._fence, gmail._fence, devwork._fence):
         assert "taint.mark(source, " in inspect.getsource(fn), fn.__qualname__
+
+
+def test_a_link_in_a_coding_jobs_output_can_be_followed_after_reading_it(net):
+    """The coding-job fence records its addresses like the others."""
+    from jarvis.tools import devwork
+
+    devwork._fence("see the docs at https://docs.example/guide for details", "coding job", "output")
+    net.responses = [_page("<html><title>Guide</title><p>the guide text</p></html>")]
+    assert "the guide text" in research.web_read("https://docs.example/guide")

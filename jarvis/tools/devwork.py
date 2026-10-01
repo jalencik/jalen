@@ -933,7 +933,7 @@ def _fence(text: str, source: str, what: str) -> str:
     from ..config import CONFIG
     from ..safety import SafetyEngine
 
-    taint.mark(source)
+    taint.mark(source, text)
     flags = SafetyEngine(CONFIG).scan_for_injection(text)
     warning = ""
     if flags:
