@@ -242,9 +242,22 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     native_host_module.BRIDGE_FILE = scratch / "bridge.json"
     _os.environ["JALEN_BRIDGE_FILE"] = str(scratch / "bridge.json")
 
+    # --- the speech cache: data/tts_cache -------------------------------
+    # test_overhaul_fixes::test_audio_cache_is_bounded rendered 55 dummy
+    # phrases into the LIVE cache on every gate run (all 55 found among its
+    # 272 files by the collaborator, 2026-10-01). Past 400 files the cache
+    # deletes its 40 oldest, so test junk could evict his real phrases, and
+    # warmup() counts files to decide it is warm. Tests that set their own
+    # CACHE_DIR still do; this is for the ones that did not.
+    from jarvis.audio.tts import Speaker
+
+    saved_speech_cache = Speaker.CACHE_DIR
+    Speaker.CACHE_DIR = scratch / "tts_cache"
+
     try:
         yield scratch
     finally:
+        Speaker.CACHE_DIR = saved_speech_cache
         (bridge_server_module.BRIDGE_FILE, native_host_module.BRIDGE_FILE,
          was) = saved_bridge
         if was is None:
