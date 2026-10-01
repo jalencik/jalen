@@ -1,9 +1,9 @@
 # Jalen — handoff
 
-**For a fresh session picking this up.** Rewritten 22 August 2026, after a
-pass over the previous handoff's outstanding list. It tells you where things
-stand, what is genuinely unfinished, and what you must not break while
-finishing it.
+**HISTORICAL: this is the state of 23 August 2026 (last edited in a731da6).** Its counts,
+"NOT done" lists and commands are not current. For today: `docs/collab/STATUS.md`,
+`docs/collab/COLLABORATOR_PROMPT.md`, `.\jalen.ps1 todo` and `CLAUDE.md`. Lines 79-111 and
+797-816 are still current and `CLAUDE.md` cites them by number: keep those lines where they are.
 
 Read this before touching anything. Then read `ARCHITECTURE.md` for the
 design reasoning and `README.md` for what it does.
@@ -13,8 +13,8 @@ design reasoning and `README.md` for what it does.
 ## Orientation in sixty seconds
 
 Jalen is a voice assistant on O'ktam's Windows 10 laptop. Wake word → VAD →
-Groq Whisper → **intent router** (answers ~88% of turns locally, for zero
-tokens) → **safety gate** → Claude Agent SDK with 125 tools → edge-tts.
+Groq Whisper → **intent router** (~88% of turns locally in an August sample, for zero
+tokens) → **safety gate** → Claude Agent SDK with 165 tools (at 833adbb) → edge-tts.
 
 ```
 jarvis/
@@ -24,13 +24,13 @@ jarvis/
   safety.py         THE GATE. classify() decides GREEN/AMBER/RED/BLACK
   timing.py         per-turn stopwatch — how "slow" became a number
   brain/
-    router.py       ~90 local rules. Read the ORDERING RULE comment first.
+    router.py       141 rules at 833adbb, first match wins. Read the ORDERING RULE comment first.
     agent.py        Claude SDK client, system prompt, PreToolUse safety hook
     tools.py        TOOL_SPECS — what the model can see. 1:1 with the registry.
-  tools/            26 modules, one REGISTRY each, merged in __init__.py
+  tools/            37 modules, one REGISTRY each, merged in __init__.py
   audio/            wake, vad, stt, tts (SpeechStream is subtle — read it)
   ui/orb.py         the floating orb
-  ui/gestures.py    sizing the orb with your hands (optional, camera)
+  taint.py          has Jalen read someone else's text since he last spoke? (injection guard)
 config/
   jarvis.yaml       the DEFAULTS and the design record. Heavily commented;
                     the comments are the reasoning — read them before
@@ -54,19 +54,19 @@ when he reports something.
   --ignore=tests\benchmark_phrasing.py
 ```
 
-2,721 tests, ~2.5 minutes. `tests/test_voice_pipeline.py` calls live Groq and
-edge-tts and occasionally fails on the network — **re-run it alone before
-treating a failure there as a regression.**
+Run it to see today's count (5,245 collected at 833adbb). One known failure on this machine: the
+CapCut case in `test_overhaul_fixes.py`. `tests/test_voice_pipeline.py` calls live Groq and edge-tts —
+**re-run it alone before treating a failure there as a regression.**
 
 ---
 
 ## Disk: resolved, but stay aware
 
 `C:` was at **100% — 0.00 GB free** on 22 August, and a test run died with
-`OSError: [Errno 28]` mid-write. He has since cleared it: **17.7 GB free**.
+`OSError: [Errno 28]` mid-write. He cleared it to 17.7 GB then; on 1 October C: had 7-9 GB free.
 
-That unblocked the last blocked item (mediapipe, ~250 MB), which is now
-installed and working. `.\jalen.ps1 check` reports free space as a blocking
+That unblocked the last blocked item (mediapipe, ~250 MB); it was removed
+again on 23 August with hand gestures. `.\jalen.ps1 check` reports free space as a blocking
 problem under 1 GB and a warning under 5 GB, so this cannot silently return.
 
 Two things worth knowing if it tightens again:
@@ -76,39 +76,39 @@ Two things worth knowing if it tightens again:
 - `temp_file_report` finds ~130 MB across `%TEMP%` and `C:\Windows\Temp`.
   Say *"clear the temp files"* — RED, so it asks first.
 
-## Three invariants. Breaking any of these is a security bug.
+## Three invariants from August. Breaking any of these is a security bug.
 
-These fail SILENTLY. Nothing errors, tests stay green, and the damage is
-only visible after something has already gone out.
+These fail SILENTLY: nothing errors and tests stay green. The full, current
+list is in `CLAUDE.md` under "Invariants"; these three came first.
 
 ### 1. The injection guard runs BEFORE destination pre-approval
 
-In `SafetyEngine.classify()`, the `origin == "content"` check sits above the
-pre-approved-destination check. Text Jalen merely *read* — an email, a
-Telegram message, a web page — can never trigger a RED tool, even one aimed
-at a destination he approved.
+In `SafetyEngine.classify()` (jarvis/safety.py) the `origin == "content"`
+checks sit above the pre-approval check. After Jalen has read someone
+else's text, RED and AMBER tools and the GREEN tools on `refuse_from_content`
+are refused; the one exception is his own Saved Messages when HIS words named it.
 
 Moving the pre-approval block above it turns his ML community channel into
 an open relay for anyone who can get words in front of him.
-`tests/test_preapproved_sends.py::test_the_preapproval_check_runs_after_the_injection_check`
-asserts the ordering, and
-`tests/test_flow_rehearsal.py::test_an_email_that_asks_to_be_posted_is_refused`
-now asserts it again through the whole email→post flow.
+`tests/test_adversarial.py::test_the_ordering_is_structural_not_incidental`
+and `tests/test_preapproved_sends.py::test_the_preapproval_check_runs_after_the_injection_check`
+assert the ordering, and `tests/test_flow_rehearsal.py::test_an_email_that_asks_to_be_posted_is_refused`
+asserts it again through the whole email→post flow.
 
 ### 2. Secrets never become tool results
 
-`vault.get_secret()` is deliberately **not** in any REGISTRY. A tool result
-reaches the model, the transcript window, the audit log, and possibly the
-TTS engine. Tools may list secret **names** only. `fill_credential` types the
-value and reports which secret went in, never what it was.
+`vault.get_secret()` is deliberately in no REGISTRY and not in TOOL_SPECS.
+A tool result reaches the model, the transcript window, the audit log and
+possibly the TTS engine. Tools may list secret **names** only; the tools
+that type a secret report which one went in, never what it was.
 
-### 3. Jalen never chooses the field
+### 3. Jalen never chooses the password field
 
-`autofill.py` types into whatever **he** has focused. Chrome does not permit
-reliable field-finding, so any "find the password box" implementation is
-Tab-and-hope — and Tab-and-hope already typed into YouTube's search box and
-wiped it. If you add element-finding here, a password can land in the wrong
-box.
+`fill_credential` (autofill.py, AMBER) types into whatever **he** has
+focused; Tab-and-hope once typed into YouTube's search box and wiped it.
+The one tool that finds a password field, `fill_login_field` (webforms.py, RED,
+in Jalen's own Chrome), lets the page decide: exactly one `input[type=password]`,
+on a host with an exact vault approval, with the login tied to that host.
 
 ---
 
@@ -248,7 +248,7 @@ instead of me."*
 
 | say | it does |
 |---|---|
-| *"test yourself"* | runs its own 2,291-test suite |
+| *"test yourself"* | runs its own full test suite in the background |
 | *"are you ok"* | disk, last shutdown, tools loaded — two sentences |
 | *"diagnose yourself"* | the full `jalen.ps1 check` report |
 | *"open your code"* | its own source in VS Code |
@@ -356,7 +356,7 @@ Every item is testable and tested. Numbers are from the suite, not estimates.
 
 ## What is genuinely NOT done
 
-### 1. Hand-gesture orb resize — WORKING, AWAITING HIS TEST
+### 1. Hand-gesture orb resize — REMOVED 23 August (a731da6); kept as a record
 
 mediapipe 1.0.1 is installed and the adapter has run for real. Verified on
 this machine:
@@ -426,7 +426,7 @@ and all three are closed:
    exception all left identical (empty) evidence. Now `_exit_reason` names
    which, and `data/last_exit.json` carries it across restarts.
 
-So if it recurs: **`python run.py --why`**. If it says "ended WITHOUT
+So if it recurs: **`.\jalen.ps1 why`**. If it says "ended WITHOUT
 shutting down", the process was killed or died somewhere it could not
 report, and `data/crash.log` will have a traceback if there was one.
 
@@ -493,7 +493,7 @@ It walks them one at a time and records what he observed in
 arrived" are the two things this project keeps confusing, and a rehearsal
 that accepted the first would have reproduced the bug it exists to catch.
 
-### 5. The vault has never been created — STILL BLOCKED ON HIM
+### 5. The vault had never been created (22 August) — `.\jalen.ps1 todo` item 1 shows today's state
 
 `data/vault.json` does not exist. Nothing is stored, so `fill_credential`
 cannot be tested for real. **He needs to run this once, himself** — it asks
@@ -543,7 +543,7 @@ build on it, that is a two-minute change and the file says how.
   are still assumed throughout (`C:/Program Files/Everything/es.exe`, UIA,
   pywin32).
 - **No telemetry, no crash reporting, no auto-update.** `scripts/update.py`
-  is a manual `git pull` with backups and a test run.
+  is a `git pull` with backups and a test run; this checkout has no git remote, so it stops at the fetch.
 
 ---
 
@@ -673,8 +673,8 @@ than pretending.
 He asked for a list of everything Jalen can do, to test against. It is
 GENERATED from the live tool registry, safety tiers and router rules, so it
 cannot promise something that no longer exists — this project has already
-shipped documentation that outlived the code it described. 147 things, with
-checkboxes, and a `*` on the 84 that answer by voice for free.
+shipped documentation that outlived the code it described. It prints its own count
+(147 in August), with checkboxes and a `*` on the ones that answer by voice for free.
 
 ---
 
@@ -801,8 +801,8 @@ Worth knowing before you propose anything:
 - **He wants depth per feature, not breadth.** Finish one thing properly
   before starting the next. He has said this explicitly.
 - **Implement obvious improvements without asking.** Reserve questions for
-  genuine forks where the options differ materially — he engages with those
-  and answers in detail.
+  genuine forks (privacy, what goes public, money, accounts) and ask them as
+  a poll: 2-4 labelled options, the recommended one first.
 - **Report done AND not-done.** Silence about a skipped part reads as
   success and he has called that out more than once.
 - **He tests it for real and reports in blunt terms.** "It is ignoring me",
@@ -838,15 +838,15 @@ Every task is one word:
 | | |
 |---|---|
 | `.\jalen.ps1 vault` | create the password vault (he types the passphrase) |
-| `.\jalen.ps1 hands` | see what the camera sees — the gesture answer |
+| ~~`.\jalen.ps1 hands`~~ | removed with hand gestures (a731da6); now prints "Unknown command" |
 | `.\jalen.ps1 voice` | teach the wake word his own voice |
 | `.\jalen.ps1 rehearse` | drive the six flows that need him present |
-| `.\jalen.ps1 licence` | decide who may use this, and record it |
+| `.\jalen.ps1 licence` | decide who may use this, and record it (deferred at his request) |
 
 The checklist ticks itself from real evidence, not from having run the
-script. `calibrate_hands.py` writes its marker **only after it has actually
-seen a hand**, and reports what it saw: how many hands at once, the best
-pinch gap against the threshold, whether the orb was ever grabbed. A marker
+script. `calibrate_hands.py` (removed on 23 August) wrote its marker **only
+after it had actually seen a hand**, and reported what it saw: how many hands at
+once, the best pinch gap against the threshold, whether the orb was ever grabbed. A marker
 written merely because a window opened would tick the box for someone who
 learned nothing — the same "reported success, nothing happened" failure this
 project keeps producing, moved into a checklist.
@@ -865,11 +865,11 @@ it is the actual shape of what is left.
    with `getpass`, and a passphrase that passes through an assistant is one
    the assistant could have kept. Unblocks the whole credential path.
    **Pick a fresh one**: an earlier passphrase was typed into a chat window.
-2. **`scripts\calibrate_hands.py`** — thirty seconds, and it is the answer to
-   "the gesture is not working on me". Watch the line between thumb and
-   finger turn green. Measured off his webcam, he is sitting far enough back
-   that both hands are rarely in frame together; the one-hand gesture needs
-   only one.
+2. ~~`scripts\calibrate_hands.py`~~ — removed with the hand-gesture feature
+   on 23 August (a731da6), at his request. The orb no longer resizes at all:
+   its size and place are `ui.orb_size` and `ui.orb_position` in
+   `config/jarvis.yaml`. `.\jalen.ps1 hands` now prints "Unknown command".
+   Nothing here needs him any more.
 3. **`scripts\rehearse.py`** — one sitting. Six flows that have never been
    driven end to end by a person. Cheapest place a real bug is still hiding.
 4. **`scripts\record_wake_samples.py`** — fifteen minutes, if the wake word
@@ -887,7 +887,7 @@ it is the actual shape of what is left.
 
 6. **The 21 August silent exit is still not root-caused.** It has not
    recurred. What changed is that a recurrence is now *findable*:
-   `python run.py --why`, `data/crash.log`, `data/last_exit.json`.
+   `.\jalen.ps1 why`, `data/crash.log`, `data/last_exit.json`.
    **Do not report it as fixed.**
 7. **Speaker identification** would need a neural model (~100 MB). The
    numbers for the cheap version are in the section above and they do not
@@ -899,10 +899,10 @@ it is the actual shape of what is left.
 
 ---
 
-## Current state, verified 22 August 2026
+## State on 22 August 2026 (HISTORICAL — today's state is in docs/collab/STATUS.md)
 
-- **125 tools** — 100 GREEN, 14 AMBER, 11 RED
-- **2,721 tests passing** (zero failures, including the live-network ones), 60 test files (was 1,637 across 43)
+- **125 tools** — 100 GREEN, 14 AMBER, 11 RED (at 833adbb: 165 — 125 GREEN, 24 AMBER, 16 RED)
+- **2,721 tests passing** then (zero failures, including the live-network ones), 60 test files (was 1,637 across 43); at 833adbb: 136 test files, run the gate for the count
 - `tests/test_every_request_reachable.py` is a **capability ledger** — when a
   row there fails, a feature has gone missing, which is a different kind of
   failure from an assertion changing. Hand control is now in it, in both
@@ -916,19 +916,19 @@ it is the actual shape of what is left.
   route it (the brain needs the conversation to write the prompt) and
   `agent.py`'s system prompt names the mis-transcription explicitly. Both
   are pinned by tests in `test_handoff.py`.
-- New diagnostics: `python run.py --why`, and `.\jalen.ps1 check` now reports
-  disk, the vault, wake-word recordings, gesture availability, rehearsal
-  progress, and how the last run ended.
+- New diagnostics: `.\jalen.ps1 why`, and `.\jalen.ps1 check` now reports
+  the Claude sign-in, Google and Telegram, disk, the vault, wake-word
+  recordings, rehearsal progress, and how the last run ended.
 - `tests/test_conversation_requests.py` is a **second ledger**, and a
   different one: it asks "did we build what he asked for", tagged by the
-  message each request came from. 52 rows. A failure there means a
+  message each request came from. 59 rows at 833adbb. A failure there means a
   capability he explicitly asked for has stopped existing.
-- **Jalen can test itself**: say "test yourself" and it runs its own 2,291
-  tests in the background and tells you the result. Read-only with respect
+- **Jalen can test itself**: say "test yourself" and it runs its own full
+  suite in the background and tells you the result. Read-only with respect
   to its own code, asserted by test.
-- **Hand gestures work**: mediapipe 1.0.1, Tasks API, verified against his
-  own reference photo and a live camera. Say "calibrate my hands" to see
-  what the camera sees.
+- **Hand gestures were removed on 23 August** (a731da6), and orb resizing
+  after them: the orb's size and place are `ui.orb_size` / `ui.orb_position`
+  in `config/jarvis.yaml`. Nothing opens the camera.
 - **Coding agents**: "start a coding job" runs Claude Code headless for up
   to an hour, announces when it finishes, and "review the coding job"
   compares the git diff against what was asked.
