@@ -697,7 +697,8 @@ research:
   # Jalen's first try (only then - the first try looks like Chrome), so it
   # identifies you to them. Put an address you're happy to share: your
   # channel's t.me link, a GitHub profile, or an email.
-  contact: ""
+  # His choice, 2026-10-01: his public ML channel.
+  contact: "https://t.me/MLcommunityy"
 
 # ---------------------------------------------------------------------------
 # WEB DELEGATION  (handing work to ChatGPT / Gemini in a real browser)
