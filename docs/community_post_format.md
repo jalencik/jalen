@@ -203,9 +203,10 @@ send one only when he asked for that post to have it ("post it with a sticker"),
 because a sticker that reached the channel cannot be taken back. It is never
 part of the post and never inside it: it is its own message. When he asked, send
 the post first, then `send_sticker` to the same chat, with the emoji that suits
-the post. With no pack named it looks in his favourites first, then takes the
-first match in his packs and says so. If there is no matching sticker, say so
-and send nothing; never send a random one.
+the post. With no pack named it looks only in his favourites; if none has the
+emoji it sends nothing and lists the packs that do, and you ask him which pack
+to use. If there is no matching sticker, say so and send nothing; never send a
+random one.
 
 ---
 

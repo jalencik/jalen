@@ -208,9 +208,11 @@ green:
     # His OWN emoji sets and sticker packs, read-only (messages.getEmojiStickers,
     # getAllStickers, getStickerSet, getFavedStickers), and the premium emoji
     # in his own recent posts. Neither acts on the world, so neither is on
-    # refuse_from_content. find_premium_emoji prints ids and characters only,
-    # nothing a pack author wrote, so it does not taint the turn the post is
-    # sent from; list_sticker_packs prints titles and is fenced like any reader.
+    # refuse_from_content. find_premium_emoji prints only ids and validated
+    # single emoji (a character that passed stickers._emoji_only's strict shape
+    # check, never a name, a title or a word a pack author chose), so it does
+    # not taint the turn the post is sent from; list_sticker_packs prints titles
+    # and is fenced like any reader.
     - find_premium_emoji
     - list_sticker_packs
     - save_telegram_draft   # a DRAFT reaches nobody. send_telegram_message stays RED.

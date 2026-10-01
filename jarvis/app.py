@@ -296,6 +296,45 @@ ANSWER_STT_SLACK_S = 5.0
 # vad.silence_ms.
 ECHO_REACHES_THE_GATE_S = ECHO_TAIL_S + 4.0 + ANSWER_STT_SLACK_S
 
+# THE LEAKY ECHO RULE, FOR AN ANSWER TO "...Confirm?". Four or more words of
+# which 80% are words of the question: the rule _sounds_like_its_own_voice
+# measured on the whole corpus (0 of 853 real utterances refused, 725 of 725
+# question-shaped replies caught), applied here to the question that is known.
+#
+# WHY IT IS NEEDED. _echoes_the_confirmation recognises only an exact tail of
+# the question, and a speaker bleeding into a microphone comes back with words
+# dropped and mangled. A voice-message question is up to 80 words of whatever
+# he asked Jalen to say, so the echo "ok sound good see you at six confirm" (one
+# word off) was not a tail, parsed as agreement and approved the send. Reproduced
+# on the functions; not with real audio.
+#
+# MEASURED 2026-10-01 against data/audit.jsonl (read-only): 22 spoken
+# confirmation questions, 20 real answers to them. None is flagged: 7 of the 20
+# have four words or more, and the largest share of one found in its own
+# question is 0.5 ("Yes, open Telegram, please."). A one-word yes is never
+# affected: under four words nothing is echo here, as everywhere.
+#
+# THE WINDOW IS THE DOORS', NOT THE EXACT RULE'S. The exact tail is judged
+# within ECHO_TAIL_S of the question ending, because "confirm" said four seconds
+# later is a real yes. This rule needs no such care - an answer is not 80% made
+# of the question - and it needs the longer one: the echo of a question reaches
+# the gate after the endpoint's silence and the transcription (3.2 s at the
+# median, see _sounds_like_its_own_voice), which is after ECHO_TAIL_S, so judged
+# in 3 s it would have caught almost nothing. A person who repeats four words of
+# the question back as his answer ("close app notepad confirm") within that
+# window is now ignored and the confirmation times out, which cancels: the safe
+# way to be wrong. [NOT MEASURED] how often he answers like that; none of the 20.
+_CONFIRM_ECHO_MIN_WORDS = 4
+_CONFIRM_ECHO_SHARE = 0.80
+
+# Plain yes/no words. An echo of a confirmation question cannot contain one
+# that the question does not (see _echoes_the_confirmation), and a genuine
+# answer usually does.
+_PLAIN_ANSWER_WORDS = frozenset({
+    "yes", "yeah", "yep", "yup", "yea", "sure", "okay", "ok", "no", "nope", "nah",
+    "cancel", "stop", "affirmative", "negative", "absolutely", "definitely",
+})
+
 
 # Words that turn an answer into a CORRECTION: he is not saying yes to what
 # was asked, he is saying what to do instead. Padded with spaces because the
@@ -780,12 +819,45 @@ class Jalen:
         utterance that is the question's own ending - "Confirm.", "notepad.
         Confirm?" - within ECHO_TAIL_S of it finishing is the echo. "yes" is
         not in the question and so can never be mistaken for it.
+
+        THE ENDING NEED NOT BE EXACT. Four or more words, 80% of them the
+        question's own, is the echo too, for the door's longer window: see
+        _CONFIRM_ECHO_SHARE for why, and for what was measured.
         """
-        if time.monotonic() - getattr(self, "_confirm_asked_at", 0.0) > ECHO_TAIL_S:
-            return False
+        waited = time.monotonic() - getattr(self, "_confirm_asked_at", 0.0)
         heard = _SPOKEN_WORD.findall((text or "").lower())
+        if not heard:
+            return False
         asked = _SPOKEN_WORD.findall((getattr(self, "_confirm_question", "") or "").lower())
-        return bool(heard) and len(heard) <= len(asked) and asked[-len(heard):] == heard
+        vocabulary = set(asked)
+        window = getattr(self, "_door_echo_tail_s", ECHO_REACHES_THE_GATE_S)
+
+        # AN ECHO OF THE QUESTION CANNOT CONTAIN A PLAIN YES OR NO THAT THE
+        # QUESTION DOES NOT. A real answer usually does. So a yes/no word
+        # that is not in the question settles it: this is an answer, however
+        # much of the action it restates ("yes send the voice message"). The
+        # leaky rule below used to drop 3.3% of realistic answers in silence
+        # (19 of 576 pairs) - the confirmation then timed out and cancelled.
+        if any(word in _PLAIN_ANSWER_WORDS and word not in vocabulary for word in heard):
+            return False
+        if (waited <= ECHO_TAIL_S and len(heard) <= len(asked)
+                and asked[-len(heard):] == heard):
+            return True
+        if waited <= window:
+            # Every word is the question's own: it is the question coming
+            # back, however short. The exact-tail rule and the four-word
+            # rule both missed "Confirm." arriving 3.5 s after the question
+            # (the echo reaches the gate about 3.2 s after it ends at the
+            # median), and " confirm " is on the YES list - so it approved
+            # the send. Cost: a bare "confirm" as the answer is ignored in
+            # this window (he says "yes"), as is a "yes" the question's own
+            # text contains; both time out and CANCEL, the safe way to fail.
+            if all(word in vocabulary for word in heard):
+                return True
+            if len(heard) >= _CONFIRM_ECHO_MIN_WORDS:
+                hits = sum(1 for word in heard if word in vocabulary)
+                return hits / len(heard) >= _CONFIRM_ECHO_SHARE
+        return False
 
     def _drain_answers(self) -> None:
         while not self._answer_q.empty():

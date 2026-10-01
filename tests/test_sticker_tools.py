@@ -242,11 +242,16 @@ def test_without_a_pack_his_favourites_are_searched_first(wire):
     assert "favourite" in reply.lower()
 
 
-def test_without_a_pack_and_no_favourite_his_packs_are_searched(wire):
+def test_without_a_pack_and_no_favourite_his_packs_are_searched_and_he_is_asked(wire):
+    """
+    The pick used to be the first match in his packs, sent and then disclosed.
+    Now the packs are searched only to be offered (tests/
+    test_telegram_round2_posts.py has the whole behaviour).
+    """
     acct = wire(_account())
     reply = stickers.send_sticker(to=CHANNEL, emoji=CLAP_C)
-    assert _sent_documents(acct) == [2101]
-    assert reply.startswith("Sent")
+    assert _sent_documents(acct) == []
+    assert reply.startswith("Nothing sent") and "Techno Cats" in reply
 
 
 def test_a_number_needs_a_pack(wire):

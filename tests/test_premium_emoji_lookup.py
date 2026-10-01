@@ -93,10 +93,18 @@ def test_a_character_is_answered_with_a_tag_ready_to_paste(wire):
 
 
 def test_the_variation_selector_does_not_hide_an_emoji(wire):
-    """The pen is U+1F58A; the brain often writes it with U+FE0F after it."""
+    """
+    The pen is U+1F58A; the brain often writes it with U+FE0F after it. It is
+    found, and the tag carries the character as it was written - with the
+    selector - not the pack's spelling without it (that was this test's old
+    expectation, and the cosmetic issue a review found: the tag held a
+    different character from the one it replaced).
+    """
     wire(_account())
     reply = stickers.find_premium_emoji(query=PEN_C + "\ufe0f")
-    assert _tag(PEN, PEN_C) in reply
+    assert _tag(PEN, PEN_C + "\ufe0f") in reply
+    stickers._forget()
+    assert _tag(PEN, PEN_C) in stickers.find_premium_emoji(query=PEN_C)
 
 
 def test_several_characters_are_answered_one_line_each_in_one_request_round(wire):

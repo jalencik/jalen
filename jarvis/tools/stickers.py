@@ -641,6 +641,9 @@ def find_premium_emoji(query: str = "", learn_from: str = "") -> str:
             notes.append(
                 f"None of his last {learned.total} posts in {learned.chat} use "
                 "premium emoji yet, so these come from his emoji sets."
+                if learned.total else
+                f"There are no posts with words in {learned.chat} to learn from, "
+                "so these come from his emoji sets."
             )
         if index.total == 0:
             notes.append("He has no custom emoji sets installed, so there is nothing to look in.")
@@ -679,6 +682,20 @@ def _skipped_note(count: int) -> str:
     )
 
 
+def _inside(asked: str, stored: str) -> str:
+    """
+    The character that goes BETWEEN the tags: the one he asked for, as he wrote
+    it, when it is a valid emoji, else the pack's own (already validated).
+
+    The pack stores its own spelling, and a pen written with the emoji selector
+    (U+270F U+FE0F) came back inside a tag as the pen without it - a different
+    character from the one the tag replaces, and the one non-Premium viewers
+    see. They are equal once the selectors are stripped (_by_character), so
+    nothing is swapped for something else, only the spelling is kept.
+    """
+    return asked if _emoji_only(asked) else stored
+
+
 def _answer(want: _Want, index: _Index, learned: "_Learned | None") -> "tuple[list[str], bool]":
     """(the line or lines that answer one thing he asked for, whether a tag was found)."""
     if want.is_emoji:
@@ -692,13 +709,14 @@ def _answer(want: _Want, index: _Index, learned: "_Learned | None") -> "tuple[li
             if mine:
                 doc_id, use = mine[0]
                 return [
-                    f"{want.text}  ->  {_tag(doc_id, use.char)}  (the one in his "
-                    f"posts: {use.posts} of his last {learned.total})"
+                    f"{want.text}  ->  {_tag(doc_id, _inside(want.text, use.char))}  (the one "
+                    f"in his posts: {use.posts} of his last {learned.total})"
                 ], True
         found = _by_character(index, want.text)
         if found:
             first = found[0]
-            return [f"{want.text}  ->  {_tag(first.doc_id, first.char)}  (from his emoji sets)"], True
+            return [f"{want.text}  ->  {_tag(first.doc_id, _inside(want.text, first.char))}  "
+                    "(from his emoji sets)"], True
         return [
             f"{want.text}  ->  no premium version in his emoji sets - leave the "
             f"ordinary {want.text}"
@@ -713,9 +731,11 @@ def _describe_pattern(learned: "_Learned | None", notes: list[str]) -> str:
     if learned is None:
         return " ".join(notes) or "I couldn't read that chat."
     if not learned.uses:
+        seen = (f"None of his last {learned.total} posts in {learned.chat} use "
+                "premium emoji yet" if learned.total else
+                f"There are no posts with words in {learned.chat} to learn from")
         return (
-            f"None of his last {learned.total} posts in {learned.chat} use "
-            "premium emoji yet, so there is no pattern to follow. Ask for the "
+            f"{seen}, so there is no pattern to follow. Ask for the "
             "emoji by character and I'll look in his emoji sets."
         )
     lines = [
@@ -882,14 +902,41 @@ def _matching(docs: list, holder, want: str) -> list:
     return [(d, a) for d, a in docs if _bare(a) == want or d.id in related]
 
 
+def _which_pack(raw_emoji: str, fits: list, more: bool) -> str:
+    """
+    The question that stands in for a pick: which of the packs that have a
+    sticker for this emoji does he mean.
+
+    The titles are strangers' words, so they come back inside the fence and the
+    turn is marked (messaging._fence), exactly like list_sticker_packs'
+    overview. That is deliberate and it is the point: a marked turn cannot send
+    a sticker (SafetyEngine refuses send_sticker under origin 'content'), so the
+    brain cannot answer its own question - the pack is named in a turn of his
+    own. The sentence outside the fence names no pack.
+    """
+    lines = [f"- {i.title} ({i.count} stickers)" for i in fits]
+    fenced = messaging._fence(
+        "\n".join(lines), f"his sticker packs with a sticker for {raw_emoji}", limit=2000)
+    return (
+        f"none of his favourites has a sticker for {raw_emoji}, and I won't choose a "
+        "pack for him. Ask him which pack to take it from, and ask him to say it "
+        "starting with \"Jalen,\" (or type it): a short spoken answer without the "
+        "name is not taken as his own instruction after packs were read, so the "
+        "send would be refused. Then send again with that pack named. These packs "
+        f"have one:\n{fenced}"
+        + ("\nThere may be more: I stopped at the first packs that had one." if more else "")
+    )
+
+
 async def _pick_sticker(client, named: str, raw_emoji: str, number: int):
     """
     ((document, its emoji, an extra sentence), "") or (None, why nothing).
 
     With a pack: that pack, and `number` (as list_sticker_packs numbers it) or
-    the sticker for the emoji. Without one: his favourites first, then his
-    packs in the order he has them. The favourites are his own choice, so the
-    first match there is not a guess; two matches in a PACK are disclosed.
+    the sticker for the emoji. Without one: his favourites, which are his own
+    choice, so the first match there is not a guess. If none of them has the
+    emoji nothing is picked: the reason is a question naming the packs that do
+    (_which_pack). Two matches inside ONE pack are disclosed.
     """
     want = _bare(raw_emoji)
     if named:
@@ -939,19 +986,25 @@ async def _pick_sticker(client, named: str, raw_emoji: str, number: int):
     every = await _sticker_infos(client)
     infos = every[:_MAX_SETS]
     failed = 0
+    fits: list = []                        # the packs that have a sticker for it
     for start in range(0, len(infos), _PARALLEL):
-        for _info, full in await _fetch_many(client, infos[start:start + _PARALLEL]):
+        batch = infos[start:start + _PARALLEL]
+        for info, full in await _fetch_many(client, batch):
             if full is None:
                 failed += 1
                 continue
-            found = _matching(_sticker_docs(full), full, want)
-            if found:
-                # Nobody chose this one for the emoji: it is simply the first.
-                # Said, so that he can name a pack instead (see send_sticker).
-                return (found[0][0], found[0][1], (
-                    " None of his favourites matched, so this is the first one "
-                    "for that emoji in his packs. Name a pack to choose another."
-                )), ""
+            if _matching(_sticker_docs(full), full, want):
+                fits.append(info)
+        if fits:
+            # NOTHING IS PICKED FOR HIM. The first version took the first match
+            # in install order, sent it to his channel, and only then said
+            # "none of his favourites matched, so this is the first one" - a
+            # sticker from a pack called "Adult Memes" went out because "Tech
+            # Memes" had no rocket. A sticker goes out only when he asks, and
+            # which pack it comes from is part of what he asked, so with no
+            # pack named and no favourite it is a question. Stopped after the
+            # first batch that has any: more may follow, and the reply says so.
+            return None, _which_pack(raw_emoji, fits, more=start + len(batch) < len(every))
     if failed:
         unread.append(f"{failed} of his {len(infos)} sticker packs")
     if not unread and len(every) <= len(infos):
@@ -1000,6 +1053,17 @@ def send_sticker(to: str, emoji: str = "", pack: str = "", number: int = 0) -> s
                 "which pack to take it from.")
     if number and not named:
         return "Nothing sent - a number only means something inside a pack. Name the pack too."
+    wanted = _bare(emoji)
+    if wanted and not number and not _emoji_only(wanted):
+        # A WORD FOR AN EMOJI. send_sticker(emoji="rocket") searched every pack
+        # for a sticker filed under the letters r-o-c-k-e-t and answered "none of
+        # his favourites or his 12 sticker packs has a sticker for rocket",
+        # which reads as "he has no rocket sticker". Nothing is read for it.
+        if any(ch.isalnum() for ch in wanted):
+            return ("Nothing sent - the emoji has to be the character itself, not a "
+                    "word like 'rocket'. Give the emoji character, or name a pack and a number.")
+        return ("Nothing sent - a sticker matches one emoji. Give one emoji, or name a "
+                "pack and a number.")
 
     async def look(client):
         # Reads only. The chat first: a wrong name must cost no pack reads.

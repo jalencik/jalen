@@ -843,10 +843,33 @@ def _rules() -> list[Rule]:
     # really starts with one ("It Support") costs one brain turn instead of
     # being read aloud by mistake. [NOT MEASURED] No chat of his is known to
     # start with any of them.
+    #
+    # The second line is the QUANTIFIERS, added after a review reproduced "did
+    # no one reply on telegram", "did none of them", "did both" and "what did
+    # something say" all becoming a chat called "no one", "none", "both" and
+    # "something". A list of words is a denylist and will always miss one; the
+    # price of a miss is a wrong "couldn't find a chat" sentence (a hit needs
+    # the word to be a piece of exactly one chat title). Whole words only, so
+    # "Anya" and "Nodir" are not "any" and "no one".
     not_a_chat = (
         r"(?!(?:i|you|we|they|he|she|it|him|her|them|us|me|anyone|anybody|someone|"
-        r"somebody|everyone|everybody|nobody|people|who|that|this)\b)"
+        r"somebody|everyone|everybody|nobody|people|who|that|this|"
+        r"no one|noone|none|nothing|all|both|either|neither|each|any|some|many|few|"
+        r"several|one|whoever|whomever|whatever|something|anything|everything)\b)"
     )
+
+    # "a voice message" and "a voice note" are not part of a chat's name. Without
+    # this the text rules below took "telegram Ali a voice message saying hello"
+    # for a text to a chat called "Ali a voice message", and he was asked to
+    # confirm that. A sentence that asks for one is left to the brain, which has
+    # send_voice_message; a text that only MENTIONS one ("telegram Ali saying I
+    # left you a voice message") has the words after the separator and still
+    # routes. The name is matched one character at a time so it can never run
+    # over the phrase.
+    # Siblings too: voice memo/recording, voicemail, audio message/note - the
+    # independent re-check found each still captured as a chat name.
+    not_voice = (r"(?:(?!\b(?:voice[ -]?(?:messages?|msgs?|notes?|memos?|recordings?)|"
+                 r"voicemails?|audio[ -]?(?:messages?|notes?|recordings?))\b).)+?")
 
     return [
         # ====================================================================
@@ -1503,15 +1526,15 @@ def _rules() -> list[Rule]:
         # generic rule it never got the chance: "message sat talk on telegram
         # saying hi" split at the first "saying" and captured the recipient as
         # "sat talk on telegram", which resolves to no chat at all.
-        (R(r"^(?:tell|message|text|dm|write|send) (.+?) on telegram "
+        (R(r"^(?:tell|message|text|dm|write|send) (" + not_voice + r") on telegram "
            r"(?:that |saying |to say )?(.+)$", re.I),
          "send_telegram_message",
          lambda m: {"to": m.group(1).strip(), "text": m.group(2).strip()}, None),
-        (R(r"^(?:telegram|message|text|dm|write to|send to) (.+?) "
+        (R(r"^(?:telegram|message|text|dm|write to|send to) (" + not_voice + r") "
            r"(?:saying|to say|that says|with the message|with) (.+)$", re.I),
          "send_telegram_message",
          lambda m: {"to": m.group(1).strip(), "text": m.group(2).strip()}, None),
-        (R(r"^(?:telegram|message|text|dm) (.+?) that (.+)$", re.I),
+        (R(r"^(?:telegram|message|text|dm) (" + not_voice + r") that (.+)$", re.I),
          "send_telegram_message",
          lambda m: {"to": m.group(1).strip(), "text": m.group(2).strip()}, None),
 

@@ -256,9 +256,18 @@ def _voice_message_summary(args: dict[str, Any]) -> str:
     only a guard on the other side of that cap), and the voice is named so he
     is not led to think it will sound like him.
     """
+    from . import voicelang
+
     to = _said(args.get("to"), 90) or "someone"
     words = _said(args.get("text"), 600)
     head = f"send {to} a voice message in Jalen's synthetic voice"
+    # The voice follows the language (jarvis/voicelang.py), so when the words
+    # are not English the question says which: he hears the words read by the
+    # Uzbek or the Russian voice, and has to know that is what was meant. The
+    # same function the tool uses decides, so the two cannot disagree.
+    spoken_in = voicelang.resolve(words, args.get("language"))
+    if spoken_in != "en":
+        head += f", in {voicelang.name(spoken_in)}"
     return f"{head}, saying: {words}" if words else head
 
 

@@ -134,12 +134,13 @@ class FakeSTT:
 def _speech(monkeypatch, mp3):
     """Replace the speech engine; remember what it was asked to say."""
     said = []
-    monkeypatch.setattr(messaging, "_speech_mp3", lambda words: said.append(words) or mp3)
+    monkeypatch.setattr(messaging, "_speech_mp3",
+                        lambda words, language="": said.append(words) or mp3)
     return said
 
 
 def _speech_must_not_run(monkeypatch):
-    def boom(words):
+    def boom(words, language=""):
         raise AssertionError("speech was rendered, and the words went to a third party")
 
     monkeypatch.setattr(messaging, "_speech_mp3", boom)
@@ -278,7 +279,8 @@ def test_the_tool_spec_says_the_voice_is_synthetic_and_not_a_clone():
     description, params = TOOL_SPECS["send_voice_message"]
     lowered = description.lower()
     assert "synthetic" in lowered and "clone" in lowered
-    assert set(params) == {"to", "text"} and params["to"][2] and params["text"][2]
+    assert set(params) == {"to", "text", "language"} and params["to"][2] and params["text"][2]
+    assert not params["language"][2], "the language is optional"
     assert "400" in description
 
 
@@ -328,7 +330,7 @@ def test_a_chat_that_does_not_exist_is_a_sentence_and_nothing_is_rendered(monkey
 def test_a_speech_engine_that_fails_sends_nothing_and_says_so(monkeypatch):
     client = wire(monkeypatch, VoiceClient(dialogs=[Dialog(ALI)]))
 
-    def broken(words):
+    def broken(words, language=""):
         raise RuntimeError("TTS failed: 403")
 
     monkeypatch.setattr(messaging, "_speech_mp3", broken)
@@ -339,7 +341,7 @@ def test_a_speech_engine_that_fails_sends_nothing_and_says_so(monkeypatch):
 
 def test_speech_that_cannot_be_converted_sends_nothing(monkeypatch):
     client = wire(monkeypatch, VoiceClient(dialogs=[Dialog(ALI)]))
-    monkeypatch.setattr(messaging, "_speech_mp3", lambda words: b"not an mp3")
+    monkeypatch.setattr(messaging, "_speech_mp3", lambda words, language="": b"not an mp3")
     reply = messaging.send_voice_message(to="Ali Karimov", text="hello")
     assert reply.startswith("Nothing sent") and client.files == []
 

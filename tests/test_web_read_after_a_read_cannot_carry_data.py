@@ -127,9 +127,13 @@ def test_every_fence_that_makes_text_untrusted_also_records_its_addresses():
     'read my email and open the link in it' into a refusal."""
     import inspect
 
-    from jarvis.tools import devwork, gmail
+    from jarvis.tools import devwork, gmail, messaging
 
-    for fn in (research._fence, gmail._fence, devwork._fence):
+    # Every door untrusted text comes through. messaging._fence is the Telegram
+    # door (reads, searches, voice-note transcripts, sticker pack titles); it
+    # marked the turn without passing its text until 2026-10-01, so a link in a
+    # message he asked to have read was refused as "not shown".
+    for fn in (research._fence, gmail._fence, devwork._fence, messaging._fence):
         assert "taint.mark(source, " in inspect.getsource(fn), fn.__qualname__
 
 

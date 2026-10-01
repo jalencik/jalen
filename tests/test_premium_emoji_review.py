@@ -454,17 +454,22 @@ def test_a_named_emoji_set_says_how_many_it_left_out(wire):
 
 
 # ============================== what a sticker taken from his packs discloses
-def test_a_sticker_nobody_chose_for_the_emoji_says_so(wire):
-    """No favourite matched, so it is only the first one in his packs: say that."""
+def test_a_sticker_nobody_chose_for_the_emoji_is_not_sent_and_he_is_asked(wire):
+    """
+    No favourite matched. This used to send the first one in his packs and say
+    so afterwards ("the first one ... Name a pack"). It is a question now: the
+    pack is part of what he asked for (tests/test_telegram_round2_posts.py).
+    """
     acct = _tech_memes()
     wire(acct)
     reply = stickers.send_sticker(to=CHANNEL, emoji=FIRE)
-    assert reply.startswith("Sent a " + FIRE + " sticker")
-    assert "first one" in reply and "Name a pack" in reply
+    assert reply.startswith("Nothing sent") and acct.wire == []
+    assert "which pack" in reply.lower() and "first one" not in reply
 
-    # A favourite is his own choice, and is not described that way.
+    # A favourite is his own choice: it goes out, and is described as one.
     acct.faved = [sticker_doc(3001, FIRE, 300)]
     reply = stickers.send_sticker(to=CHANNEL, emoji=FIRE)
+    assert reply.startswith("Sent a " + FIRE + " sticker")
     assert "favourite" in reply and "first one" not in reply
 
 

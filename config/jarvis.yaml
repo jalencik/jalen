@@ -716,6 +716,25 @@ telegram:
     voice_message:
       voice: ""
       rate: "+0%"
+      # THE VOICE FOLLOWS THE LANGUAGE (jarvis/voicelang.py). He is written to,
+      # and writes, in Uzbek and Russian, and an English voice reading either is
+      # noise. The language is the one the brain names (language="uz" - Uzbek in
+      # Latin letters cannot be told from English by looking) or, when none is
+      # named, the one the script shows (mostly Cyrillic = Russian; Cyrillic
+      # with a letter only Uzbek has = Uzbek). English keeps `voice` above.
+      # The question he is asked says "in Russian" or "in Uzbek" when it is not
+      # English, so he is never surprised by what he approved.
+      #
+      # The names were read from edge_tts.list_voices() on 2026-10-01 (322
+      # voices; uz-UZ has MadinaNeural and SardorNeural, ru-RU has DmitryNeural
+      # and SvetlanaNeural) - the male ones, because Jalen's own voice is. NO
+      # SPEECH WAS SYNTHESISED to hear them: how they sound, and whether the
+      # Uzbek voice reads Uzbek written in Cyrillic, are NOT MEASURED. If it
+      # cannot, the render fails and nothing is sent. An empty name falls back
+      # to `voice` (an English voice), which is worse than not sending.
+      voices:
+        uz: "uz-UZ-SardorNeural"
+        ru: "ru-RU-DmitryNeural"
 
     # The language Groq listens for when he asks what ONE voice note says
     # (transcribe_voice_note). Empty = Groq detects it, which is right for the

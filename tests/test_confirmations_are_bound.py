@@ -171,9 +171,18 @@ def test_the_question_coming_back_through_the_microphone_is_ignored(echo):
 
 
 def test_the_same_word_from_him_later_is_a_real_yes():
-    """Time is the gate: echo cannot arrive seconds after the question ended."""
+    """
+    Time is the gate - but the window is how long an echo can take to reach
+    the gate, not the 3 s of the exact-tail rule. The echo of a question
+    arrives about 3.2 s after it ends at the median (measured, see
+    _sounds_like_its_own_voice), so 'confirm' 4 s later WAS the echo, and it
+    approved a voice message (tests/test_confirmation_echo_round_two.py).
+    Past the whole window it is a real yes.
+    """
+    from jarvis.app import ECHO_REACHES_THE_GATE_S
+
     j = _jalen()
-    _pending(j, asked_ago=ECHO_TAIL_S + 1)
+    _pending(j, asked_ago=ECHO_REACHES_THE_GATE_S + 1)
     _say(j, "confirm")
     assert j._answer_q.get_nowait()
 
