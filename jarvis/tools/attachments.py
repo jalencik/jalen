@@ -121,8 +121,8 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
     it reaches a person and cannot be recalled.
     """
     from .messaging import (
-        _Attempt, _chat_name, _deliver, _enabled, _formatted, _run_send,
-        _resolve as _resolve_chat,
+        PREMIUM_DROPPED, _Attempt, _chat_name, _deliver, _enabled, _formatted,
+        _run_send, _resolve as _resolve_chat,
     )
 
     _enabled()
@@ -163,7 +163,9 @@ def send_telegram_file(to: str, file: str, caption: str = "") -> str:
             f"Sent {path.name} ({path.stat().st_size / 1024**2:.1f} MB) "
             f"to {await _chat_name(client, entity)}."
         )
-        if note:
+        if note.startswith(PREMIUM_DROPPED):
+            reply += f" The caption's premium emoji went as ordinary emoji — {note}."
+        elif note:
             reply += f" The caption went WITHOUT formatting — {note}."
         return reply
 

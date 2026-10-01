@@ -166,15 +166,59 @@ longer belongs inside the expandable block.
 
 ---
 
+## Premium emoji and stickers
+
+He has Telegram Premium and wants his own premium emoji in the posts. (A
+sticker is a different matter: see the last paragraph of this section.) Write
+the post exactly as above first, with the ordinary emoji from the table. Then swap each one for its premium version in the
+same place: one for one, never an extra emoji, never in a new position. The
+layout does not change; only what is drawn there does.
+
+A premium emoji is a tag around the ordinary emoji it replaces:
+
+```
+<tg-emoji emoji-id="ID">🚀</tg-emoji>
+```
+
+The emoji between the tags is the fallback: the same emoji that was there
+before, which is what anyone without Premium sees. It stays, it is exactly one
+emoji, and it is never a word, a number or a different emoji. An empty tag is
+refused, and so is one around a word.
+
+**The id is the part you cannot know.** Never write one from memory and never
+guess one: a made-up id is refused at the send, and a real id from a different
+emoji is a wrong picture in his channel. Call `find_premium_emoji` once, with
+every emoji the post uses as the query (`🖊 🚀 🛣 📌 👏 ❓ 👇` is the whole house
+set) and `learn_from` set to the channel's exact title. The ones he already
+uses in his recent posts come first, so a new post matches the old ones. Paste
+each tag it returns where the ordinary emoji was. An emoji it finds nothing for
+stays ordinary, and you say which.
+
+After the send, the reply says how many premium emoji arrived. Telegram drops
+them without an error when an account is not Premium, so a post can be "sent"
+and plain. Pass that sentence on as it is.
+
+**A sticker only when he asks for one.** No sticker follows a post on your own:
+send one only when he asked for that post to have it ("post it with a sticker"),
+because a sticker that reached the channel cannot be taken back. It is never
+part of the post and never inside it: it is its own message. When he asked, send
+the post first, then `send_sticker` to the same chat, with the emoji that suits
+the post. With no pack named it looks in his favourites first, then takes the
+first match in his packs and says so. If there is no matching sticker, say so
+and send nothing; never send a random one.
+
+---
+
 ## Telegram HTML: what is actually supported
 
 Only these tags, and every one of them arrives as formatting:
 
 `<b>` `<i>` `<u>` `<s>` `<code>` `<pre>` `<a href="https://...">` `<blockquote>`
-`<blockquote expandable>` `<tg-spoiler>`
+`<blockquote expandable>` `<tg-spoiler>` `<tg-emoji emoji-id="ID">`
 
 (`<strong>` `<em>` `<ins>` `<strike>` `<del>` and `<span class="tg-spoiler">`
-are other spellings of the same things. `<a>` takes `href` and nothing else.)
+are other spellings of the same things. `<a>` takes `href` and nothing else.
+`<tg-emoji>` takes `emoji-id` and nothing else, and wraps one emoji.)
 
 Anything else - `<h1>`, `<ul>`, `<li>`, `<br>`, `<p>`, a tag never closed, a
 tag closed out of order - and the post fails to save: nothing is sent or

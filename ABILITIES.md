@@ -1,6 +1,6 @@
 # What Jalen can do
 
-**155 tools.** Generated from the running code by
+**158 tools.** Generated from the running code by
 `scripts/abilities.py`, so it cannot promise something that no longer
 exists. Every quoted phrase is one the test suite already asserts.
 
@@ -149,7 +149,15 @@ _Your own chats, your saved messages, and your channel._
 
 ### `community_post_guide`   — GREEN
 
-The layout rules for his AI Engineering & Machine Learning channel: bullet character, where bold goes, the expandable Q&A block, the fixed sign-off. Call this BEFORE writing any channel post, and call voice_guide too — one is how a post is laid out, the other is how he sounds, and a post needs both.
+The layout rules for his AI Engineering & Machine Learning channel: bullet character, where bold goes, the expandable Q&A block, the fixed sign-off. Call this BEFORE writing any channel post, and call voice_guide too — one is how a post is laid out, the other is how he sounds, and a post needs both. Then, before sending, call find_premium_emoji for the post's emoji: he has Telegram Premium and wants his premium emoji in every post. A sticker goes out only when he asks for one.
+
+### `find_premium_emoji`   — GREEN
+
+Look up his PREMIUM custom emoji, read from his own Telegram account, and get the <tg-emoji emoji-id="ID">E</tg-emoji> tag for each. Call it AFTER writing a channel post and BEFORE sending it: give every emoji the post uses (the characters, in one call, or a name like 'rocket') and put each returned tag where the ordinary emoji was, keeping the emoji between the tags. Pass learn_from with the channel he posts in and the ones he already uses there come first, so a new post matches his old ones; with no query it describes that pattern. NEVER write an emoji id from memory or invent one: ids come only from this tool, and a made-up one is refused at the send. It shows only ids and characters - nothing a pack author wrote - so it does not mark the turn as having read anything. If it finds none, leave the ordinary emoji and say so.
+
+### `list_sticker_packs`   — GREEN
+
+List the custom emoji sets and sticker packs on his Telegram account, or, with pack, the stickers inside one pack (numbered, with their emoji). Read-only. The overview shows pack titles that strangers wrote, so it comes back fenced as UNTRUSTED CONTENT and the rest of the turn counts as having read something - use it when he asks what he has, not in the middle of a post. A named pack shows only emoji and numbers.
 
 ### `list_telegram_chats`   — GREEN
 
@@ -185,6 +193,12 @@ Send SEVERAL posts to one Telegram chat in a single call. Use when he asks for m
 
 Needs: `to`, `posts`
 
+### `send_sticker`   — RED
+
+Send ONE sticker to a Telegram chat as its own message, as him, ONLY WHEN HE ASKS for a sticker (for example 'post it with a sticker'): never after a post on your own. Irreversible and it reaches someone else, so it is gated exactly like send_telegram_message: his pre-approved destinations (Saved Messages and his channel, by their exact names) go straight out, anyone else is asked about first, and nothing Jalen merely read can start it. Name the pack (title or short name) and either the emoji the sticker matches or its number from list_sticker_packs. With no pack it looks in his favourites, then his packs, for the emoji, and says when it took the first match from his packs. A sticker is a separate message: when he asked for one, send the post first and the sticker after it. If a pack name fits two packs, or there is no sticker for that emoji, nothing is sent.
+
+Needs: `to`
+
 ### `send_telegram_file`   — RED
 
 Send a file to a Telegram chat. Name the file the way he says it — 'my CV', 'the changes pdf' — and it is resolved by the same search open_target uses. Refuses if the name matches more than one file, rather than guessing which. Reaches a person, so the safety gate asks first unless the destination is one he pre-approved.
@@ -193,7 +207,7 @@ Needs: `to`, `file`
 
 ### `send_telegram_message` * — RED
 
-Send a Telegram message AS HIM to a person or group. Irreversible and it reaches someone else, so the safety gate asks out loud first. 'Saved Messages' targets his own notes and reaches nobody. If the name is ambiguous this refuses rather than guessing — a message delivered to the wrong person cannot be recalled.
+Send a Telegram message AS HIM to a person or group. Irreversible and it reaches someone else, so the safety gate asks out loud first. 'Saved Messages' targets his own notes and reaches nobody. If the name is ambiguous this refuses rather than guessing — a message delivered to the wrong person cannot be recalled. The text may carry premium emoji as <tg-emoji emoji-id="ID">E</tg-emoji> tags, but only with ids from find_premium_emoji; an id Telegram does not know is refused, and the reply says how many premium emoji arrived.
 
 Say: "telegram sat talk saying hello"
 
@@ -1022,4 +1036,4 @@ Look up one of his own details from the personal-info folder - 'what's my school
 - Reach Gemini or ChatGPT over their APIs on this machine - the Gemini key is 403'd and there is no OpenAI key. The browser route works instead.
 - Undo a sent email or a deleted file. That is why those ask first.
 
-**155 tools** — 22 amber, 120 green, 13 red
+**158 tools** — 22 amber, 122 green, 14 red

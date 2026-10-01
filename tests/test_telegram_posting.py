@@ -569,11 +569,16 @@ def test_every_tag_the_post_guide_promises_is_delivered(wired):
     for opening in promised:
         name = re.match(r"<([a-z-]+)", opening).group(1)
         opening = re.sub(r'href="[^"]*"', 'href="https://example.com"', opening)
+        # The guide writes the premium emoji's id as the placeholder ID, and
+        # the tag wraps one emoji, not a word. A real-looking id and an emoji
+        # make it the post the guide describes.
+        opening = re.sub(r'emoji-id="[^"]*"', 'emoji-id="5368324170671202286"', opening)
+        body = "\U0001f680" if name == "tg-emoji" else "word"
         wired.wire.clear()
-        messaging.send_telegram_message(to="ML community", text=f"{opening}word</{name}>")
+        messaging.send_telegram_message(to="ML community", text=f"{opening}{body}</{name}>")
         assert wired.wire, f"{opening} was refused"
         _, text, entities = wired.wire[-1]
-        assert text == "word" and entities, f"{opening} arrived as no formatting"
+        assert text == body and entities, f"{opening} arrived as no formatting"
 
 
 def test_a_rejected_spoiler_is_never_retried_in_the_clear(monkeypatch):

@@ -609,10 +609,14 @@ class SafetyEngine:
         "save_telegram_draft": "to",
         "send_posts": "to",
         "send_telegram_file": "to",
+        "send_sticker": "to",
     }
 
     # What may still go to his OWN Saved Messages after Jalen has read
-    # somebody else's text. See step 2 of classify().
+    # somebody else's text. See step 2 of classify(). TEXT tools only:
+    # send_telegram_file and send_sticker are left out on purpose, because
+    # WHICH file or sticker to send is a choice an injected instruction can
+    # make (tests/test_sticker_send_gate.py pins it).
     _SAFE_TO_OWN_CHAT_UNDER_TAINT = frozenset({
         "send_telegram_message", "save_telegram_draft", "send_posts",
     })

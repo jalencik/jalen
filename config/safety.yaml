@@ -190,6 +190,14 @@ green:
     - search_telegram       # searches his OWN messages
     - voice_guide           # reads his own skill file off local disk
     - community_post_guide  # reads the channel's post format off local disk
+    # His OWN emoji sets and sticker packs, read-only (messages.getEmojiStickers,
+    # getAllStickers, getStickerSet, getFavedStickers), and the premium emoji
+    # in his own recent posts. Neither acts on the world, so neither is on
+    # refuse_from_content. find_premium_emoji prints ids and characters only,
+    # nothing a pack author wrote, so it does not taint the turn the post is
+    # sent from; list_sticker_packs prints titles and is fenced like any reader.
+    - find_premium_emoji
+    - list_sticker_packs
     - save_telegram_draft   # a DRAFT reaches nobody. send_telegram_message stays RED.
     - claude_code_status    # reports whether a CLI is installed; runs nothing
     # Signs him in to ChatGPT or Gemini with HIS Google account and stops at
@@ -388,6 +396,13 @@ red:
     - send_email                # F46
     - send_telegram_message     # F46
     - send_telegram_file        # reaches a person, cannot be recalled
+    # A sticker is a message to a person too. Same tier, and the same
+    # pre-approved destinations, as send_telegram_message
+    # (SafetyEngine._DESTINATION_ARG). Deliberately NOT in the Saved Messages
+    # exception that lets TEXT through after a read: which sticker to send is a
+    # choice an injected instruction could make, the reason send_telegram_file
+    # is outside it too.
+    - send_sticker
     # Batching the WORK, not the permission — each post still goes
     # through send_telegram_message and its destination check.
     - send_posts

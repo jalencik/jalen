@@ -226,6 +226,165 @@ def _parse_html(markup: str) -> tuple[str, list]:
     return del_surrogate(text), list(parser.entities)
 
 
+# ----------------------------------------------------------- premium emoji
+# A premium (custom) emoji is <tg-emoji emoji-id="ID">E</tg-emoji>. E, between
+# the tags, is the ordinary emoji it stands in for: what a viewer without
+# Premium sees, and what Telegram draws the animation over. The id is a
+# Telegram document id, so it is a 64-bit SIGNED integer on the wire
+# (Telethon packs it with struct '<q'), and nothing that is not one can be
+# sent.
+#
+# WHAT THE PARSER DID WITH A BAD TAG, found by running the installed Telethon
+# 1.44 on it: an EMPTY tag made no entity and no word - the emoji vanished and
+# the post went out with a gap, "Sent" - and a tag around a WORD made an entity
+# over the word. Both are checked here, before anything is sent, and refused
+# with a sentence: the same rule as every other markup this module will not
+# guess at.
+_PREMIUM_TAG = re.compile(
+    r"<tg-emoji\s+emoji-id=(?:\"([0-9]+)\"|'([0-9]+)'|([0-9]+))\s*>(.*?)</tg-emoji\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_MAX_PREMIUM_EMOJI_ID = 2**63 - 1
+_KEYCAP = chr(0x20E3)
+
+# The reply a send gives when Telegram refused the premium emoji and the post
+# went out with the rest of its formatting. send_telegram_file's caption path
+# shares _deliver, so it reads this to say the right thing.
+PREMIUM_DROPPED = "Telegram rejected the premium emoji"
+
+
+def _is_one_emoji(inner: str) -> bool:
+    """
+    Could `inner` be one emoji, and not a word, a number or nothing?
+
+    Refuses whitespace, ASCII letters and digits, and the letters of the
+    alphabetic scripts (everything below U+2000: Latin, Greek, Cyrillic,
+    Arabic...). It does not try to recognise every emoji: U+2139 (the
+    information sign) is a Unicode LETTER and a real emoji, so "is it
+    alphabetic" would refuse it. A keycap (a digit, U+FE0F, U+20E3) keeps its
+    digit.
+    """
+    if not inner or any(ch.isspace() for ch in inner):
+        return False
+    keycap = _KEYCAP in inner
+    for ch in inner:
+        if keycap and ch in "0123456789#*":
+            continue
+        if ch.isascii() and ch.isalnum():
+            return False
+        if ch.isalpha() and ord(ch) < 0x2000:
+            return False
+    return True
+
+
+def _premium_emoji_problem(text: str) -> str:
+    """An empty string when every <tg-emoji> in `text` is one Telegram can draw, else why not."""
+    for tag in _PREMIUM_TAG.finditer(text):
+        raw_id = next(g for g in tag.groups()[:3] if g is not None)
+        inner = tag.group(4)
+        opening = tag.group(0)[: tag.group(0).index(">") + 1]
+        if not 0 < int(raw_id) <= _MAX_PREMIUM_EMOJI_ID:
+            return (
+                f"emoji id {raw_id[:24]} is not one Telegram can have. Take ids "
+                "from find_premium_emoji; never write one from memory"
+            )
+        if not inner.strip():
+            return (
+                f"{opening} has no emoji inside it. Between the tags goes the "
+                "ordinary emoji it stands in for, as find_premium_emoji gives it"
+            )
+        if not _is_one_emoji(inner):
+            shown = inner if len(inner) <= 20 else inner[:17] + "..."
+            return (
+                f"{opening} wraps {shown!r}, which is not a single emoji. "
+                "Between the tags goes the one emoji it stands in for"
+            )
+    return ""
+
+
+def _is_custom_emoji(entity) -> bool:
+    return type(entity).__name__ == "MessageEntityCustomEmoji"
+
+
+def _custom_emoji_ids(entities) -> list[int]:
+    """The premium emoji ids in `entities`, in order, repeats kept."""
+    return [e.document_id for e in entities or [] if _is_custom_emoji(e)]
+
+
+async def _unknown_premium_emoji(client, ids: list[int]) -> list[int]:
+    """
+    The ids among `ids` that Telegram has no custom emoji for.
+
+    One request for all of them (messages.getCustomEmojiDocuments answers with
+    the documents it knows and leaves the rest out). An id the brain wrote
+    from memory is not a rendering problem Telegram reports - it is a post
+    with a broken emoji in his channel - so it is refused before the send.
+
+    Fails OPEN: if the question itself cannot be asked (a dropped connection),
+    the post is not stopped for it. The read-back after the send is what
+    catches anything this missed.
+    """
+    from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
+
+    wanted = sorted(set(ids))
+    try:
+        found = await client(GetCustomEmojiDocumentsRequest(document_id=wanted))
+    except Exception:  # noqa: BLE001 - a safeguard that cannot run must not stop the post
+        return []
+    # Only a real Document counts. For an id it does not know Telegram can
+    # answer with a DocumentEmpty, which carries the id it was asked about, so
+    # "has an id" would make every made-up id look known.
+    known = {doc.id for doc in found or [] if type(doc).__name__ == "Document"}
+    return [i for i in wanted if i not in known]
+
+
+def _unknown_emoji_sentence(unknown: list[int]) -> str:
+    shown = ", ".join(str(i) for i in unknown[:3])
+    more = f" and {len(unknown) - 3} more" if len(unknown) > 3 else ""
+    return (
+        f"Telegram has no custom emoji with id {shown}{more}. Look the emoji up "
+        "with find_premium_emoji instead of writing ids from memory"
+    )
+
+
+async def _read_back(client, entity, sent, promised: list[int]) -> str:
+    """
+    One sentence about how many of the `promised` premium emoji are in the
+    message Telegram actually stored.
+
+    WHY IT IS READ BACK. Telegram does not refuse custom emoji from an account
+    that is not Premium: it accepts the message and drops them, so the send
+    "succeeds" and the post is not what he approved. Nothing in the send
+    reports it. The only way to know is to ask Telegram for the message.
+    """
+    from collections import Counter
+
+    count = len(promised)
+    message_id = getattr(sent, "id", None)
+    stored = None
+    if message_id is not None:
+        try:
+            stored = await client.get_messages(entity, ids=message_id)
+        except Exception:  # noqa: BLE001 - not worth failing a delivered send over
+            stored = None
+    if stored is None:
+        return (
+            f"I couldn't read it back to confirm the {count} premium emoji, so "
+            "check that they show in the channel."
+        )
+    arrived = Counter(_custom_emoji_ids(getattr(stored, "entities", None)))
+    wanted = Counter(promised)
+    kept = sum(min(n, arrived[i]) for i, n in wanted.items())
+    if kept == count:
+        return f"Read it back: all {count} premium emoji arrived."
+    lead = "only " if kept else ""
+    return (
+        f"Read it back: {lead}{kept} of {count} premium emoji arrived. Telegram "
+        "drops them when the account isn't Premium, so the rest show as "
+        "ordinary emoji."
+    )
+
+
 def _formatted(text: str) -> _Formatted:
     """
     Decide, per message, how Telegram should read `text`.
@@ -261,6 +420,8 @@ def _formatted(text: str) -> _Formatted:
             "which are words. Fix the markup, or write &lt; &gt; &amp; to send "
             "those characters as they are"
         ), False)
+    if emoji_problem := _premium_emoji_problem(text):
+        return _Formatted("", [], "", "", emoji_problem, False)
     try:
         message, entities = _parse_html(markup)
     except Exception as exc:  # noqa: BLE001 - any parse failure has one answer
@@ -304,8 +465,9 @@ def _rejected_note(exc: Exception) -> str:
 
 async def _deliver(send, post: _Formatted) -> tuple[str | None, str]:
     """
-    Put `post` through `send(text, entities)`: formatted, and once more
-    plain if Telegram refused the formatting.
+    Put `post` through `send(text, entities)`: formatted; then, if Telegram
+    refused it and it carried premium emoji, once more without ONLY those
+    (the note starts with PREMIUM_DROPPED); then once more plain.
 
     Returns (the text that went out, a note), or (None, why nothing did).
     Only a refusal (a 400) is retried or answered with a sentence - nothing
@@ -327,6 +489,20 @@ async def _deliver(send, post: _Formatted) -> tuple[str | None, str]:
             f"Telegram rejected the formatting ({_error_code(first)}), and "
             "without it the spoiler would show in the clear"
         )
+    # A premium emoji is the likeliest thing for Telegram to refuse (an id it
+    # will not draw), and refusing ONE emoji used to cost the whole post its
+    # formatting: the bold, the blockquote, every link. So the first retry
+    # keeps everything except the premium emoji - their ordinary emoji stay
+    # in the text - and only a second refusal goes plain.
+    kept = [e for e in post.entities if not _is_custom_emoji(e)]
+    if len(kept) != len(post.entities):
+        try:
+            await send(post.text, kept)
+        except Exception as exc:
+            if not _rejected(exc):
+                raise
+        else:
+            return post.text, f"{PREMIUM_DROPPED} ({_error_code(first)})"
     try:
         await send(post.plain, [])
     except Exception as exc:
@@ -609,12 +785,23 @@ def send_telegram_message(to: str, text: str) -> str:
             # Telethon raises ValueError on an empty message; "<b></b>" is one.
             return "Nothing sent — once the formatting is taken out, there are no words in it."
 
+        # An emoji id that Telegram has never heard of is refused BEFORE the
+        # send, by name: see _unknown_premium_emoji().
+        if wanted := _custom_emoji_ids(post.entities):
+            if unknown := await _unknown_premium_emoji(client, wanted):
+                return f"Nothing sent — {_unknown_emoji_sentence(unknown)}."
+
+        # What each attempt put on the wire and what Telegram handed back, so
+        # the reply can speak about the attempt that SUCCEEDED (see below).
+        went_out: list[tuple[list, Any]] = []
+
         async def send(words, entities):
             # parse_mode=None AND explicit entities: Telethon's markdown
             # default must never see this text. See _formatted().
-            await client.send_message(
+            sent = await client.send_message(
                 entity, words, formatting_entities=entities, parse_mode=None
             )
+            went_out.append((entities, sent))
 
         # A post that went out plain is recoverable; one lost to an exception
         # is not - so a refused formatting is retried once plain (_deliver).
@@ -623,16 +810,28 @@ def send_telegram_message(to: str, text: str) -> str:
         if message is None:
             return f"Nothing sent — {note}."
         name = await _chat_name(client, entity)
+        # Telegram drops premium emoji from an account that is not Premium
+        # WITHOUT an error, so a post that carried any is read back. Counted
+        # from the attempt that went out, not from what was asked: after a
+        # refusal the retry carries none, and the note already says so.
+        check = ""
+        if went_out and (promised := _custom_emoji_ids(went_out[-1][0])):
+            check = " " + await _read_back(client, entity, went_out[-1][1], promised)
         # The PARSED text, not the raw HTML: this reply is spoken, and the
         # tags are how the post is formatted, not what it says. It starts
         # "Sent to" whenever the post went out, and only then: that opening
         # is what drafting.send_posts reads, never the quoted post.
+        if note.startswith(PREMIUM_DROPPED):
+            return (
+                f"Sent to {name}, but the premium emoji went as ordinary emoji "
+                f"— {note}. The rest of the formatting is intact. {message!r}"
+            )
         if note:
             return (
                 f"Sent to {name}, but WITHOUT formatting — {note}. "
                 f"Worth checking it: {message!r}"
             )
-        return f"Sent to {name}: {message!r}"
+        return f"Sent to {name}: {message!r}{check}"
 
     attempted = _Attempt()
     return _run_send(work, to, attempted)
@@ -737,6 +936,9 @@ def save_telegram_draft(to: str, text: str) -> str:
                 "Nothing saved — once the formatting is taken out, there are no "
                 f"words in it, and an empty draft would delete the one in {title}."
             )
+        if wanted := _custom_emoji_ids(post.entities):
+            if unknown := await _unknown_premium_emoji(client, wanted):
+                return f"Nothing saved — {_unknown_emoji_sentence(unknown)}."
         message, entities = post.text, post.entities
         if post.note:
             try:

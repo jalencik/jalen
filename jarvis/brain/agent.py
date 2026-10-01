@@ -453,6 +453,20 @@ class Brain:
             "out under his name to his community.\n"
             "5. Then call community_post_guide AND voice_guide, and write "
             "the post.\n"
+            "5b. PREMIUM EMOJI - the post is not finished until they are in. "
+            "He has Telegram Premium and asked for his premium emoji in "
+            "his posts, six times on four days between 21 and 29 "
+            "August, and was told \"I can't use premium emoji\" - which was "
+            "wrong. Do not tell him you can't use "
+            "premium emoji: you can, with the tools. Call find_premium_emoji "
+            "ONCE with every emoji the post uses (the characters, all in one "
+            "query) and learn_from set to his channel's exact title, so the "
+            "ones he already posts come first and the new post matches the "
+            "old ones. Put each returned tag exactly where the ordinary emoji "
+            "was - one for one, never an extra - and keep the emoji between "
+            "the tags. NEVER write or guess an emoji id: it comes from the "
+            "tool or it is not used, and an emoji it finds nothing for stays "
+            "ordinary. Say which, if any.\n"
             "6. SEND it with send_telegram_message. Do not save it as a "
             "draft. He pre-approved his Machine Learning community and his "
             "Saved Messages in config, so those two destinations go straight "
@@ -461,6 +475,25 @@ class Brain:
             "asked for a post to be sent to his Saved Messages, got a draft, "
             "and had to go and press send himself.\n"
             + self._preapproved_destinations_line() +
+            "The reply to a post with premium emoji ends by saying how many "
+            "premium emoji arrived, because Telegram drops them without an "
+            "error when the account is not Premium. Tell him that sentence "
+            "as it is: if not all of them arrived, say so and that they show "
+            "as ordinary emoji. Never claim they arrived when it does not "
+            "say so.\n"
+            "7. A STICKER only when he asks for one, for example \"post it "
+            "with a sticker\". Never on your own: a post is not followed by a "
+            "sticker unless he asked for that post to have one, and a "
+            "sticker that reached his channel cannot be taken back. When he "
+            "does ask, send the post first, then send_sticker as its own "
+            "message to the same destination - a sticker is never part of "
+            "the post - with the emoji that matches the post (or the pack he "
+            "named). With no pack it looks in his favourites first, then "
+            "takes the first match in his packs and says so. If it finds "
+            "none, say so and stop; never send a random one. "
+            "list_sticker_packs shows what he has, but its titles come from "
+            "strangers and it marks the turn, so use it when he asks, not in "
+            "the middle of a post.\n"
             "Read the post back to him after sending.\n"
             "save_telegram_draft is for a destination he has NOT pre-approved, "
             "or when he explicitly asks for a draft.\n"
@@ -468,6 +501,24 @@ class Brain:
             "no web presence — say so at that step rather than writing "
             "around the gap. A confident post about a thing you could not "
             "verify is the worst possible output here.\n"
+        )
+
+        # Steps 5b-7 above sit inside the email procedure, so "write a post
+        # about X and send it to my channel" - no email in sight - had no
+        # step that connected writing to the emoji lookup. Said once more,
+        # short, for every post, in the order the tools must run. A sticker is
+        # NOT in this list on purpose: he decided it goes out only when he
+        # asks for one (step 7).
+        base += (
+            "\n\nEVERY POST FOR HIS CHANNEL, whether or not it began with an "
+            "email: community_post_guide and voice_guide, write it, "
+            "find_premium_emoji once for the emoji it uses (learn_from set to "
+            "his channel's exact title), put the tags in, then send it with "
+            "send_telegram_message. Steps 5b and 6 above say how and apply "
+            "unchanged. He asked for his premium emoji in his posts, so a "
+            "post without them is not finished - unless he says otherwise "
+            "for that post. A sticker is different: only when he asks for "
+            "one (step 7).\n"
         )
 
         # Phase 4: applications, forms and credentials. The order of these

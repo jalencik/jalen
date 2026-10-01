@@ -75,7 +75,8 @@ GROUPS: list[tuple[str, str, tuple[str, ...]]] = [
     ("Email", "Reading, sorting, drafting and sending Gmail.",
      ("email", "inbox", "gmail", "scan_inbox", "google_status")),
     ("Telegram", "Your own chats, your saved messages, and your channel.",
-     ("telegram", "send_posts", "save_draft_text", "community_post_guide")),
+     ("telegram", "send_posts", "save_draft_text", "community_post_guide",
+      "sticker", "premium_emoji")),
     ("Calendar", "", ("calendar", "event")),
     ("Handing work to other AIs",
      "Claude Code and the desktop app over the API; ChatGPT and Gemini in a "
