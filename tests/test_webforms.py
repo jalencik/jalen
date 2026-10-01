@@ -85,6 +85,9 @@ def form():
 
     def open_at(url):
         session.do(lambda page: page.goto(url, wait_until="domcontentloaded"))
+        # As in real use: the form is read before any step acts on it, and
+        # every step acts only on the page that read was of.
+        wf.inspect_form()
 
     try:
         open_at(_url())

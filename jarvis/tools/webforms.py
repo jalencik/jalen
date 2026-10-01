@@ -45,6 +45,7 @@ errors back, and never stall silently.
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -150,6 +151,113 @@ def _do(job, *, tab: str, timeout: float = 120.0):
 
 
 # ---------------------------------------------------------------------------
+# THE FORM THAT WAS READ
+#
+# Same tab is not the same site. Every step after inspect_form - fill a
+# field, fill from his folder, attach a file, submit - runs with tab="same",
+# which refuses a REPLACED tab but says nothing about where the tab itself
+# has gone. A tab that navigated on its own between the read and the step
+# (a redirect, a timer, a link) had his email typed into, his CV attached
+# to, and its submit button pressed on a page nobody read - reproduced
+# against a faked browser in tests/test_jalens_own_chrome.py (R8).
+#
+# So inspect_form writes down where it read the form, and every step checks
+# the page against it INSIDE its own browser job: once before it looks at
+# anything, and again immediately before it types, attaches or clicks.
+#
+# Where = the host, plus the path as the cheapest form identity there is:
+# another page on the same site is not the form that was read either. The
+# query and #fragment are left out, because sites rewrite their own as you
+# fill (?step=2, #email) and that is still the same form. That choice is an
+# assumption, NOT MEASURED against the forms he actually fills, and its cost
+# is that two forms differing only in their query (?id=...) count as one.
+#
+# Written and read inside browser jobs, so on one thread; the lock is cheap
+# insurance for any other reader. The last read replaces it whatever it
+# found: a read that found no form, or was refused, leaves nothing read.
+# ---------------------------------------------------------------------------
+_FORM_READ: dict[str, str] = {}
+_FORM_READ_LOCK = threading.Lock()
+
+
+def _form_address(url: str) -> tuple[str, str, str]:
+    """
+    (origin, host, path without a trailing slash) - what 'the same form'
+    means. The ORIGIN (scheme, host, port) is compared, not just the host:
+    http://apply.example and apply.example:8443 are other servers (found by
+    the independent review). The host is kept apart only to be spoken.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit((url or "").strip())
+        scheme, port, path = parts.scheme.lower(), parts.port, parts.path
+    except ValueError:
+        scheme, port, path = "", None, url or ""
+    host = _host(url)
+    default = {"http": 80, "https": 443}.get(scheme)
+    origin = f"{scheme}://{host}" + (f":{port}" if port and port != default else "")
+    return origin, host, path.rstrip("/")
+
+
+def _remember_the_form(url: str, has_fields: bool) -> None:
+    origin, host, path = _form_address(url)
+    with _FORM_READ_LOCK:
+        _FORM_READ.clear()
+        _FORM_READ.update(origin=origin, host=host, path=path,
+                          fields="yes" if has_fields else "")
+
+
+def _forget_the_form() -> None:
+    with _FORM_READ_LOCK:
+        _FORM_READ.clear()
+
+
+def _site_name(host: str) -> str:
+    return host or "a page with no web address"
+
+
+def _not_the_form_read(url: str, didnt: str, *, typing: bool = False) -> str:
+    """
+    "" when `url` is the page inspect_form last read; otherwise the one
+    spoken sentence for why nothing was done. `didnt` finishes "so I
+    didn't ...": "fill anything", "submit anything".
+
+    `typing`: the step types his details into fields, so the read must have
+    SEEN fields. A read that found none still vouches for the page - a review
+    page with only a Submit button, a CV page whose file input is hidden -
+    which is why every completed read is recorded (the independent review
+    found those pages refused forever otherwise).
+
+    Call it on page.url INSIDE the browser job, right before acting - a
+    check made in the caller, or at the start of a long job, is a check of
+    where the page used to be.
+    """
+    with _FORM_READ_LOCK:
+        read = dict(_FORM_READ)
+    origin, host, path = _form_address(url)
+    if not read:
+        return (f"I haven't read the form on {_site_name(host)} yet, so I "
+                f"didn't {didnt} - ask me to read the form first.")
+    if host != read["host"]:
+        return (f"The tab is on {_site_name(host)} now, not "
+                f"{_site_name(read['host'])} where I read the form, so I "
+                f"didn't {didnt} - ask me to read the form again.")
+    if origin != read["origin"]:
+        return (f"The tab is on {origin} now, not {read['origin']} where I read "
+                f"the form, so I didn't {didnt} - ask me to read the form again.")
+    if path != read["path"]:
+        return (f"The tab has moved on to a different page on "
+                f"{_site_name(host)} since I read the form, so I didn't "
+                f"{didnt} - ask me to read the form again.")
+    if typing and not read.get("fields"):
+        return (f"When I read the form on {_site_name(host)} there were no "
+                f"fields to type into, so I didn't {didnt} - ask me to read the "
+                f"form again once it shows them.")
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # READING THE FORM
 # ---------------------------------------------------------------------------
 def inspect_form() -> str:
@@ -160,12 +268,27 @@ def inspect_form() -> str:
     of the fields and which of them are required and still empty, the only
     honest thing Jalen can say is "click a field and I'll type into it",
     which is what it used to say.
+
+    It is also what every later form step is held to: where this read the
+    form is written down (see THE FORM THAT WAS READ), and a step that
+    finds the page anywhere else does nothing.
     """
     def job(page):
+        _forget_the_form()          # this read replaces the last, whatever it finds
         refusal = _never_touch(page.url, "read its form")
         if refusal:
             return refusal
-        return page.url, page.title(), page.evaluate(_SCAN)
+        url = page.url
+        title = page.title()
+        fields = page.evaluate(_SCAN)
+        # The fields came from where the page was when the read began. If it
+        # is somewhere else now, remembering either address would vouch for
+        # a page these fields did not come from.
+        if _form_address(page.url) != _form_address(url):
+            return (f"The tab moved on to {_site_name(_host(page.url))} "
+                    f"while I was reading its form - ask me to read it again.")
+        _remember_the_form(url, bool(fields))
+        return url, title, fields
 
     try:
         outcome = _do(job, tab="read")
@@ -255,7 +378,8 @@ def fill_form_field(field: str, value: str) -> str:
         return "Which field?"
 
     def job(page):
-        refusal = _never_touch(page.url, "type into it")
+        refusal = (_never_touch(page.url, "type into it")
+                   or _not_the_form_read(page.url, "fill anything", typing=True))
         if refusal:
             return "REFUSED:" + refusal
         fields = page.evaluate(_SCAN)
@@ -266,6 +390,9 @@ def fill_form_field(field: str, value: str) -> str:
         if target["type"] in _SECRET_TYPES:
             return "SECRET:"
         element = page.locator("input, textarea, select").nth(target["index"])
+        moved = _not_the_form_read(page.url, "fill anything", typing=True)   # at the typing
+        if moved:
+            return "REFUSED:" + moved
         if target["type"] == "select-one":
             element.select_option(label=value)
         else:
@@ -307,7 +434,8 @@ def upload_to_form(path: str, field: str = "") -> str:
         return f"{target.name} is a folder, not a file."
 
     def job(page):
-        refusal = _never_touch(page.url, "attach anything")
+        refusal = (_never_touch(page.url, "attach anything")
+                   or _not_the_form_read(page.url, "attach anything"))
         if refusal:
             return "REFUSED:" + refusal
         inputs = page.locator('input[type="file"]')
@@ -323,6 +451,9 @@ def upload_to_form(path: str, field: str = "") -> str:
             chosen = [f["label"] for f in fields].index(match["label"])
         elif count > 1:
             return "AMBIGUOUS:" + str(count)
+        moved = _not_the_form_read(page.url, "attach anything")  # at the attaching
+        if moved:
+            return "REFUSED:" + moved
         inputs.nth(chosen).set_input_files(str(target))
         return "OK:"
 
@@ -353,7 +484,8 @@ def submit_form() -> str:
     the failure this project keeps having in other forms.
     """
     def job(page):
-        refusal = _never_touch(page.url, "submit anything")
+        refusal = (_never_touch(page.url, "submit anything")
+                   or _not_the_form_read(page.url, "submit anything"))
         if refusal:
             return {"refused": refusal}
         button = None
@@ -370,6 +502,9 @@ def submit_form() -> str:
                 continue
         if button is None:
             return {"none": True}
+        moved = _not_the_form_read(page.url, "submit anything")  # at the click
+        if moved:
+            return {"refused": moved}
         before = page.url
         button.click()
         page.wait_for_timeout(2500)

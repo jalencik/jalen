@@ -14,6 +14,9 @@ that only saw the typed address, a Cloudflare check heard as "still
 loading", specs that advertised a flow that refuses itself, a browser that
 would go to its own debug port, and host checks done by substring.
 
+R8: a form step - fill, fill from his folder, attach, submit - that acted on
+whatever site the tab had moved to since inspect_form read it.
+
 EVERYTHING HERE IS A FAKE, ON PURPOSE
 -------------------------------------
 No Chrome is launched and no Playwright browser exists. The boundary is
@@ -92,6 +95,10 @@ class FakeLocator:
     def select_option(self, label=None) -> None:
         self.fill(label)
 
+    def set_input_files(self, path: str) -> None:
+        self.page._alive()
+        self.page.uploads.append((self.page.url, path))
+
     def input_value(self) -> str:
         return self.page.typed.get(self.index, "")
 
@@ -121,6 +128,7 @@ class FakePage:
         self.password_boxes = 0
         self.passwords: list[tuple[str, str]] = []
         self.clicks: list[tuple[str, str]] = []
+        self.uploads: list[tuple[str, str]] = []
 
     def _alive(self) -> None:
         if self.closed or getattr(self, "dead", False):
@@ -994,6 +1002,7 @@ class TestAContinuingJobNeverMovesToAnotherTab:
         wa.browse_to("https://apply.example/form")
         page = live.do(lambda p: p, timeout=5)
         page.fields = [dict(EMAIL_FIELD)]
+        assert "Email" in wf.inspect_form()     # R8: a step needs a read form
 
         assert "Filled" in wf.fill_form_field("Email", "me@example.com")
         assert page.typed == {0: "me@example.com"}
@@ -1004,6 +1013,7 @@ class TestAContinuingJobNeverMovesToAnotherTab:
         page = live.do(lambda p: p, timeout=5)
         page.url = "https://apply.example/form"
         page.fields = [dict(EMAIL_FIELD)]
+        assert "Email" in wf.inspect_form()     # R8: a step needs a read form
 
         assert "Filled" in wf.fill_form_field("Email", "me@example.com")
 
@@ -1241,3 +1251,261 @@ class TestHostsAreComparedExactly:
         page = FakePage(url="https://auth.openai.com.evil.tld/",
                         visible={PAGE_WIDE_CODE_TEXT, wa.CHATGPT.prompt_box[0]})
         assert wa.page_state(page, wa.CHATGPT) not in ("challenge", "signed-out")
+
+
+# ---------------------------------------------------------------------------
+# R8. Same tab is not the same site
+# ---------------------------------------------------------------------------
+UPLOAD_BOX = 'input[type="file"]'
+
+FORM_STEPS = ["fill_form_field", "fill_form_from_profile", "upload_to_form",
+              "submit_form"]
+
+
+@pytest.fixture()
+def his_details(monkeypatch):
+    """The folder fill_form_from_profile reads, faked: one ordinary detail."""
+    from jarvis.tools import profile
+    monkeypatch.setattr(profile, "load_profile", lambda: {"email": "me@x.uz"})
+
+
+def _read_form(session, url: str) -> FakePage:
+    """The tab Jalen is working in, on a form inspect_form has just read."""
+    from jarvis.tools import webforms as wf
+    page = _form_tab(session, url)
+    page.visible.add(UPLOAD_BOX)
+    assert "Email" in wf.inspect_form()
+    return page
+
+
+def _do_the_step(step: str, tmp_path) -> str:
+    from jarvis.tools import profile
+    from jarvis.tools import webforms as wf
+    if step == "fill_form_field":
+        return wf.fill_form_field("Email", "me@example.com")
+    if step == "fill_form_from_profile":
+        return profile.fill_form_from_profile()
+    if step == "upload_to_form":
+        cv = tmp_path / "cv.pdf"
+        cv.write_bytes(b"%PDF-1.4 pretend")
+        return wf.upload_to_form(str(cv))
+    return wf.submit_form()
+
+
+def _what_it_did(page: FakePage) -> list:
+    """Everything a form step put into the page, with where the page was."""
+    return [*page.typed.items(), *page.uploads, *page.clicks]
+
+
+def _moves_when_touched(page: FakePage, to: str) -> None:
+    """
+    The page navigates itself the moment a step starts addressing elements -
+    after every check made at the top of the job, before the typing or the
+    click. A site's own redirect does not wait for Jalen to finish.
+    """
+    real = page.locator
+
+    def locator(selector):
+        page.url = to
+        return real(selector)
+    page.locator = locator
+
+
+class TestAFormStepActsOnlyOnTheSiteThatWasRead:
+    """
+    inspect_form read the fields of the page in Jalen's Chrome; every step
+    after it - fill, fill from his folder, attach, submit - ran on "the same
+    tab" (tab="same"). Same tab is not the same site. A tab that navigated
+    itself between the read and the step (a redirect, a timer, a link) had
+    his details typed into, his CV attached to, or its submit button pressed
+    on a page nobody read. fill_login_field already re-read the host right
+    before typing; none of the others did.
+    """
+
+    @pytest.mark.parametrize("step", FORM_STEPS)
+    def test_nothing_is_done_after_the_tab_went_to_another_site(
+            self, live, his_details, tmp_path, step):
+        form = _read_form(live, "https://apply.example/form")
+        form.url = "https://other.example/form"         # it navigated itself
+
+        said = _do_the_step(step, tmp_path)
+
+        assert _what_it_did(form) == [], f"{step} acted on a page nobody read"
+        assert "other.example" in said, "he must hear where the page is now"
+        assert "read the form again" in said
+
+    @pytest.mark.parametrize("step", FORM_STEPS)
+    def test_a_move_during_the_step_is_caught_right_before_acting(
+            self, live, his_details, tmp_path, step):
+        form = _read_form(live, "https://apply.example/form")
+        _moves_when_touched(form, "https://other.example/form")
+
+        said = _do_the_step(step, tmp_path)
+
+        assert _what_it_did(form) == [], f"{step} acted after the page moved"
+        assert "other.example" in said
+
+    @pytest.mark.parametrize("step", FORM_STEPS)
+    def test_a_form_nobody_read_is_not_acted_on(self, live, his_details,
+                                                tmp_path, step):
+        page = live.do(lambda p: p, timeout=5)
+        page.url = "https://apply.example/form"
+        page.fields = [dict(EMAIL_FIELD)]
+        page.visible |= {'button[type="submit"]', UPLOAD_BOX}
+
+        said = _do_the_step(step, tmp_path)
+
+        assert _what_it_did(page) == [], f"{step} acted on an unread form"
+        assert "apply.example" in said
+        assert "read the form" in said
+
+    def test_another_page_on_the_same_site_is_not_the_form_either(self, live):
+        from jarvis.tools import webforms as wf
+        form = _read_form(live, "https://apply.example/form")
+        form.url = "https://apply.example/account/delete"
+
+        said = wf.submit_form()
+
+        assert form.clicks == [], "pressed a button on a page nobody read"
+        assert "apply.example" in said
+        assert "read the form again" in said
+
+    def test_a_move_onto_a_protected_site_is_refused_as_one(self, live):
+        """The never-touch check stays, and stays first."""
+        from jarvis.tools import webforms as wf
+        form = _read_form(live, "https://apply.example/form")
+        form.url = "https://www.paypal.com/signin"
+
+        said = wf.submit_form()
+
+        assert form.clicks == []
+        assert "never-touch" in said.lower()
+
+    def test_the_whole_flow_on_one_page_still_works(self, live, tmp_path):
+        """One read covers fill, attach, submit, and the fix after it."""
+        from jarvis.tools import webforms as wf
+        form = _read_form(live, "https://apply.example/form")
+        cv = tmp_path / "cv.pdf"
+        cv.write_bytes(b"%PDF-1.4 pretend")
+
+        assert "Filled" in wf.fill_form_field("Email", "me@example.com")
+        # Sites rewrite their own query and #fragment as you go; that is
+        # still the form that was read.
+        form.url = "https://apply.example/form/?step=2#email"
+        assert "Attached" in wf.upload_to_form(str(cv))
+        wf.submit_form()
+        assert form.clicks, "submit was refused on the page that was read"
+        assert "Filled" in wf.fill_form_field("Email", "fixed@example.com")
+        assert form.typed == {0: "fixed@example.com"}
+
+    def test_reading_the_new_page_lets_the_work_carry_on(self, live):
+        """The refusal is not a dead end: read it, and it is the form now."""
+        from jarvis.tools import webforms as wf
+        form = _read_form(live, "https://apply.example/form")
+        form.url = "https://other.example/form"
+        assert "read the form again" in wf.fill_form_field("Email", "a@b.uz")
+
+        assert "Email" in wf.inspect_form()
+
+        assert "Filled" in wf.fill_form_field("Email", "a@b.uz")
+        assert form.typed == {0: "a@b.uz"}
+
+    def test_a_read_that_found_no_form_replaces_the_last_one(self, live):
+        """What was read is what the LAST read found - here, nothing."""
+        from jarvis.tools import webforms as wf
+        form = _read_form(live, "https://apply.example/form")
+        form.fields = []
+        assert "No form fields" in wf.inspect_form()
+        form.fields = [dict(EMAIL_FIELD)]
+
+        said = wf.fill_form_field("Email", "a@b.uz")
+
+        assert form.typed == {}
+        assert "read the form" in said
+
+    def test_a_page_that_moved_while_being_read_is_not_taken_as_read(self,
+                                                                    live):
+        """
+        The fields came from apply.example; the page is on other.example by
+        the time the read ends. Remembering where it ENDED would let the next
+        fill act on other.example on the strength of apply.example's fields.
+        """
+        from jarvis.tools import webforms as wf
+        form = _form_tab(live, "https://apply.example/form")
+        real = form.evaluate
+
+        def scan_then_move(script, *args):
+            out = real(script, *args)
+            if script == wf._SCAN:
+                form.url = "https://other.example/form"
+            return out
+        form.evaluate = scan_then_move
+
+        said = wf.inspect_form()
+        form.evaluate = real
+
+        assert "other.example" in said
+        wf.fill_form_field("Email", "a@b.uz")
+        assert form.typed == {}
+
+
+class TestAPageWithNothingToTypeIsStillAForm:
+    """
+    The independent review of the R8 fix found that a read which found NO
+    fields recorded nothing, and every step needs a record - so a review page
+    with only a Submit button, or a CV page whose file input is hidden (the
+    field scan skips hidden inputs), was refused forever: "read the form
+    first", "No form fields", refused again. The old code submitted and
+    attached on both. Reproduced in real headless Chrome by the reviewer.
+
+    Every completed read now records the page. TYPING still needs a read that
+    saw fields: a field nobody read is not one to type his details into.
+    """
+
+    def test_a_review_page_with_only_a_submit_button_can_be_submitted(self, live):
+        from jarvis.tools import webforms as wf
+        page = _form_tab(live, "https://apply.example/review")
+        page.fields = []
+        assert "No form fields" in wf.inspect_form()
+
+        wf.submit_form()
+
+        assert page.clicks and page.clicks[0][0] == "https://apply.example/review"
+
+    def test_a_hidden_file_input_can_still_be_attached_to(self, live, tmp_path):
+        from jarvis.tools import webforms as wf
+        page = _form_tab(live, "https://apply.example/upload")
+        page.fields = []
+        page.visible.add(UPLOAD_BOX)
+        assert "No form fields" in wf.inspect_form()
+        cv = tmp_path / "cv.pdf"
+        cv.write_bytes(b"%PDF-1.4 pretend")
+
+        wf.upload_to_form(str(cv))
+
+        assert page.uploads, "the attachment was refused on the page that was read"
+
+    def test_typing_still_needs_a_read_that_saw_fields(self, live):
+        from jarvis.tools import webforms as wf
+        page = _form_tab(live, "https://apply.example/review")
+        page.fields = []
+        wf.inspect_form()
+        page.fields = [dict(EMAIL_FIELD)]          # a field appeared later
+
+        said = wf.fill_form_field("Email", "a@b.uz")
+
+        assert page.typed == {}
+        assert "read the form" in said
+
+    @pytest.mark.parametrize("moved_to", [
+        "http://apply.example/form",               # the same host, not encrypted
+        "https://apply.example:8443/form",         # the same host, another server
+    ])
+    def test_another_scheme_or_port_is_another_site(self, live, moved_to):
+        from jarvis.tools import webforms as wf
+        form = _read_form(live, "https://apply.example/form")
+        form.url = moved_to
+
+        wf.submit_form()
+
+        assert form.clicks == []

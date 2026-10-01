@@ -77,6 +77,21 @@ def _every_test_starts_and_ends_untainted():
     taint.he_asked_again()
 
 
+@pytest.fixture(autouse=True)
+def _every_test_starts_with_no_form_read():
+    """
+    The form inspect_form last read (webforms._FORM_READ) is process-wide,
+    the same shape as taint above: left set by one file, it would let a
+    later test's fill act on a form that test never read - and a test that
+    asserts "nothing read, nothing filled" pass or fail by file order.
+    """
+    from jarvis.tools import webforms
+
+    webforms._forget_the_form()
+    yield
+    webforms._forget_the_form()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _keep_tests_out_of_real_data(tmp_path_factory):
     scratch = tmp_path_factory.mktemp("jarvis-test-data")

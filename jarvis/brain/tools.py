@@ -662,7 +662,10 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "details in'. It NEVER touches password fields (vault only) or "
         "payment fields (his by rule), and it tells you exactly what it "
         "filled, what it still needs from him, and what it left for him. "
-        "After it runs, ask_user only for what it reports as still needed.",
+        "After it runs, ask_user only for what it reports as still needed. "
+        "Call inspect_form first: like every form step, it acts only on the "
+        "page inspect_form last read, and does nothing if the tab has moved "
+        "since.",
         {},
     ),
     "whats_my": (
@@ -683,7 +686,7 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "upload_to_form": (
         "Attach a real file to the form's file input - a CV, a PDF, an image. "
         "Give the full path. If the page has several upload boxes, also give "
-        "the field label.",
+        "the field label. Only on the page inspect_form last read.",
         {
             "path": ("string", "full path to the file", True),
             "field": ("string", "which upload box, if there are several", False),

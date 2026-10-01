@@ -262,7 +262,7 @@ def whats_my(query: str = "") -> str:
             f"I'll have it next time.")
 
 
-def fill_page(page, profile: dict) -> dict:
+def fill_page(page, profile: dict, before_typing=None) -> dict:
     """
     Fill one page from a profile dict. Split out so it can be tested against
     a real browser page without the whole session machinery.
@@ -270,6 +270,11 @@ def fill_page(page, profile: dict) -> dict:
     Returns {filled, needed, payment, secret} - lists of field labels, so
     the caller can tell him precisely what happened to each field rather
     than a bare success line on a form that is only half done.
+
+    `before_typing`, if given, is asked immediately before EACH value goes
+    in: "" to carry on, or a sentence to stop on. The stop comes back as
+    "moved", with what was filled before it. A page can navigate itself
+    halfway down a form, and the rest of his details must not follow it.
     """
     from .webforms import _SCAN
 
@@ -293,6 +298,10 @@ def fill_page(page, profile: dict) -> dict:
             continue
         try:
             element = page.locator("input, textarea, select").nth(field["index"])
+            moved = before_typing() if before_typing is not None else ""
+            if moved:
+                return {"filled": filled, "needed": needed, "payment": payment,
+                        "secret": secret, "moved": moved}
             if ftype == "select-one":
                 element.select_option(label=value)
             else:
@@ -315,6 +324,7 @@ def fill_form_from_profile() -> str:
     silently, because a silent skip reads as "done" on a form that is not.
     """
     from .webagent import BrowserUnavailable, _never_touch, _Session
+    from .webforms import _not_the_form_read
 
     profile = load_profile()
     if not profile:
@@ -322,9 +332,14 @@ def fill_form_from_profile() -> str:
                 "data/personal_info/profile.md, fill in what you're happy "
                 "for me to use, and say this again.")
 
+    # Only into the form inspect_form read, checked where the page is at the
+    # start of the job AND before every single value (webforms: THE FORM THAT
+    # WAS READ). Same tab is not the same site.
     def job(page):
         return (_never_touch(page.url, "fill your details in")
-                or fill_page(page, profile))
+                or _not_the_form_read(page.url, "fill your details in", typing=True)
+                or fill_page(page, profile, before_typing=lambda: (
+                    _not_the_form_read(page.url, "fill in anything more", typing=True))))
 
     # tab="same": "fill this in" means the form he is looking at. If he
     # closed that tab, the session would hand this job whichever tab is still
@@ -337,6 +352,10 @@ def fill_form_from_profile() -> str:
         return f"I couldn't read the form: {type(exc).__name__}: {exc}"
     if isinstance(result, str):
         return result
+    if result.get("moved"):
+        done = (f" Before it moved I had filled {', '.join(result['filled'])}."
+                if result["filled"] else "")
+        return result["moved"] + done
 
     parts = []
     if result["filled"]:

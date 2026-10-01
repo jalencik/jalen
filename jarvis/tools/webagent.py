@@ -908,6 +908,9 @@ class _Session:
           "same"   it CONTINUES earlier work (fill, submit, type a secret).
                    If the working tab was closed and replaced since, it is
                    refused with TAB_REPLACED instead of being run elsewhere.
+                   Same tab is not same site: the tab can navigate itself,
+                   so the job must also check page.url right before acting
+                   (webforms._not_the_form_read, fill_login_field's host).
         """
         if tab not in _TAB_MODES:
             raise ValueError(f"tab must be one of {_TAB_MODES}, not {tab!r}")
