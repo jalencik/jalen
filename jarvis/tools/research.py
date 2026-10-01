@@ -122,7 +122,7 @@ def _fence(text: str, source: str) -> str:
     # ever told it.
     from .. import taint
 
-    taint.mark(source)
+    taint.mark(source, text)
     flags = _safety.scan_for_injection(text)
     warning = ""
     if flags:
@@ -386,6 +386,15 @@ def web_read(url: str) -> str:
     blocked = _safety.classify("web_read", {"url": target}, origin=taint.origin_now())
     if blocked.tier.name == "BLACK":
         return f"I won't open that — {blocked.reason}"
+
+    # After a read, only an address Jalen was SHOWN. An address it built out
+    # of what it read is how data leaves: see
+    # tests/test_web_read_after_a_read_cannot_carry_data.py.
+    if (taint.is_tainted() and not taint.url_was_read(target)
+            and not _safety.unseen_url_is_harmless(target)):
+        return ("I read something while doing this, and that address wasn't "
+                "in it, so I won't open it on its say-so. Ask me to open it "
+                "yourself and I will.")
 
     try:
         page = _fetch(target)

@@ -146,7 +146,7 @@ def _fence(text: str, source: str) -> str:
     # ever told it.
     from .. import taint
 
-    taint.mark(source)
+    taint.mark(source, text)
     flags = _safety.scan_for_injection(text)
     warning = ""
     if flags:

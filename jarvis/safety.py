@@ -39,6 +39,11 @@ class Verdict:
         return self.tier is Tier.GREEN
 
 
+# Longest address web_read will fetch after a read without having been
+# shown it. A Wikipedia article URL with a long title is about 120; this
+# leaves room and still cannot carry a token. NOT MEASURED beyond that.
+_MAX_HARMLESS_URL = 200
+
 # Argument names that carry a location. "path", "file" and "dir" were the
 # only ones inspected, so project_status(folder=...), open_in(target=...) and
 # copy_file/move_file(destination=...) were never checked at all - and
@@ -228,6 +233,9 @@ class SafetyEngine:
                 if norm == blocked or norm.startswith(blocked + "/"):
                     return f"path is on the never-touch list ({blocked})"
             # Every component, not only the final name: a protected name
+        self._read_hosts = tuple(
+            str(h).strip().lower().lstrip(".")
+            for h in (guard.get("allow_unseen_urls_on_hosts", []) or []) if str(h).strip())
             # used as a FOLDER ("Mother credentials" moved off the Desktop,
             # a "passwords" folder of plain .txt files) protects what is
             # inside it too. Only the components he WROTE (after expansion),
@@ -357,6 +365,27 @@ class SafetyEngine:
             # tool can be classified properly later.
             base = Tier.AMBER
             detail["unclassified"] = True
+    def unseen_url_is_harmless(self, address: str) -> bool:
+        """
+        May web_read fetch this address after a read although it was never
+        SHOWN to Jalen (taint.url_was_read)? Only a plain reference page on
+        a host no stranger controls (injection_guard.
+        allow_unseen_urls_on_hosts in safety.yaml): no query, no fragment,
+        no credentials, short. Even there the path stays short, so the
+        address cannot carry what was just read.
+        """
+        from urllib.parse import urlsplit
+
+        try:
+            parts = urlsplit(address if "://" in address else "https://" + address)
+            host = (parts.hostname or "").rstrip(".").lower()
+        except ValueError:
+            return False
+        if (not host or parts.query or parts.fragment or parts.username
+                or parts.password or len(address) > _MAX_HARMLESS_URL):
+            return False
+        return any(host == h or host.endswith("." + h) for h in self._read_hosts)
+
 
         if base is Tier.BLACK:
             return Verdict(

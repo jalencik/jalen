@@ -56,6 +56,7 @@ the only event that can honestly mean "this is his instruction, not a page's".
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 
@@ -71,17 +72,75 @@ _SOURCES: list[tuple[float, str]] = []
 MAX_AGE_S = 600.0
 
 
-def mark(source: str) -> None:
+# Web addresses that appeared, written out, in text Jalen has read since he
+# last spoke. web_read may follow one of these after a read, and may NOT
+# build a new address out of what it read - see url_was_read. Cleared with
+# the taint. 500 is a backstop against a page that lists thousands of links;
+# NOT MEASURED (one search result page carries about 10).
+_SEEN_URLS: set[str] = set()
+_MAX_SEEN_URLS = 500
+_URL_IN_TEXT = re.compile(r"https?://[^\s<>\"'`\\]+", re.IGNORECASE)
+_TRAILING = ".,;:!?)]}>'\""
+
+
+def _address_key(address: str) -> str:
+    """
+    One comparable form for an address, so "the same address spelled a
+    little differently" counts as the same: scheme ignored, host lowercased,
+    fragment and trailing slash dropped, the QUERY kept - the query is where
+    a payload goes, so a different query is a different address.
+    """
+    from urllib.parse import urlsplit
+
+    s = str(address).strip().rstrip(_TRAILING)
+    if "://" not in s:
+        s = "https://" + s
+    try:
+        parts = urlsplit(s)
+    except ValueError:
+        return ""
+    host = (parts.hostname or "").rstrip(".").lower()
+    if not host:
+        return ""
+    port = f":{parts.port}" if parts.port not in (None, 80, 443) else ""
+    path = parts.path.rstrip("/")
+    return f"{host}{port}{path}" + (f"?{parts.query}" if parts.query else "")
+
+
+def mark(source: str, text: str = "") -> None:
     """
     Untrusted text just entered the turn. Called by the content fences.
 
     `source` is kept for the audit line - "refused because you were reading an
     email from x@y.com" is a sentence he can act on; "refused: content" is not.
+
+    `text` is what was read. Every web address written out in it is
+    remembered (see url_was_read). A fence that marks the turn without
+    passing its text turns "read my email and open the link in it" into a
+    refusal, so tests/test_web_read_after_a_read_cannot_carry_data.py checks
+    that each fence does.
     """
+    found = [_address_key(m) for m in _URL_IN_TEXT.findall(text or "")] if text else []
     with _LOCK:
         _SOURCES.append((time.monotonic(), str(source)[:120]))
         if len(_SOURCES) > 20:
             del _SOURCES[:-20]
+        for key in found:
+            if key and len(_SEEN_URLS) < _MAX_SEEN_URLS:
+                _SEEN_URLS.add(key)
+
+
+def url_was_read(address: str) -> bool:
+    """
+    Did this exact address appear, written out, in text read this turn?
+
+    The only sound test for "may Jalen fetch this after a read": the address
+    was SHOWN to it. An address it BUILT (a stranger's host plus a query made
+    of whatever it read) was not, and is how data leaves.
+    """
+    key = _address_key(address)
+    with _LOCK:
+        return bool(key) and key in _SEEN_URLS
 
 
 # The place HE named in the instruction that started this - "Saved Messages",
@@ -105,6 +164,7 @@ def he_asked_again() -> None:
     global _NAMED
     with _LOCK:
         _SOURCES.clear()
+        _SEEN_URLS.clear()
         _NAMED = ""
 
 
