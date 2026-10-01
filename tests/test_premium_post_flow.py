@@ -124,7 +124,10 @@ def test_the_whole_flow_leaves_nothing_for_him_to_fix(account, engine):
     assert post.count("<tg-emoji") == 4, "the draft has four emoji: title, Project, Requirements, sign-off"
     send_args = {"to": CHANNEL, "text": post}
     verdict = engine.classify("send_telegram_message", send_args, origin=taint.origin_now())
-    assert verdict.tier is Tier.GREEN and not verdict.requires_confirmation
+    # No question; announced first with its opening line and links (AMBER),
+    # his decision of 2026-10-01: tests/test_channel_posts_are_read_aloud_first.py.
+    assert verdict.tier is Tier.AMBER and not verdict.requires_confirmation
+    assert "Project" in verdict.summary or "starts" in verdict.summary
 
     result = messaging.send_telegram_message(**send_args)
     assert result.startswith("Sent to " + CHANNEL)
@@ -139,8 +142,9 @@ def test_the_whole_flow_leaves_nothing_for_him_to_fix(account, engine):
     # 3. The sticker - only because he asked for one ("post it with a sticker"):
     #    its own message, after the post. Nothing sends it by default.
     sticker_args = {"to": CHANNEL, "emoji": ROCKET}
+    # The channel is announced first, like the post (his decision, 2026-10-01).
     assert engine.classify("send_sticker", sticker_args,
-                           origin=taint.origin_now()).tier is Tier.GREEN
+                           origin=taint.origin_now()).tier is Tier.AMBER
     sticker_reply = stickers.send_sticker(**sticker_args)
     assert sticker_reply.startswith("Sent a " + ROCKET + " sticker to " + CHANNEL)
     assert "favourite" in sticker_reply.lower()

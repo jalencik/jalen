@@ -213,6 +213,39 @@ def _said(value: Any, limit: int) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + " ... and more"
 
 
+_MARKUP = re.compile(r"<[^>]+>")
+_ADDRESS = re.compile(r"https?://[^\s\"'<>)\]]+", re.IGNORECASE)
+
+
+def _first_spoken_line(text: str, limit: int = 110) -> str:
+    """The first non-empty line as it will be READ ALOUD: tags gone, entities decoded."""
+    import html as _html
+
+    plain = _html.unescape(_MARKUP.sub("", str(text or "")))
+    # A spoken URL is noise; the hosts are named separately after it.
+    plain = _ADDRESS.sub("a link", plain)
+    for line in plain.splitlines():
+        line = " ".join(line.split())
+        if line:
+            return line if len(line) <= limit else line[:limit].rstrip() + " ..."
+    return ""
+
+
+def _link_hosts(text: str) -> list[str]:
+    """The hosts of every web address in the post, markup included (href="..."), in order."""
+    from urllib.parse import urlsplit
+
+    seen: list[str] = []
+    for address in _ADDRESS.findall(str(text or "")):
+        try:
+            host = (urlsplit(address).hostname or "").lower()
+        except ValueError:
+            host = ""
+        if host and host not in seen:
+            seen.append(host)
+    return seen
+
+
 def _voice_message_summary(args: dict[str, Any]) -> str:
     """
     The question he is asked before Jalen speaks as him: WHO and the EXACT
@@ -612,11 +645,25 @@ class SafetyEngine:
         # text in front of Jalen.
         if base is Tier.RED and origin == "user" and self._is_preapproved(tool, args):
             detail["preapproved_destination"] = True
-            return Verdict(
-                Tier.GREEN, tool, summary,
-                "a destination you pre-approved in config",
-                False, False, False, detail,
-            )
+            if self._reaches_his_community(tool, args):
+                # HIS CHANNEL IS READ ALOUD FIRST (his decision, 2026-10-01,
+                # asked as a poll). Pre-approval stays - no question - but
+                # the post is announced with its first line and the hosts of
+                # its links, and goes unless he says stop. Why: something
+                # read earlier in the same conversation can still be in the
+                # model's context when a CLEAN turn says "post today's
+                # summary", and the gate cannot see that; a person can.
+                # Falls through to step 4, so paranoid mode asks and the
+                # autonomous posture stays silent, like every AMBER action.
+                base = Tier.AMBER
+                summary = self._post_summary(tool, args)
+                detail["read_aloud_first"] = True
+            else:
+                return Verdict(
+                    Tier.GREEN, tool, summary,
+                    "a destination you pre-approved in config",
+                    False, False, False, detail,
+                )
 
         # 4. Posture adjustments.
         tier = base
@@ -674,6 +721,60 @@ class SafetyEngine:
     @property
     def _self_chat_preapproved(self) -> bool:
         return any(name in SELF_CHAT_ALIASES for name in self._preapproved)
+
+    def _reaches_his_community(self, tool: str, args: dict[str, Any]) -> bool:
+        """
+        Does this pre-approved send go where OTHER PEOPLE read it? Not his
+        own Saved Messages (it reaches nobody) and not a batch saved as
+        drafts (it reaches nobody until he presses send himself).
+        """
+        if tool == "send_posts" and args.get("as_draft"):
+            return False
+        arg = self._DESTINATION_ARG.get(tool)
+        return not (arg and _is_self_chat(args.get(arg, "")))
+
+    @staticmethod
+    def _post_summary(tool: str, args: dict[str, Any]) -> str:
+        """
+        What he hears before a post to his channel goes out: where, how many,
+        the first line with the markup taken out, and the HOSTS of the links -
+        "links to forms.gle", never a spoken URL - so a link he did not write
+        is the thing that stands out.
+        """
+        where = _said(args.get("to"), 60) or "your channel"
+        if tool == "send_voice_message":
+            return _voice_message_summary(args)
+        if tool == "send_sticker":
+            what = " ".join(x for x in (_said(args.get("emoji"), 20),
+                                        _said(args.get("pack"), 40)) if x)
+            return f"send a sticker ({what}) to {where}" if what else f"send a sticker to {where}"
+        if tool == "send_posts":
+            posts = [p.get("text", "") if isinstance(p, dict) else str(p or "")
+                     for p in (args.get("posts") or [])]
+            count = f"{len(posts)} post" + ("" if len(posts) == 1 else "s")
+            text = posts[0] if posts else ""
+            head = f"post {count} to {where}"
+            joined = " ".join(posts)
+        elif tool == "send_telegram_file":
+            name = _said(str(args.get("file", "")).replace("\\", "/").rsplit("/", 1)[-1], 60)
+            text = str(args.get("caption") or "")
+            head = f"send the file {name} to {where}" if name else f"send a file to {where}"
+            joined = text
+        else:
+            text = str(args.get("text") or "")
+            head = f"post to {where}"
+            joined = text
+        first = _first_spoken_line(text)
+        hosts = _link_hosts(joined)
+        if hosts:
+            shown = hosts[:3]
+            links = ("links to " + ", ".join(shown[:-1]) + (" and " if len(shown) > 1 else "")
+                     + shown[-1])
+            if len(hosts) > 3:
+                links += f" and {len(hosts) - 3} more"
+        else:
+            links = "no links"
+        return f'{head}. It starts "{first}", {links}' if first else f"{head}, {links}"
 
     def _is_preapproved(self, tool: str, args: dict[str, Any]) -> bool:
         """

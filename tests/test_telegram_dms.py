@@ -696,7 +696,8 @@ def test_a_reply_or_a_topic_does_not_make_a_person_pre_approved(args):
 def test_the_pre_approved_channel_still_needs_him_not_a_message_he_read():
     engine = SafetyEngine(CONFIG)
     args = {"to": "AI engineering & Machine learning", "text": "x", "reply_to": "5"}
-    assert engine.classify("send_telegram_message", args, origin="user").tier is Tier.GREEN
+    # No question, but announced first (AMBER): his decision of 2026-10-01.
+    assert engine.classify("send_telegram_message", args, origin="user").tier is Tier.AMBER
     assert engine.classify("send_telegram_message", args, origin="content").tier is Tier.BLACK
 
 
@@ -807,7 +808,7 @@ def test_a_group_copying_the_title_of_his_channel_does_not_receive_the_post(monk
                                                    Dialog(real, is_user=False)]))
     name = "AI engineering & Machine learning"
     assert SafetyEngine(CONFIG).classify(
-        "send_telegram_message", {"to": name, "text": "x"}, origin="user").tier is Tier.GREEN
+        "send_telegram_message", {"to": name, "text": "x"}, origin="user").tier is Tier.AMBER
     reply = messaging.send_telegram_message(to=name, text="hello community")
     assert "More than one" in reply and client.sent == []
 

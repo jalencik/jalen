@@ -98,7 +98,11 @@ def test_a_fragment_or_a_longer_name_is_not_pre_approved(engine, to):
     "AI Engineering &amp; Machine Learning",
 ])
 def test_what_he_pre_approved_still_goes_without_asking(engine, to):
-    assert _tier(engine, to) is Tier.GREEN, to
+    # Without a QUESTION. His channel is announced first - AMBER, his decision of
+    # 2026-10-01 (tests/test_channel_posts_are_read_aloud_first.py); his own notebook
+    # reaches nobody and stays GREEN.
+    channel = "machine learning" in to.lower()
+    assert _tier(engine, to) is (Tier.AMBER if channel else Tier.GREEN), to
 
 
 @pytest.mark.parametrize("to", ["Uluhbek", "Rodion", "Mom", "@durov", "+998901234567"])
@@ -124,7 +128,11 @@ def test_a_fragment_is_not_pre_approved_for_a_voice_message_either(engine, to):
     "AI Engineering &amp; Machine Learning",
 ])
 def test_what_he_pre_approved_goes_without_asking_as_a_voice_message_too(engine, to):
-    assert _tier(engine, to, tool="send_voice_message") is Tier.GREEN, to
+    # Without a QUESTION. His channel is announced first - AMBER, his decision of
+    # 2026-10-01 (tests/test_channel_posts_are_read_aloud_first.py); his own notebook
+    # reaches nobody and stays GREEN.
+    channel = "machine learning" in to.lower()
+    assert _tier(engine, to, tool="send_voice_message") is (Tier.AMBER if channel else Tier.GREEN), to
 
 
 @pytest.mark.parametrize("to", ["Uluhbek", "Rodion", "Mom", "@durov", "+998901234567"])
@@ -204,7 +212,7 @@ def test_the_batch_and_file_sends_honour_pre_approval_too(engine, tool):
     file to his own Saved Messages asked every time - while the
     send_telegram_file spec told the model it would not.
     """
-    assert _tier(engine, CHANNEL, tool=tool) is Tier.GREEN
+    assert _tier(engine, CHANNEL, tool=tool) is Tier.AMBER      # announced first, no question
     assert _tier(engine, "Saved Messages", tool=tool) is Tier.GREEN
     assert _tier(engine, "Rodion", tool=tool) is Tier.RED
     assert _tier(engine, "Ed", tool=tool) is Tier.RED

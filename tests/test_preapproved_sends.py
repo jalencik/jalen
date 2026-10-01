@@ -27,19 +27,32 @@ def engine() -> SafetyEngine:
 
 @pytest.mark.parametrize(
     "destination",
-    [
-        "Saved Messages",
-        "saved messages",
-        "SAVED MESSAGES",
-        "AI engineering & Machine learning",
-        "ai engineering and machine learning",
-        "AI Engineering &amp; Machine Learning",
-    ],
+    ["Saved Messages", "saved messages", "SAVED MESSAGES"],
 )
 def test_his_own_destinations_send_without_asking(engine, destination):
     verdict = engine.classify("send_telegram_message", {"to": destination, "text": "hi"})
     assert verdict.tier is Tier.GREEN, f"{destination!r} still asks for permission"
     assert verdict.requires_confirmation is False
+
+
+@pytest.mark.parametrize(
+    "destination",
+    [
+        "AI engineering & Machine learning",
+        "ai engineering and machine learning",
+        "AI Engineering &amp; Machine Learning",
+    ],
+)
+def test_his_channel_sends_without_a_question_but_is_read_aloud_first(engine, destination):
+    """
+    No question - his own instruction stands - but since 2026-10-01 (his
+    decision, a poll) the post is announced with its first line and the hosts
+    of its links, and goes unless he says stop: AMBER, not GREEN.
+    tests/test_channel_posts_are_read_aloud_first.py covers the wording.
+    """
+    verdict = engine.classify("send_telegram_message", {"to": destination, "text": "hi"})
+    assert verdict.tier is Tier.AMBER, f"{destination!r}"
+    assert verdict.requires_confirmation is False and verdict.announce is True
 
 
 @pytest.mark.parametrize(
@@ -78,18 +91,19 @@ def test_read_content_can_never_send_anywhere(engine, destination):
 
 
 @pytest.mark.parametrize(
-    "destination",
+    "destination, tier",
     [
-        "Saved Messages",
-        "saved messages",
-        "AI engineering & Machine learning",
-        "AI Engineering &amp; Machine Learning",
+        ("Saved Messages", Tier.GREEN),
+        ("saved messages", Tier.GREEN),
+        ("AI engineering & Machine learning", Tier.AMBER),
+        ("AI Engineering &amp; Machine Learning", Tier.AMBER),
     ],
 )
-def test_a_voice_message_to_his_own_destinations_goes_without_asking(engine, destination):
-    """send_voice_message has the SAME pre-approved destinations as a text."""
+def test_a_voice_message_to_his_own_destinations_goes_without_a_question(engine, destination, tier):
+    """send_voice_message has the SAME pre-approved destinations as a text:
+    Saved Messages silently, his channel announced first (AMBER)."""
     verdict = engine.classify("send_voice_message", {"to": destination, "text": "hi"})
-    assert verdict.tier is Tier.GREEN, f"{destination!r} still asks for permission"
+    assert verdict.tier is tier, f"{destination!r}"
     assert verdict.requires_confirmation is False
 
 

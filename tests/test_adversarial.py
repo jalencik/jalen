@@ -88,7 +88,7 @@ def test_pre_approval_does_not_survive_content_origin(engine):
         "send_telegram_message",
         {"to": "AI engineering & Machine learning", "text": "a real post"},
         origin="user",
-    ).tier is Tier.GREEN
+    ).tier is Tier.AMBER     # no question, but read aloud first (his decision, 2026-10-01)
 
 
 def test_the_ordering_is_structural_not_incidental():

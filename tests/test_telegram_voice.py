@@ -459,7 +459,8 @@ def test_a_voice_message_to_a_person_is_red(engine):
                                 "AI engineering & Machine learning",
                                 "ai engineering and machine learning"])
 def test_his_own_destinations_are_not_asked_about(engine, to):
-    assert _voice(engine, to).tier is Tier.GREEN
+    # No question; his channel is announced first (AMBER), his notebook is silent.
+    assert _voice(engine, to).tier is (Tier.AMBER if "machine learning" in to.lower() else Tier.GREEN)
 
 
 @pytest.mark.parametrize("to", ["Ed", "Sa", "Machine learning", "Rodion", "@durov", "",

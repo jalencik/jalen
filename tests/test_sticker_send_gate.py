@@ -99,7 +99,8 @@ def test_a_sticker_gets_the_text_sends_verdict(engine, to, origin):
 
 @pytest.mark.parametrize("to", [CHANNEL, "Saved Messages", "me"])
 def test_his_own_destinations_go_without_asking(engine, to):
-    assert _verdict(engine, "send_sticker", to).tier is Tier.GREEN
+    # No question; his channel is announced first (AMBER), his notebook is silent.
+    assert _verdict(engine, "send_sticker", to).tier is (Tier.AMBER if to == CHANNEL else Tier.GREEN)
 
 
 @pytest.mark.parametrize("to", ["Rodion", "Uluhbek", "@durov", "Ed", "a", ""])
