@@ -1,275 +1,449 @@
-# Setting up Jarvis
+# Setting up Jalen
 
-Written for someone who hasn't done this before. Do the steps in order. Each
-one takes a few minutes. You can stop after Step 8 and Jarvis will talk to you —
-everything after that adds abilities.
+The assistant is called Jalen. The Python package and a few file names still say `jarvis`, and "Hey Jarvis" wakes him too.
 
-If something breaks, run `python run.py --check` first. It usually tells you
-exactly what's wrong.
+Written for someone who hasn't done this before. Do the steps in order. After Step 9 Jalen will talk to you. Everything after that adds accounts and abilities.
 
----
+If something breaks, stop Jalen (`.\jalen.ps1 stop`) and run `.\jalen.ps1 check` from the project folder. It says what is missing in plain words. `.\jalen.ps1 todo` lists what still needs you.
 
-## Step 1 — Install Python 3.13 (64-bit)
+## Three rules for one laptop
 
-Download from <https://www.python.org/downloads/windows/>. Pick **Windows
-installer (64-bit)**.
+Read these once. Breaking them causes problems that are hard to trace.
 
-**On the first screen, tick "Add python.exe to PATH".** If you miss it, nothing
-below works.
-
-Check it worked — open PowerShell and run:
-
-```powershell
-python --version
-```
-
-You want `Python 3.13.x`. If it says 3.11 or lower, install the newer one.
-32-bit will not work: onnxruntime has no 32-bit wheels.
+- **One Jalen at a time, in any mode.** Voice, text and the Telegram bot are modes of the same Jalen. A second launch is refused while one is running.
+- **One program at a time on your Telegram login.** The personal Telegram session file (`data\telegram_user.session`) may be used by only one program at once. A second one can get the session killed or corrupted. So stop Jalen before you run `connect_telegram.py` (even with `--status`) or `.\jalen.ps1 check`.
+- **Always run Jalen from the same folder.** The "only one Jalen" lock, the autostart entries and the Chrome extension link all belong to the folder they were set up from. Do not run Jalen from a second copy, or from a git worktree under `.claude\worktrees\`. Those copies have no `.venv`, `.env`, `data\` or `models\`.
 
 ---
 
-## Step 2 — Put the project somewhere sensible
+## Step 1 — Install Python 3.13 (64-bit), Chrome, and microphone access
 
-The repo should already be at `C:\Users\user\Desktop\Jarvis`. Open PowerShell
-there:
+Go to <https://www.python.org/downloads/windows/> and pick a **3.13.x** release, then **Windows installer (64-bit)**. Do not just take the newest Python at the top of python.org. `requirements.txt` is written for 3.12 or 3.13, the working machine runs 3.13.15, and newer versions are untested.
+
+On the first screen tick **"Add python.exe to PATH"**, and leave the **py launcher** ticked.
+
+Check it in a new PowerShell window:
 
 ```powershell
-cd C:\Users\user\Desktop\Jarvis
+py -3.13 --version
 ```
+
+You want `Python 3.13.x`. 32-bit Python will not work, because onnxruntime has no 32-bit wheels.
+
+Also install **Google Chrome**, because the Jalen extension and the ChatGPT/Gemini hand-off both use it.
+
+Then allow microphone access. In **Settings → Privacy → Microphone** (Windows 11: **Settings → Privacy & security → Microphone**), turn on **Allow desktop apps to access your microphone** (Windows 11: **Let desktop apps access your microphone**).
 
 ---
 
-## Step 3 — Create a virtual environment
+## Step 2 — Put the project in place
 
-This keeps Jarvis's packages separate from everything else on your machine, so
-nothing you install later can break it.
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-```
-
-If you get *"running scripts is disabled on this system"*:
+There is no online copy to clone, so copy the whole project folder from the machine that has it. The other docs assume this location. Any folder works, as long as you always run Jalen from the same one:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process RemoteSigned
-.venv\Scripts\Activate.ps1
+cd C:\Users\<you>\Desktop\Jarvis-setup\jarvis
 ```
 
-You'll know it worked when your prompt starts with `(.venv)`. **You need to run
-that `Activate` line every time you open a new terminal.**
+Some files are deliberately left out of git, so a code-only copy does not bring them. The one you cannot get any other way is the wake-word model **`models\hey_jalen.onnx`** (about 0.9 MB). Copy it across by hand; Step 5 has the alternatives.
+
+Do not copy `data\telegram_user.session` or `data\google_token.json` to the new laptop while the old one still runs Jalen. Sign in fresh instead (Steps 10 and 12).
+
+Run Jalen only from this folder (see "Three rules for one laptop" above).
+
+---
+
+## Step 3 — Let PowerShell run the launcher, and create the virtual environment
+
+Jalen starts from a PowerShell script, `jalen.ps1`. A fresh Windows refuses to run scripts, so allow your own once. No admin is needed:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+Unblock-File .\jalen.ps1      # only if the folder came from a download or a zip
+```
+
+Then create the project's own Python:
+
+```powershell
+py -3.13 -m venv .venv
+```
+
+You do not need to activate it. Every command below calls `.venv\Scripts\python.exe` directly, and `jalen.ps1` finds it on its own.
 
 ---
 
 ## Step 4 — Install the packages
 
 ```powershell
-pip install --upgrade pip
-pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Takes 3–8 minutes. It's downloading around 600 MB. Fine to ignore warnings that
-say "WARNING"; only "ERROR" matters.
+Allow about 1.5 GB of disk. The finished `.venv` is about 1.2 GB on the working machine (measured 2026-10-01), and the Claude package alone is a ~105 MB download because the Claude Code program the brain runs is inside it. Lines that say WARNING are fine; only ERROR matters.
+
+If pip says *"No matching distribution found for claude-agent-sdk"*, your Python is most likely 32-bit (Step 1). `requirements.txt` refuses on purpose any build of that package that lacks the program inside it.
 
 ---
 
 ## Step 5 — Download the local models
 
 ```powershell
-python scripts\download_models.py
+.venv\Scripts\python.exe scripts\download_models.py
 ```
 
-About 8 MB — the "hey jarvis" wake word and the voice detector.
+About 8 MB, and it needs the internet. It fetches the voice detector (Silero VAD) and the pretrained "hey jarvis" wake model with its two feature models.
+
+It does **not** fetch Jalen's own wake model, `models\hey_jalen.onnx`. That model was trained on the working machine and cannot be downloaded. Voice mode loads it first and stops at start-up without it ("Could not find pretrained model for model name 'hey_jalen'"). `.\jalen.ps1 check` does not look for this file. Pick one:
+
+- **Copy it** from the working machine into `models\` (Step 2). This is the best option.
+- **Use "Hey Jarvis" for now.** Put these lines in `config\user.yaml` (Step 8 explains that file) and say "Hey Jarvis" instead:
+
+  ```yaml
+  wake:
+    model: ["hey_jarvis_v0.1"]
+  ```
+
+  (`.\jalen.ps1 setup` rewrites `config\user.yaml`, so add these lines back after running it.)
+- **Train it again**, which takes about 40 minutes. The training script needs one package that is not in `requirements.txt`:
+
+  ```powershell
+  .venv\Scripts\python.exe -m pip install onnx
+  .venv\Scripts\python.exe scripts\train_wake_word.py all
+  ```
+
+Text mode (Step 9) needs no wake model.
+
+Two more models download on their own the first time they are used: the offline speech fallback and the memory model. Keep the internet on for the first run.
 
 ---
 
-## Step 6 — Connect your Claude subscription
+## Step 6 — Make your `.env` and get a Groq key
 
-This is what gives Jarvis its brain, using the Pro plan you already pay for
-rather than buying API credits.
-
-1. Install Claude Code from <https://claude.com/download> if you don't have it.
-2. In PowerShell:
-
-```powershell
-claude setup-token
-```
-
-3. A browser opens. Log in with the Google account on your Claude Pro plan.
-4. Done. The SDK picks the token up automatically.
-
-**Leave `ANTHROPIC_API_KEY` empty in `.env`.** If you set it, you'll be billed
-per token instead of using your subscription.
-
----
-
-## Step 7 — Get a Groq key (speech recognition, free)
-
-1. Go to <https://console.groq.com>
-2. Sign in with Google.
-3. **API Keys** → **Create API Key** → copy it. You only see it once.
-
-Now make your `.env` file:
+`.env` holds your keys. It stays in this folder and is never committed.
 
 ```powershell
 copy .env.example .env
 notepad .env
 ```
 
-Paste the key after `GROQ_API_KEY=`, with no spaces and no quotes:
+The one key everybody needs is for speech recognition, and it is free:
 
-```
-GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
-```
+1. Go to <https://console.groq.com> and sign in.
+2. **API Keys → Create API Key**, then copy it. You only see it once.
+3. Paste it after `GROQ_API_KEY=` with no spaces and no quotes. Save.
 
-Save and close.
+What each line in `.env` is for:
 
----
+| Key | What it is for | Needed? |
+|---|---|---|
+| `GROQ_API_KEY` | Speech to text (Groq Whisper) | Yes. `check` marks it blocking; without it Jalen falls back to a slower offline model |
+| `CLAUDE_CODE_OAUTH_TOKEN` | The brain's sign-in to your Claude subscription | Yes, Step 7 |
+| `ANTHROPIC_API_KEY` | Nothing. Leave it **empty** | Must stay empty |
+| `CLAUDE_CLI_PATH` | Run a different `claude.exe` from the one inside the SDK | No, leave empty |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | The Telegram bot (Step 11) | Optional; the two go together |
+| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | Your own Telegram account (Step 12) | Optional |
+| `GEMINI_API_KEY` | Handing a task to Gemini when you ask | Optional |
+| `HERMES_API_KEY` or `OPENROUTER_API_KEY` | "ask Hermes to ..." through OpenRouter (set one, not both) | Optional |
+| `OPENAI_API_KEY` | "ask ChatGPT to ..." through the OpenAI API | Optional |
+| `GITHUB_TOKEN`, `NOTION_TOKEN` | Nothing yet: no tool reads them, and both integrations are off | No |
 
-## Step 8 — Check everything, then talk to it
-
-```powershell
-python run.py --check
-```
-
-Fix anything marked `[XX]`. Warnings marked `[--]` are optional features you
-haven't set up yet — ignore them for now.
-
-Then:
-
-```powershell
-python run.py --unmuted
-```
-
-Say **"Hey Jarvis"**, wait for the orb to turn blue, then say **"what time is
-it?"**
-
-That's it. It's alive.
-
-> Prefer to test without a microphone? `python run.py --text` gives you a typed
-> conversation with the same brain and the same safety rules.
+[CREDENTIALS.md](CREDENTIALS.md) says where to get each one.
 
 ---
 
-## Step 9 — The Telegram bot (control Jarvis from your phone)
+## Step 7 — Sign the brain in to Claude
 
-1. Open Telegram, search **@BotFather**.
-2. Send `/newbot`. Name it `Jarvis`, username something like `oktam_jarvis_bot`.
-3. BotFather replies with a token — copy it into `.env`:
+Jalen thinks with your Claude subscription (Pro or Max), not with paid API credits. You do not need to install Claude Code. The brain runs the copy that came inside the `claude-agent-sdk` package in Step 4, and that is the copy to sign in with.
 
+1. In the project folder run:
+
+   ```powershell
+   .venv\Lib\site-packages\claude_agent_sdk\_bundled\claude.exe setup-token
+   ```
+
+2. A browser opens. Sign in with the account that has your Claude subscription.
+3. It prints a long token. Nothing saves it for you, so paste it into `.env`:
+
+   ```
+   CLAUDE_CODE_OAUTH_TOKEN=<paste the token here>
+   ```
+
+4. Save. Jalen reads it when he starts.
+
+**Leave `ANTHROPIC_API_KEY` empty, both in `.env` and in Windows' own environment variables.** A value in either place moves the brain off your subscription and onto per-token billing. `.env` does not override a variable Windows already has, so an empty line in `.env` does not cancel one set in Windows.
+
+---
+
+## Step 8 — Make it yours
+
+`config\jarvis.yaml` holds the defaults, and it ships with the original owner's personal values. Do not edit it. Put your own values in **`config\user.yaml`**, which overlays it key by key and is never committed. Lists in `user.yaml` replace the list in `jarvis.yaml`; they are not added to it.
+
+These four keys carry the original owner's values and should be yours:
+
+| Key | What it does |
+|---|---|
+| `identity.user_name` | Your name |
+| `web.google_account` | The Google address that Jalen's own Chrome signs in with |
+| `telegram.personal.send_without_asking_to` | Telegram chats Jalen may post to without asking first. Start with an empty list |
+| `research.contact` | A link or email that Jalen gives to websites that refuse unnamed readers. Use one you are happy to share, or leave it empty |
+
+A starting `config\user.yaml`:
+
+```yaml
+identity:
+  user_name: "<your name>"
+web:
+  google_account: "<your Google address>"
+telegram:
+  personal:
+    send_without_asking_to: []
+research:
+  contact: ""
 ```
-TELEGRAM_BOT_TOKEN=8123456789:AAF...
+
+You can also run the guided setup, which asks your name and writes `config\user.yaml` with an empty send-without-asking list. It can also add keys to `.env` and run the Google and Telegram sign-ins (Steps 10 and 12):
+
+```powershell
+.\jalen.ps1 setup
 ```
 
-4. Now get your own numeric ID: message **@userinfobot** and it replies with a
-   number. Put it in `.env`:
+Two warnings about it. Say **No** at its brain step: it uses a different `claude` from the one the brain runs, and it does not put the token in `.env`, so Step 7 is the right way. And it rewrites `config\user.yaml` every time it runs, so add your `web`, `research` and `wake` lines back afterwards.
 
-```
-TELEGRAM_ALLOWED_USER_IDS=123456789
+---
+
+## Step 9 — First words
+
+Start with text. It needs no microphone and no wake model:
+
+```powershell
+.\jalen.ps1 text
 ```
 
-**This is a security control, not a convenience setting.** The bot can drive
-your desktop. Anyone whose ID is not on that list gets refused. Leave it empty
-and the bot refuses everyone, which is the safe default.
+Type `explain in one sentence why the sky is blue`. A real answer means the brain is signed in. Type `quit` to leave.
+
+Then voice:
+
+```powershell
+.\jalen.ps1 start
+```
+
+Say **"Hey Jalen"** ("Hey Jarvis" works too), wait for the orb to turn blue, then say **"what time is it?"**. To stop, say **"Jalen, quit"** or press Ctrl+C.
+
+If either one fails, stop it and run `.\jalen.ps1 check`. Fix every `[XX]` line except two that stay until later steps: "Google is not connected" (Step 10) and "Personal Telegram isn't signed in" (Step 12). Lines marked `[--]` are optional extras.
 
 ---
 
 ## Step 10 — Gmail and Calendar
 
-The fiddliest step. Read it carefully; there's one trap that wastes people's
-weekends.
+The fiddliest step. Read it carefully; there's one trap that wastes people's weekends.
 
-1. Go to <https://console.cloud.google.com> and create a project called `Jarvis`.
+1. Go to <https://console.cloud.google.com> and create a project (any name, for example `Jalen`).
 2. **APIs & Services → Library** → enable **Gmail API** and **Google Calendar API**.
-3. **APIs & Services → OAuth consent screen** → choose **External** → fill in
-   app name and your email.
-4. **⚠️ The trap: go to Audience and click "PUBLISH APP".**
+3. **APIs & Services → OAuth consent screen** → choose **External** → fill in an app name and your email.
+4. **The trap: go to Audience and click "PUBLISH APP".**
 
-   While the app is in *Testing*, Google expires your login **every 7 days** and
-   Jarvis stops working. Adding yourself as a test user does **not** fix it —
-   that *is* Testing mode. Publishing does.
+   While the app is in *Testing*, Google expires your login **every 7 days** and Gmail and Calendar stop working. Adding yourself as a test user does **not** fix it — that *is* Testing mode. Publishing does.
 
-   **Do not** submit for verification. You don't need it for personal use.
-   You'll see a "Google hasn't verified this app" screen once — click
-   **Advanced → Go to Jarvis (unsafe)**. That's expected for your own app.
+   **Do not** submit for verification. You don't need it for personal use. You'll see a "Google hasn't verified this app" screen once — click **Advanced → Go to <your app name> (unsafe)**. That is expected for your own app.
 
 5. **Credentials → Create Credentials → OAuth client ID → Desktop app.**
-6. Download the JSON, rename it `client_secret.json`, put it in the Jarvis folder.
-7. In `config/jarvis.yaml` set `integrations.gmail.enabled: true` and
-   `integrations.calendar.enabled: true`.
+6. Download the JSON, rename it `client_secret.json`, and put it in the project folder (next to `run.py`).
+7. If you did not publish the app in item 4, add the Google account you will use under **Audience → Test users**. Otherwise Google refuses the sign-in.
+8. Connect, once:
 
-First time Jarvis touches Gmail it opens a browser to authorise. Once only.
+   ```powershell
+   .venv\Scripts\python.exe scripts\connect_google.py
+   ```
 
-> One thing to expect: **changing your Google password invalidates the token.**
-> If Gmail suddenly stops working, that's usually why — just re-authorise.
+   Your browser opens. Pick the account and press **Allow**. Jalen never sees your password. He asks for four permissions only: read mail, create drafts, send mail (he always asks out loud before sending), and calendar events. The login is stored in `data\google_token.json`.
+9. Check which account got connected:
 
----
+   ```powershell
+   .venv\Scripts\python.exe scripts\connect_google.py --status
+   ```
 
-## Step 11 — Your personal Telegram account (optional)
+   If it is the wrong account, run `connect_google.py --logout`, then connect again.
 
-This lets Jarvis read your real chats and send messages as you.
+Gmail and Calendar already ship switched on in `config\jarvis.yaml`, so there is nothing to edit. Jalen never opens a sign-in browser by himself. When the login stops working he tells you, and you run `connect_google.py` again.
 
-1. Go to <https://my.telegram.org> → **API development tools**.
-2. Create an app. You get an **api_id** and **api_hash**.
-3. Put both in `.env`, then set `telegram.personal.enabled: true` in the config.
-
-**Read this before you enable it.** This logs in as *you*, not as a bot.
-Telegram's terms allow it, but heavy automation gets accounts banned, and
-there's no appeal process worth relying on. Reading your own chats and sending
-the occasional message is low risk. Bulk messaging is not. Also: the `.session`
-file this creates is a complete login to your account — anyone who copies it is
-you. Never commit it, never share it.
+> **Changing your Google password ends the login.** If Gmail suddenly stops working, run `connect_google.py` again.
 
 ---
 
-## Step 12 — File search
+## Step 11 — The Telegram bot (control Jalen from your phone, optional)
 
-Install **Everything** from <https://www.voidtools.com> (free, tiny). Let it
-index in the background. Jarvis uses it for instant "where is that file"
-answers. Without it, file search falls back to a slower method.
+1. Open Telegram, search **@BotFather**.
+2. Send `/newbot`. Give it any name (for example `Jalen`) and a username ending in `bot`, such as `<yourname>_jalen_bot`.
+3. BotFather replies with a token. Put it in `.env`:
 
----
+   ```
+   TELEGRAM_BOT_TOKEN=<the token from BotFather>
+   ```
 
-## Step 13 — Start automatically with Windows
+4. Now get your own numeric ID: message **@userinfobot** and it replies with a number. Put it in `.env` (several IDs: separate them with commas):
+
+   ```
+   TELEGRAM_ALLOWED_USER_IDS=<your numeric id>
+   ```
+
+**This is a security control, not a convenience setting.** The bot can drive your desktop, and anyone whose ID is not on that list is refused. If you leave the list empty, `.\jalen.ps1 telegram` refuses to start at all.
+
+To use the bot, start Jalen in Telegram mode instead of voice:
 
 ```powershell
-python scripts\install_autostart.py
+.\jalen.ps1 telegram
 ```
 
-Starts muted, as you asked. Say "unmute" or press the tray icon to wake it.
+It is one or the other. Voice, text and Telegram are modes of the same single Jalen, and a second launch is refused while one is running. Stop the running one first with `.\jalen.ps1 stop`.
+
+---
+
+## Step 12 — Your personal Telegram account (optional)
+
+This lets Jalen read your real chats and send messages as you.
+
+1. Go to <https://my.telegram.org> → **API development tools**.
+2. Create an app. You get an **api_id** (a number) and an **api_hash**.
+3. Put them in `.env` as `TELEGRAM_API_ID=` and `TELEGRAM_API_HASH=`. They identify the app. They are not a login.
+4. With Jalen stopped, sign in once:
+
+   ```powershell
+   .venv\Scripts\python.exe scripts\connect_telegram.py
+   ```
+
+   It asks for your phone number with the country code (`+...`), the code Telegram sends to your other Telegram devices, and your two-step password if you have one (typed hidden). None of these are stored.
+5. Check it, still with Jalen stopped:
+
+   ```powershell
+   .venv\Scripts\python.exe scripts\connect_telegram.py --status
+   ```
+
+Personal Telegram already ships switched on in `config\jarvis.yaml`, so there is nothing to edit. If you skip this step, put this in `config\user.yaml` so that `check` stops counting it as a problem:
+
+```yaml
+telegram:
+  personal:
+    enabled: false
+```
+
+**Read this before you sign in.** This logs in as *you*, not as a bot. Telegram's terms allow it, but heavy automation gets accounts banned, and there's no appeal process worth relying on. Reading your own chats and sending the occasional message is low risk; bulk messaging is not. The file this creates, `data\telegram_user.session`, is a complete login to your account, and anyone who copies it is you. Never commit it, never share it.
+
+**One program at a time.** Only one program may use that session file at once, and a second one can get the session killed or corrupted. So stop Jalen (`.\jalen.ps1 stop`) before you run `connect_telegram.py` (including `--status`) or `.\jalen.ps1 check`, and never run Jalen with the same session on two machines.
+
+---
+
+## Step 13 — Your everyday Chrome (the Jalen extension, optional)
+
+This lets Jalen see the tab you are looking at in your own Chrome and fill ordinary forms there. The full guide is [docs\CHROME_EXTENSION_SETUP.md](docs/CHROME_EXTENSION_SETUP.md). In short:
+
+1. From this project folder (the one Jalen runs from), register the bridge. No argument is needed:
+
+   ```powershell
+   .venv\Scripts\python.exe scripts\install_extension.py
+   ```
+
+   It writes a small launcher and a manifest into this folder and registers them for your Windows user only. The launcher always starts this folder's `.venv`, which is one more reason to run Jalen from here only.
+2. In Chrome open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `browser_extension` folder inside the project.
+3. Quit Chrome completely and open it again.
+4. Start Jalen (`.\jalen.ps1 start` or `.\jalen.ps1 text`). Click the Jalen orb in the Chrome toolbar. The panel should say **connected**.
+
+If it says not connected, run `.\jalen.ps1 browser`. It checks each link in the chain and names the broken one.
+
+---
+
+## Step 14 — File search (optional)
+
+Install **Everything** from <https://www.voidtools.com> and let it index. Jalen does not talk to Everything directly. He runs its command-line tool **`es.exe`**, which is a separate download on the same site ("Command-line Interface"). Put `es.exe` in `C:\Program Files\Everything\`, the path set as `index.everything_cli` in `config\jarvis.yaml`. Everything itself must be running. Without them, "find that file" falls back to a slower search of Documents, Downloads and Desktop.
+
+---
+
+## Step 15 — Start with Windows, and the hotkeys
+
+Run this from the project folder. The entries it creates point at whichever folder it was run from.
+
+```powershell
+.\jalen.ps1 hotkeys
+```
+
+(This is the same as `.venv\Scripts\python.exe scripts\install_autostart.py`.) It puts two entries in your Startup folder:
+
+- **Jalen** starts at login, **muted**. He listens but stays silent until you say "Hey Jalen, unmute" or press **Ctrl+Alt+J**.
+- **Jalen Hotkeys** is a small separate listener, and it also starts right away:
+  - **Ctrl+Alt+J** wakes him. It starts him, unmuted, if he is not running, and un-mutes or un-pauses him if he is.
+  - **Ctrl+Alt+K** is the kill switch. It stops Jalen.
+
+  If another program already owns one of those keys, the listener takes the next free one (Ctrl+Shift+J or Ctrl+Alt+F9; Ctrl+Shift+K or Ctrl+Alt+F10) and writes which one it took to `data\hotkeys.log`.
+
+The script's own closing message still says "Ctrl+Alt+Space stops him". That is out of date: the key is Ctrl+Alt+K.
+
+To see what is installed:
+
+```powershell
+.venv\Scripts\python.exe scripts\install_autostart.py --status
+```
+
+To remove both: `.\jalen.ps1 uninstall`.
+
+---
+
+## Step 16 — Full check
+
+1. Stop Jalen: `.\jalen.ps1 stop`.
+2. Run the diagnostic:
+
+   ```powershell
+   .\jalen.ps1 check
+   ```
+
+   Know what it does: it makes one real round trip to Claude, asks Google which account is connected, and opens your Telegram session to see who is signed in. That is why Jalen must be stopped first.
+
+   When everything is ready it ends with **"All good — start it with: .\jalen.ps1"**. Otherwise it counts the blocking problems, each with its fix.
+3. See what is still optional:
+
+   ```powershell
+   .\jalen.ps1 todo
+   ```
+
+   The usual extras are the password vault (`.\jalen.ps1 vault`), teaching the wake word your own voice (`.\jalen.ps1 voice`, about 15 minutes), and walking the end-to-end flows with you present (`.\jalen.ps1 rehearse`).
+
+Ways to check one thing at a time:
+
+| Command | What it tells you |
+|---|---|
+| `.\jalen.ps1 status` | Is Jalen running, and in which mode? |
+| `.venv\Scripts\python.exe scripts\connect_google.py --status` | Which Google account is connected |
+| `.venv\Scripts\python.exe scripts\connect_telegram.py --status` | Which Telegram account is signed in (stop Jalen first) |
+| `.venv\Scripts\python.exe scripts\install_autostart.py --status` | Whether autostart and the hotkeys are installed |
+| `.\jalen.ps1 browser` | Why the Chrome extension says "not connected" |
 
 ---
 
 ## Starting and stopping
 
-The simplest way — a launcher that can't be typed wrong:
+The simplest way is the launcher, which can't be typed wrong. From the project folder:
 
 ```powershell
-cd C:\Users\user\Desktop\Jarvis-setup\jarvis
-
-.\jarvis.ps1              # start listening
-.\jarvis.ps1 stop         # stop it
-.\jarvis.ps1 restart      # stop, then start fresh
-.\jarvis.ps1 status       # is it running?
-.\jarvis.ps1 text         # type instead of talk
-.\jarvis.ps1 telegram     # control from your phone
-.\jarvis.ps1 check        # diagnostics
+.\jalen.ps1              # start listening (voice, unmuted)
+.\jalen.ps1 stop         # stop it
+.\jalen.ps1 restart      # stop, then start fresh
+.\jalen.ps1 status       # is it running?
+.\jalen.ps1 text         # type instead of talk
+.\jalen.ps1 telegram     # run as the Telegram bot instead of voice
+.\jalen.ps1 check        # diagnostics (stop Jalen first)
+.\jalen.ps1 why          # why did it stop last time?
+.\jalen.ps1 todo         # what still needs you
+.\jalen.ps1 setup        # guided setup: your name, keys, Google, Telegram
 ```
 
 **Why not just `run.py --unmuted`?** That fails twice over on Windows:
 
-- PowerShell will not run a script from the current folder without the `.\`
-  prefix — you get *"The term 'run.py' is not recognized"*.
-- Bare `python` is a **different** Python install without this project's
-  packages, so it dies with *"No module named 'numpy'"*.
+- PowerShell will not run a script from the current folder without the `.\` prefix, so you get *"The term 'run.py' is not recognized"*.
+- Bare `python` is a **different** Python install without this project's packages, so it dies with *"No module named 'numpy'"*.
 
-`.\jarvis.ps1` handles both, from any folder.
+`.\jalen.ps1` handles both.
 
 ### The longer way
 
-
-Always use the project's `.venv` (see the troubleshooting table below if you
-get a `ModuleNotFoundError`):
+Always use the project's `.venv` (see the troubleshooting table below if you get a `ModuleNotFoundError`):
 
 ```powershell
 .venv\Scripts\python.exe run.py --unmuted     # voice
@@ -286,25 +460,23 @@ To stop it — you never need Task Manager:
 .venv\Scripts\python.exe run.py --restart     # stop, then start fresh
 ```
 
-Or just say so: **"Jarvis, quit"**, **"Jarvis, pause"** (stops listening but
-stays running — say "Hey Jarvis" to come back), **"Jarvis, resume"**.
+Or just say so: **"Jalen, quit"**, **"Jalen, pause"** (stops listening but stays running; say "Hey Jalen" to bring him back), **"Jalen, resume"**. "Jarvis" works anywhere you would say "Jalen".
 
-Only one Jarvis can run at a time. A second launch tells you one is already
-running and exits, rather than quietly starting a second copy that fights the
-first one for your microphone.
+Only one Jalen can run at a time, in any mode: voice, text and Telegram share one lock. A second launch says which one is already running and exits. It does not start a second copy that fights the first for your microphone and your Telegram session. The lock lives in this folder's `data\`, which is why Jalen must always be started from the same folder.
 
 ## Everyday use
 
 | You say | What happens |
 |---|---|
-| "Hey Jarvis" | Wakes up, orb turns blue |
-| "that's all" | Ends the conversation |
-| "stop" | Kill switch — cuts him off mid-sentence |
-| `Ctrl+Alt+Space` | Same kill switch, from the keyboard |
-| "mute" | He stops talking but keeps listening |
-| "private mode" | Nothing logged, nothing remembered |
-| "paranoid mode off" | Stops asking permission for reversible things |
-| "what did you do today?" | Shows the audit log |
+| "Hey Jalen" (or "Hey Jarvis") | Wakes up, orb turns blue |
+| "that's all" / "goodbye" / "quit" | Says "See you, Boss." and shuts Jalen down. Ctrl+Alt+J or `.\jalen.ps1` starts him again |
+| "stop" | Kill switch: cuts him off mid-sentence |
+| `Ctrl+Alt+K` | Stops Jalen completely, from the keyboard (needs Step 15; `data\hotkeys.log` names the key if Ctrl+Alt+K was taken) |
+| "mute" / "unmute" | He stops talking but keeps listening / he talks again |
+| "pause" | Stops listening but stays running; "Hey Jalen" brings him back |
+| "private mode" | Nothing logged, nothing remembered ("private mode off" ends it) |
+| "paranoid mode on" / "paranoid mode off" | Asks before anything that changes something / back to the default: asks only before things that can't be undone |
+| "what did you do today?" | Reads back a digest of today's audit log |
 
 ---
 
@@ -312,13 +484,26 @@ first one for your microphone.
 
 | Symptom | Cause |
 |---|---|
-| `ModuleNotFoundError: No module named 'numpy'` (or any package) even though setup succeeded | This terminal's `python` isn't the project's `.venv` one. Every *new* terminal starts without it — you have to run `.venv\Scripts\Activate.ps1` again each time (Step 3), or skip activation entirely and call `.venv\Scripts\python.exe run.py ...` directly. Check which one you're running with: `Get-Command python \| Select-Object Source` should print a path inside `...\jarvis\.venv\Scripts\`. If it prints anything else (e.g. `AppData\Local\Programs\Python\...`), that's the bug — activate, or use the full `.venv` path. |
-| Doesn't hear "Hey Jarvis" | Lower `wake.threshold` to 0.45 in the config |
-| Triggers when the TV is on | Raise it to 0.65 |
-| `tflite-runtime` error | You have openwakeword 0.4.0 — `pip install openwakeword==0.6.0` |
-| edge-tts gives 403 | `pip install --upgrade edge-tts` — Microsoft rotated a token |
-| Gmail dies after a week | You're in Testing mode — publish the app (Step 10.4) |
-| Gmail dies suddenly | Did you change your Google password? Re-authorise |
-| Chrome control does nothing | Launch Chrome with `--force-renderer-accessibility` |
-| Brain errors | Run `claude setup-token` again |
+| `ModuleNotFoundError: No module named 'numpy'` (or any package) even though setup succeeded | This terminal's `python` isn't the project's one. Use `.\jalen.ps1`, or call `.venv\Scripts\python.exe run.py ...` directly. Check which one you're running with: `Get-Command python \| Select-Object Source` should print a path inside `...\jarvis\.venv\Scripts\`. If it prints anything else (e.g. `AppData\Local\Programs\Python\...`), that's the bug — use the full `.venv` path. |
+| Doesn't hear "Hey Jalen" | Run `.\jalen.ps1 check`: it lists your microphones, and you can pin one with `audio.input_device` in `config\user.yaml`. If the mic is right, the model has only ever heard synthetic voices, so teach it yours with `.\jalen.ps1 voice` (about 15 minutes). `wake.threshold` already ships lowered to 0.5 for this reason. |
+| Wakes when nobody said his name | Raise `wake.threshold` back toward 0.7. The measured table is in the comment above it in `config\jarvis.yaml`. |
+| Voice mode stops at start with "Could not find pretrained model for model name 'hey_jalen'" | `models\hey_jalen.onnx` is missing. See Step 5. |
+| `tflite-runtime` error | You have openwakeword 0.4.0: `.venv\Scripts\python.exe -m pip install openwakeword==0.6.0` |
+| edge-tts gives 403 | `.venv\Scripts\python.exe -m pip install --upgrade edge-tts`. Microsoft rotated a token |
+| Gmail and Calendar die after a week | The consent screen is still in Testing mode. Run `.venv\Scripts\python.exe scripts\connect_google.py` again, and publish the app (Step 10, item 4) so it stops happening. |
+| Gmail dies suddenly | Did you change your Google password? Run `.venv\Scripts\python.exe scripts\connect_google.py` again. |
+| Jalen says the Chrome extension isn't connected | `.\jalen.ps1 browser` checks every link in the chain and names the broken one. Most often Chrome was not fully restarted after Step 13, or Jalen isn't running. |
+| Jalen can't read the text of a Chrome window ("read the screen") | Chrome shows page text to screen-reading tools only when it is started with `--force-renderer-accessibility`. |
+| `check` says "the brain is NOT signed in to Claude" | Repeat Step 7: run the bundled `claude.exe setup-token`, put the new token in `CLAUDE_CODE_OAUTH_TOKEN` in `.env`, and restart Jalen. |
+| It stopped on its own | `.\jalen.ps1 why` |
 | Everything is slow | Check RAM in Task Manager — you don't have much spare |
+
+---
+
+## For a developer machine: the tests
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests\ -q -p no:cacheprovider --ignore=tests\benchmark_latency.py --ignore=tests\benchmark_open.py --ignore=tests\benchmark_phrasing.py
+```
+
+Run it to see the current count; it was about 5,245 at commit `833adbb` and it changes as work merges. Expect one failure when CapCut is not installed: `test_overhaul_fixes.py::test_real_typos_and_abbreviations_still_resolve[capcut-True]`. It is not a code problem. Any other failure is real.
