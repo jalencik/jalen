@@ -1,19 +1,17 @@
 # STATUS — written only by the Integrator (Session A). Collaborators: read, never edit.
 
-Updated: 2026-10-01 (evening, local time)
+Updated: 2026-10-01 (night, local time)
 
-**main:** `a371945` — 3,997 tests collected, 3,996 pass; the 1 failure is the CapCut test (CapCut is not installed on this machine).
+**main:** `e34e790` — 5,226 tests collected; 5,225 pass; the 1 failure is the CapCut test (CapCut is not installed on this machine).
 
-**Wave merged?** **NO.** Four reviewed branches are waiting to be merged into main by the Integrator, in this order:
-1. `worktree-wf_1b55f1a2-583-1` — premium emoji + stickers (posts)
-2. `worktree-wf_1b55f1a2-583-2` — DMs + voice messages + on-request voice-note transcription
-3. `worktree-wf_1b55f1a2-583-3` — safe folder moves C: -> D: + PC control
-4. `worktree-wf_1b55f1a2-583-4` — listening ("not deaf")
+**First wave merged?** **YES.** Premium emoji + stickers, DMs + voice messages + on-request transcription, safe folder moves C: -> D:, and listening ("not deaf") are all in main, each after an independent review. Each review returned "merge with fixes"; the fixes not already made are Wave 4's first items.
 
-Until this file says **"WAVE MERGED"**, do not edit the in-flight files listed in section 8.4 of the prompt.
+**Wave 4 in flight (7 worker branches, each followed by an independent re-check):** files-fixes, telegram-fixes, listening-echo, browser-everyday, research-fallback, machine-facts, conversation-quality. Their files are listed in section 8.4 of the prompt. **Do not edit those files until this file says "WAVE 4 MERGED".**
 
-**Collaborator lanes open now:** B1 (everyday-Chrome browser), B2 (research fallback), B3 (machine facts), B5 (injection-alarm false positives), plus proposal-only B6, B7, B8. B4 (router phrasing) opens after the wave is merged.
+**Collaborator lanes open now:** C1 (owner-run live Telegram check script), C2 (adversarial review of everything since `a371945`), C3 (docs that match the code), C4 (Google quality), C5 (vault / codes / autofill, second look). Lane B (browser, research, machine facts, router phrasing, injection alarm, prompt wording, disk answers) is **claimed by Wave 4**.
 
 **Live resources — do not start these yourself:** the Jalen process and its Telegram session (one client at a time); Jalen's own Chrome profile `data\browser_profile` (one owner at a time).
 
-**Open owner decisions:** none outstanding. (See section 10 of the prompt for the binding ones.)
+**Open owner decisions:** none. One standing action for the owner: publish the Google OAuth consent screen before about 2026-10-08, or Gmail and Calendar stop again.
+
+**Known gap that matters:** `move_folder` is **not ready** for folders whose files matter (the copy drops Mark-of-the-Web, the hidden attribute and creation dates before the original is deleted) until Wave 4's files-fixes lane lands.

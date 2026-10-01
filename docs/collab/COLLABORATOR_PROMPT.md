@@ -1,6 +1,6 @@
 # JALEN — COLLABORATOR PROMPT (paste this whole file into the other Claude session)
 
-Written 2026-10-01 by the Claude Code session that has been building Jalen with the owner ("Session A", the Integrator). The state described here is exact as of main commit `a371945`. Anything marked **VERIFY** may have moved: check it before relying on it.
+Written 2026-10-01 by the Claude Code session that has been building Jalen with the owner ("Session A", the Integrator). The state described here is exact as of main commit `e34e790` (5,226 tests collected). Anything marked **VERIFY** may have moved: check it before relying on it.
 
 ---
 
@@ -79,8 +79,8 @@ cd C:\Users\user\Desktop\Jarvis-setup\jarvis
 .venv\Scripts\python.exe -m pytest tests\ -q -p no:cacheprovider --ignore=tests\benchmark_latency.py --ignore=tests\benchmark_open.py --ignore=tests\benchmark_phrasing.py
 ```
 
-- Always `python -m pytest`, never the bare `pytest.exe` (89 of 118 test files rely on `-m` putting the CWD on the path). `pytest-timeout` is not installed; do not pass `--timeout`.
-- **Current count at `a371945`: 3,997 tests collected; 3,996 pass, 1 fails.** The one failure is `test_overhaul_fixes.py::test_real_typos_and_abbreviations_still_resolve[capcut-True]`: it expects CapCut to be installed and it is not. It is not a code problem. Every other failure is real.
+- Always `python -m pytest`, never the bare `pytest.exe` (about three quarters of the test files rely on `-m` putting the CWD on the path). `pytest-timeout` is not installed; do not pass `--timeout`.
+- **Current count at `e34e790`: 5,226 tests collected; 5,225 pass, 1 fails.** The one failure is `test_overhaul_fixes.py::test_real_typos_and_abbreviations_still_resolve[capcut-True]`: it expects CapCut to be installed and it is not. It is not a code problem. Every other failure is real.
 - A full run takes **5-8 minutes** and uses a few hundred MB. Run it **once** per batch of changes, in the background if your tool allows, and poll the output file.
 - Three voice tests call live Groq / edge-tts and are intermittent (`test_stt_roundtrips_through_groq`, `test_barge_in_latency_is_measured`, `test_failure_paths_keep_jarvis_alive`). The trap: the fallback *working* trips the assertion. Re-run two or three times **in isolation** before touching `stt.py`.
 - **In a worktree** these fail identically with and without your change, because the files they need are gitignored: `test_attachments::test_the_refusal_is_not_overridable` (needs `.env`), `test_voice_pipeline` ×5 and `test_wake_both_names` ×2 (need `models/`), `test_native_host_process` ×2 (needs `.venv`), `test_conversation_requests` M1 ×2 (needs `data/`), plus the CapCut one. That is **13 expected failures in a worktree** and 1 in main. Confirm any *other* failure is yours.
@@ -150,7 +150,7 @@ scripts/            check_env.py (jalen check), connect_google.py, connect_teleg
                     abilities.py (regenerates ABILITIES.md), rehearse.py ...
                     (measure_address_gate.py exists only on the listening branch until it is merged)
 browser_extension/  The Chrome extension (manifest, background, native host launcher).
-tests/              118 test files, 3,997 tests. conftest.py keeps tests out of data/.
+tests/              ~125 test files, 5,226 tests. conftest.py keeps tests out of data/.
 data/               RUNTIME DATA. Never commit. Never write from tests. Contains the vault, audit log,
                     Telegram session, browser profile, habits, drafts.
 docs/               community_post_format.md (his post format), this folder (collab/).
@@ -193,7 +193,7 @@ GREEN runs. AMBER announces ("..., say stop if you don't want that") and runs un
 ### 7.4 What the safety work looks like today (so you do not redo or undo it)
 - **Never-touch path check** resolves paths the way Windows does: `~`, `%VAR%`, `..`, long-path prefixes, **junctions, 8.3 short names (`os.path.realpath`)**, trailing dots/spaces and `::$DATA` suffixes; device paths and loopback network names are refused as unreadable; filename patterns see resolved names; `never_touch.harmless_names` (e.g. HuggingFace `tokenizer.json`, `.env.example`) are exempt from the *filename patterns only*, never from protected folders.
 - **Protected domains** (banks, PayPal, click.uz, payme.uz, binance) are matched by parsed **hostname**, not substring; `protected_domain(address)` is public for callers that learn a destination later (redirect landings).
-- **Injection guard after a read:** `web_read` after a read may fetch only an address that appeared **written out** in text read this turn (`taint.url_was_read`), or a plain reference page on `allow_unseen_urls_on_hosts` (Wikipedia, arXiv, huggingface.co ...). `taint.mark(source, text)` records addresses; the Gmail and research fences pass their text. **Not yet wired: the Telegram fence (`messaging._fence`) and the coding-job fence (`devwork`)** — until they pass their text, a link inside a Telegram message cannot be followed by `web_read` in the same turn (refused with a sentence).
+- **Injection guard after a read:** `web_read` after a read may fetch only an address that appeared **written out** in text read this turn (`taint.url_was_read`), or a plain reference page on `allow_unseen_urls_on_hosts` (Wikipedia, arXiv, huggingface.co ...). `taint.mark(source, text)` records addresses; the Gmail and research fences pass their text. **Not yet wired: the Telegram fence (`messaging._fence`, assigned to Wave 4's telegram-fixes lane) and the coding-job fence (`devwork`, the Integrator's)** — until they pass their text, a link inside a Telegram message or a coding-job log cannot be followed by `web_read` in the same turn (refused with a sentence).
 - **Confirmations are bound:** `ConfirmAnswer` is truthy only for a real yes; a correction ("yes, but to Ali instead") is passed back; Jalen's own "Confirm?" echoing through the mic cannot approve itself (`_echoes_the_confirmation`); one lock for confirm/announce.
 - **Pre-approved destinations are exact-named**, not substrings ("Ed" and "a" were pre-approved by a substring bug).
 - **Secrets are bound to sites** (`data\secret_sites.json`, exact-or-subdomain host match); a one-time approval to type a password is a spoken yes to a question that *names the site*, re-checked on the page at typing time.
@@ -222,21 +222,22 @@ Work only inside that worktree. The main checkout's `.claude/` folder is untrack
 - **Scratch space:** use your own folder (for example `...\scratchpad\collab\`) and **unique file names** — a shared scratch file was overwritten by another agent today.
 - Do not edit `CLAUDE.md`, `ABILITIES.md`, `WHAT_JALEN_CAN_DO.md`, `config/jarvis.yaml` except in your own clearly separated hunk, and say so.
 
-### 8.4 In-flight files right now (A is merging four branches that touch these — **do not edit them until STATUS.md says "wave merged"**)
-| File | Branches touching it |
-|---|---|
-| `jarvis/brain/agent.py` (system prompt) | posts, dms, files |
-| `jarvis/brain/tools.py` (TOOL_SPECS) | posts, dms, files |
-| `jarvis/brain/router.py` | dms, files, listening |
-| `jarvis/safety.py`, `config/safety.yaml` | posts, dms, files |
-| `jarvis/tools/messaging.py`, `attachments.py`, `feedback.py`, `plan.py` | posts, dms |
-| `jarvis/tools/__init__.py` | posts, files |
-| `jarvis/app.py`, `jarvis/audio/tts.py`, `jarvis/audio/stt.py` | listening / dms |
-| `jarvis/tools/devwork.py`, `filesystem.py`, `launcher.py`, `sysinfo.py`, `foldermove.py` (new) | files |
-| `jarvis/tools/stickers.py` (new), `jarvis/habits.py` | posts / dms |
-| `ABILITIES.md`, `config/jarvis.yaml`, `scripts/abilities.py` | several |
+### 8.4 In-flight files right now (the Integrator's **Wave 4** — seven worker branches — touches these; **do not edit them until STATUS.md says "WAVE 4 MERGED"**)
+The first wave (premium emoji + stickers, DMs + voice, folder moves, listening) is **already merged** into main. Wave 4 is the follow-up to the independent reviews of that wave plus the live-QA fixes. Its lanes and the files they touch:
 
-Merge order: posts → dms → files → listening, then the Integrator's own follow-ups. Expected conflicts are real (the DM branch already conflicts with main in `safety.py`); they are the Integrator's to resolve, never yours.
+| Wave 4 lane | Files it touches |
+|---|---|
+| files-fixes (folder-move data safety) | `jarvis/tools/foldermove.py`, `launcher.py`, `sysinfo.py`, `jarvis/safety.py` (`_describe`), `jarvis/brain/router.py` (the "move it" rule) |
+| telegram-fixes | `jarvis/tools/messaging.py`, `stickers.py`, `jarvis/brain/router.py` (voice phrasing), `jarvis/brain/tools.py` (specs), `ABILITIES.md` |
+| listening-echo | `jarvis/app.py`, `jarvis/audio/tts.py`, `jarvis/audio/speaker*`, `config/jarvis.yaml` |
+| browser-everyday | `jarvis/tools/browser_ext.py`, `browsertabs.py`, `webagent.py`, `jarvis/bridge/`, `browser_extension/`, a new `browserdoor.py` |
+| research-fallback | `jarvis/tools/research.py` (and one seam call into `webagent.py`) |
+| machine-facts | `jarvis/tools/system.py`, `desktop.py`, `sysinfo.py`, `jarvis/brain/agent.py` (sentence joining), `jarvis/brain/tools.py`, `config/safety.yaml` |
+| conversation-quality | `jarvis/brain/router.py`, `jarvis/brain/agent.py` (system prompt), `config/safety.yaml` (`suspicious_markers`) |
+
+Files that **no** Wave 4 lane touches, and that are therefore safe for a collaborator: `jarvis/tools/gmail.py`, `gcalendar.py`, `documents.py`, `vault.py`, `otp.py`, `profile.py`, `autofill.py`, `bulkmail.py`, `agents.py`, `coding.py`, `handoff.py`, `selfcontrol.py`, `technician.py`, `scripts/` (except `abilities.py`), `docs/` (except `collab/STATUS.md`), `README.md`, `SETUP.md`, and any **new** file you create.
+
+Merge order: the Integrator merges Wave 4 branch by branch and resolves cross-branch conflicts; they are never yours to resolve. Expect line-ending noise: a whole-file conflict usually means CRLF versus LF, not a real disagreement.
 
 ### 8.5 Handing work over
 - Commit on your branch. **One commit per concern**, subject = a **past-tense sentence naming the discovery**, not the change ("`close the calculator` failed because the rule kept the word 'the'", not "fix close_app"). Body: what was wrong (measured, with numbers), what it does now, what you did **not** do. **Last line: `<total> tests, N new.`** Write the message to a file and use `git commit -F <file>`.
@@ -261,51 +262,33 @@ A new tool needs three edits that nothing hard-fails on if you miss one: (1) the
 ## 9. LANES
 
 ### Lane A — Integrator (not yours)
-Merge the four reviewed branches (premium emoji + stickers; DMs + voice messages + on-request transcription; safe folder moves C:→D: + PC control; listening/"not deaf"), resolve the router-origin interaction with the listening doors, wire the remaining fences (`messaging._fence`, `devwork` fence) to `taint.mark(source, text)`, channel posts read-aloud (his decision), Claude hand-off adapter in `webagent.py`'s SiteAdapter list after the browser lane lands, full gate, QA, STATUS.md.
+Runs **Wave 4** (seven worker agents, each followed by an independent re-check) and merges it; owns the live QA runs (only one Jalen process and one Telegram session may exist, and it is his); wires the remaining fences (`devwork`) to `taint.mark(source, text)`; builds "channel posts read the first line and links aloud before posting" (the owner's decision); builds the Claude (claude.ai) hand-off adapter once the browser lane has landed; runs the full gate; writes `STATUS.md`.
 
-### Lane B — you (start here; every item has an acceptance test)
+### Lane B — **CLAIMED by Wave 4. Do not start these.** (listed so you know what exists and do not duplicate it)
+- **B1** everyday-Chrome as the default browser (new `browserdoor.py` seam, extension path); **B2** research fallback (HTTP 202 retry, then the browser, one honest sentence, never speak a status code); **B3** machine facts (time zone and time in other cities, uptime, foreground app, running programs); **B4** router phrasing ("find me papers on X" goes to the web, not a file search; "close the calculator"; disk/memory questions); **B5** the false prompt-injection alarm on ML paper titles; **B6** fused and repeated sentences; **B7** how it talks (no tool names or status codes, "Boss" at most once); **B8** "what is filling my C drive".
+- Also in Wave 4: folder-move data safety (copy must keep Mark-of-the-Web, hidden attribute and creation times before the original is deleted; the dry run must end with a question; the named yes must name every protected file), Telegram follow-ups (voice-note decode bound, Uzbek/Russian voices, the sticker-with-no-pack question), and the listening echo window.
 
-**B1. Everyday-Chrome as the default browser for web tasks** *(his decision, 2026-10-01; biggest item)*
-- Today: Jalen's own Chrome (`webagent._Session`, separate profile, CDP) does ChatGPT/Gemini hand-off, forms and `browse_to`; the **extension path** (`browser_extension\`, `jarvis/tools/browser_ext.py`, `jarvis/bridge\`, tools `ext_status`, `ext_page_state`, `ext_form_fields`, `current_page_url`, tab tools in `browsertabs.py`) can see his real tab but is read-mostly.
-- Goal: for "do this on the web" tasks (forms, sign-in-gated sites, ChatGPT/Claude hand-off, research that needs his logins), Jalen works in **his everyday Chrome** through the extension, so he sees it happen and his logins are already there. Jalen's own window remains available when he says so.
-- First **VERIFY**: is the extension installed and connected in his everyday Chrome? (`ext_status`; `scripts\` and `native_host_manifest.json`; `jalen_bridge_host.bat`). If it is not, find out why and what he must click — **ask him with a poll**; do not guess.
-- Keep every existing safety property: never-touch domains re-checked at the *landing* page, same-site continuity for form steps (`_FORM_READ`), secrets bound to sites, taint rules, no typing into a page nobody inspected.
-- Acceptance: a fake-bridge test suite for each new path; one live read-only check (open a page in his everyday Chrome, read its title, close it) that you describe honestly; no regression in `tests/test_jalens_own_chrome.py`, `test_webforms.py`, `test_browser_ext.py`, `test_extension_page_ops.py`, `test_bridge.py`.
+### Lane C — **you** (start here; every item has an acceptance test; none overlaps Wave 4)
 
-**B2. Research that survives blocking** *(his decision: "fast fetch, browser if blocked")*
-- `jarvis/tools/research.py`: `web_read`/`web_search` use plain HTTP (bounded to 3 MB, PDFs to 25 MB, redirects checked, honest-User-Agent retry on 403/429, contact `https://t.me/MLcommunityy` in `research.contact`). Observed failures: DuckDuckGo's HTML endpoint sometimes answers **HTTP 202** (a bot check) and the code treats any non-200 as failure with no retry; weather sites block automated reads; the status code is spoken aloud to him.
-- Do: retry once on 202 with a short wait; if still blocked, fall back to reading the page **in his browser** (B1) and say so in one sentence ("that site blocks background reads, so I opened it in your browser"); never speak HTTP codes. Keep the fence + taint on everything read; the browser fallback goes through `read_browser_page`-style fencing.
-- Acceptance: tests with a fake HTTP client (202 then 200; 202 forever → fallback path called); no real network in tests.
+**C1. A real-account verification script for the owner to run** *(new file: `scripts/live_telegram_check.py`; fakes-only tests)*
+Nothing built for premium emoji, stickers, voice messages or voice-note transcription has ever run against his real Telegram account; several constants in `jarvis/tools/stickers.py` are labelled `[NOT MEASURED]` for that reason. Write an **owner-run, step-by-step checklist script** that, with Jalen **stopped** (one Telethon client at a time!), (1) looks up three premium emoji by character and name, (2) lists his sticker packs (names and counts only), (3) sends ONE test post with a premium emoji to **Saved Messages** and reads it back, (4) sends ONE short voice message to **Saved Messages**, (5) times each step and prints a table he can paste back. It must **ask before each send**, refuse any destination other than Saved Messages, never print message contents or ids, and exit cleanly on Ctrl+C. Reuse the tool functions in `jarvis/tools/messaging.py` and `stickers.py` (read them; do not edit them). Tests use the fake client in `tests/_telegram_fakes.py`.
 
-**B3. Machine facts Jalen cannot answer today** (found by live QA; all are new small tools in files outside the in-flight list: `system.py`, `desktop.py`)
-- *Time zone and time elsewhere* ("what time is it in New York", "what's my time zone"): `get_time` returns no zone. Use `datetime.now().astimezone()` and `zoneinfo` (check `tzdata` is available on Windows; if not, say so and use a small built-in table for major cities).
-- *Uptime* ("how long has my laptop been on"): `psutil.boot_time()`.
-- *Foreground app* ("which app is in front"): `get_window_list` reports the window **class** only (so Claude's desktop app is called "Chrome"); add process name + foreground flag via `psutil` and `GetForegroundWindow`.
-- *"What programs are running"*: list top processes by memory with friendly names, not window classes.
-- Acceptance: unit tests with faked `psutil`/clock; TOOL_SPECS and tier lines in your **needs-from-main**. All GREEN read-only; none acts on the world.
+**C2. Adversarial review of everything merged since `a371945`** *(review only; a written report, no code changes)*
+Use `git log a371945..main` and `git diff a371945..main`. Look for: tests that cannot fail, claims in commit messages the code does not deliver, over-refusing of ordinary requests, any of the ten invariants in section 7.3 weakened by a merge (the merges had real conflicts in `safety.py`, `messaging.py`, `tools.py`, `safety.yaml`; the Integrator resolved them by hand: check the resolutions), anything under `data/` written by tests, any secret in any file. Prove findings with a failing test or a short reproduction; mark each CONFIRMED or PLAUSIBLE; describe protections in one plain line. Write the report as `docs\collab\outbox\collab-review-1.md`.
 
-**B4. Web-search and research phrasing misrouted by the router** *(wait for "wave merged" — `router.py` is in flight)*
-- `router.py` ~line 1260: `^(find|search for|where is|locate) ...` sends "find me recent arxiv papers on X" and "search for papers about X" to **file search** ("No files matching ..."). A fixed rule also answers "search the web for X" by opening a Google tab and speaking the full URL (`open_url`, `system.py:303`). For an ML researcher these are the most natural requests. Route them to the brain (`web_search`) and keep file search for "find my file ...", "find the file called ...".
-- Also: "how much free disk space do I have" and "what's eating my memory" hit `get_system_status` (no free-space figure; no per-program list) although `disk_report` and `memory_report` exist; "close the calculator" fails because the rule keeps "the" (`router.py:~968`); `close_app` says "Closed X" after Alt+F4 without checking the window is gone and the audit records it as executed.
-- Acceptance: a parametrized test per phrasing against `IntentRouter.route`, plus the existing `tests/test_router_*` and `tests/test_new_user_sweep.py` stay green. **This item starts only after STATUS.md says the wave is merged.**
+**C3. Documentation that matches the code** *(files no lane touches)*
+`WHAT_JALEN_CAN_DO.md` is stale (it counts 145 tools; main has 165). `README.md`, `SETUP.md`, `HANDOFF.md`, `ARCHITECTURE.md` and `scripts/` help text should state the current commands, the current test count (5,226 collected), the one-machine constraints and the sign-in steps (the Claude brain token, Google, Telegram, the extension). Do not touch `CLAUDE.md` or `ABILITIES.md` (generated by `scripts/abilities.py`). A reviewer should be able to follow SETUP.md on a fresh Windows laptop.
 
-**B5. Prompt-injection alarm is crying wolf on ML papers** *(`config/safety.yaml`, in flight → separate tiny commit)*
-- `injection_guard.suspicious_markers` includes "system prompt", "you are now", "new instructions": common in ML paper titles. Reading arXiv's cs.CL listing produced "that page contained text that looked like it was trying to give me instructions" and a refusal to trust a clean page. The *tainting* is correct; the *spoken alarm* is the false positive.
-- Do: keep tainting, but only speak the warning when a marker appears **in instruction position** (start of a line/sentence or imperative form addressed to "you"/"the assistant") or when two or more markers co-occur. Measure on real pages (arXiv listing, a paper abstract, a blog post about prompt injection) and report false-alarm and miss rates. Never weaken the *refusal* logic.
+**C4. Google and Gmail/Calendar quality** *(`gmail.py`, `gcalendar.py`, `bulkmail.py`: no lane touches them)*
+He runs on the "applicant" Google account; the OAuth consent screen is in Testing mode (7-day token expiry until he publishes it). Audit the Google tools against real requests in `data/audit.jsonl` (read-only copy): which email and calendar requests failed or were answered badly; fix the top causes with fake-API tests; make every error a spoken sentence that says what to do (including the "your Google login expired, run connect_google.py" case, with the 7-day Testing-mode explanation in plain words). Tests never touch the network.
 
-**B6. Sentences fused and repeated** *(`jarvis/brain/agent.py:~1045`, in flight → tell the Integrator)*
-- Text before and after a tool call in one reply is joined with no separator ("`...from here.Right, no uptime tool here, Boss.`"; the same numbers said twice). 65 of 823 of Jalen's logged replies show it. Find where assistant text blocks are concatenated and join with a space (and drop an exact repeat). Test with a fake message stream.
+**C5. Vault, one-time codes and autofill — a second independent look** *(`vault.py`, `otp.py`, `profile.py`, `autofill.py`)*
+Recently rewritten: secrets are bound to sites (`data\secret_sites.json`), a one-time approval is a spoken yes naming the site, a code is typed only into that service's own sign-in host, and `fill_login_field` is one browser job. Review for bypasses and over-blocking (a legitimate login on a subdomain, a site that redirects to an identity provider), add the tests that are missing, and fix what is wrong. **Never** read, print or store a real secret; use tmp_path vaults.
 
-**B7. The way it talks** *(system prompt, in flight → send as a text proposal in your outbox, do not edit `agent.py`)*
-- Replies leak internals: tool names ("run cleanup_suggestions"), HTTP codes, "this list doesn't tell me", "That page is mostly navigation boilerplate", "Want me to ask it again", and "Boss" in nearly every sentence. Propose a rewritten prompt section: plain spoken sentences, no tool names, no codes, "Boss" at most once per answer, short. Provide before/after samples taken from the QA list in section 11.
-
-**B8. Disk answers** *(`sysinfo.py` is in flight → proposal only)*
-- "What's filling my C drive" never gets answered: three tries gave "still scanning" twice, then a scan of four user folders (12 s budget) that explained 0.7 GB of 139 GB. Text mode never calls `prewarm()`, so the first ask always hits a cold cache. Propose: scan from the drive roots with known-big-folder shortcuts (`C:\Users\<user>\AppData`, `C:\ProgramData`, `C:\Windows\Temp`, hibernation/pagefile/`WinSxS` sizes via `dism`/known paths, Docker/WSL vhdx, pip/npm/HuggingFace caches), a longer background budget, and an answer that names the top 5 with sizes. Do not delete anything; `cleanup_suggestions` only reports.
-
-Order of work for you: **B1 first (it unblocks Lane A's Claude hand-off), B2, B3, B5, then B6-B8 as proposals, B4 when unlocked.** If you run out of lane, write a *review* of Lane A's merged work instead of starting new features.
+Order: **C1 first** (it unblocks the owner's real-account check), then C2 (a review is cheap and finds things), then C3-C5 in any order. If you finish your lane, write **one more review** of whatever Wave 4 merged since your last one.
 
 ### What is explicitly NOT in your lane
-Telegram sending/stickers/DM tools, folder moves, listening/echo gates, anything in `app.py`, the credentials vault, the injection-guard ordering. If you find a bug there, report it in your outbox with a failing test; do not fix it.
+Everything in Wave 4's table in 8.4, Telegram sending/stickers/DM tools, folder moves, listening/echo gates, anything in `app.py`, `safety.py`, `router.py` or `agent.py`, the injection-guard ordering, the Claude hand-off adapter. If you find a bug there, report it in your outbox with a failing test; do not fix it.
 
 ---
 
@@ -353,11 +336,13 @@ All of this is merged to `main` (`git log --since=2026-09-30`). Subjects are dis
 **Diagnostics and hygiene**
 - `2371da0` `jalen check` now checks Google and Telegram. `b544b35` the suite stopped writing the real router-miss log. `b83d252` unread config keys labelled. `9a94416` CLAUDE.md corrected.
 
-**Built, reviewed, NOT yet in main (Integrator merging now; branches `worktree-wf_1b55f1a2-583-{1,2,3,4}`)**
-1. *posts* `24b7018` — `find_premium_emoji` (exact matches only, strict single-emoji shape), `list_sticker_packs`, `send_sticker` (RED, same destination rules, refused after a read even for Saved Messages), read-back of premium emoji on a sent post; stickers only on request. Reviewer: MERGE_WITH_FIXES (six low items: spoiler+emoji retry, a sticker chosen with no pack named, stale wording).
-2. *dms* `a66e5e1` — catch-up grouped by person, "who needs a reply" ranking, forward source, voice notes named, **`transcribe_voice_note` (AMBER, on request only)**, **`send_voice_message` (RED)**, scoped search. Reviewer: MERGE_WITH_FIXES — whole-file conflict in `safety.py`; voice-note decoded before its length is checked; English-only voice vs Uzbek/Russian text; `voice message` phrasing hits the text-send router rule.
-3. *files* `6597bda` — `plan_folder_move`/`move_folder` (copy, verify, switch, delete; resumable; junction left behind; protected files carried unread after a named yes), launch fixes. Reviewer: MERGE_WITH_FIXES — copy drops Mark-of-the-Web/hidden/creation-date before deleting the original; the dry-run reply is a statement so "go ahead" is dropped without his name; the named yes names only 8 of up to 20 protected files; Documents folder still refused (legacy junctions).
-4. *listening* `64c8f21` — measured the real log (of 78 sentences meant for him, 19 were refused by the first count and 40 by the later, corrected one — the two commit messages disagree), added doors (misheard names, polite requests, bare-wake window), echo tail 12 s. Reviewer: MERGE_WITH_FIXES — answer-path echo window still only 3 s; door-admitted speech now runs router tools with origin "user" after a read (conflicts with `e97771d`'s premise) → the Integrator keeps the taint check on door-admitted sentences.
+**The first wave — built, independently reviewed, merged to main (commits `9f2736b`, `a955e8e`, `ce8d92e`, `e34e790`)**
+1. *posts* — `find_premium_emoji` (exact matches only; a strict single-emoji shape so nothing hidden can ride along), `list_sticker_packs`, `send_sticker` (RED, same destination rules as a text send, and refused after a read even for Saved Messages), read-back of the premium emoji on a sent post. Stickers are sent **only when he asks**.
+2. *dms* — catch-up grouped by person, "who needs a reply" ranking that ignores thanks/ok, forward source, voice notes named, **`transcribe_voice_note`** (AMBER, on request only, audio goes to Groq), **`send_voice_message`** (RED; the confirmation names the person AND the exact words; Jalen's synthetic voice, not a clone), scoped search, `reply_to`.
+3. *files* — `plan_folder_move` / `move_folder` (dry run, copy, verify, switch, delete; resumable; leaves a junction; protected files carried unread after a named yes), launch fixes. **Known data-safety gaps, being fixed in Wave 4: the copy drops Mark-of-the-Web, the hidden attribute and creation dates before the original is deleted; the dry-run reply is a statement; the named yes names only 8 of up to 20 protected files. Treat `move_folder` as not ready for folders whose files matter.**
+4. *listening* — measured the real log (of 78 sentences meant for him, 19 were refused by the first count, 40 by the later corrected one), added doors (misheard name, polite request, bare-wake window), a 12 s echo tail. At merge, speech admitted by a door keeps the taint check (`process(text, from_him, door)`). **Open: the answer path's echo window is still 3 s from the end of speech.**
+
+Each of these was checked by an independent reviewer who reproduced the earlier findings; every one returned MERGE_WITH_FIXES, and the fixes that were not already made are Wave 4's first items.
 
 **Live QA of the real Jalen in typed mode (55 requests, 2026-10-01): 38 OK, 14 WRONG, 3 REFUSED-WRONGLY.** The failures are the source of Lane B items B2-B8: research phrasing → file search; disk questions never answered; "what's using my C drive" (0.7 of 139 GB explained); programs vs windows; "search the web" opens Google and speaks the URL; DDG 202; weather sites blocked; uptime/time-zone/foreground-app missing; `close the calculator`; false injection alarm on arXiv; fused/repeated sentences; replies that leak tool names/HTTP codes.
 
@@ -413,11 +398,10 @@ POLL FOR THE OWNER (only if truly his decision): <question> | options with one-l
 
 ## 15. FIRST 10 MINUTES CHECKLIST
 
-1. `git -C C:\Users\user\Desktop\Jarvis-setup\jarvis log -5 --format='%h %s'` — confirm main is at (or after) `a371945`; read `docs\collab\STATUS.md` if it exists.
+1. `git -C C:\Users\user\Desktop\Jarvis-setup\jarvis log -5 --format='%h %s'` — confirm main is at (or after) `e34e790`; read `docs\collab\STATUS.md` if it exists.
 2. `.\jalen.ps1 check` — expect: Claude signed in, Google (may say "refusing" after 2026-10-08), Telegram signed in, "All good".
-3. Create your worktree (8.2). Create `docs\collab\outbox\collab-browser.md` on your branch with a one-line plan.
-4. Start B1: read `jarvis/tools/browser_ext.py`, `jarvis/bridge/`, `browser_extension/`, `jarvis/tools/browsertabs.py`, `tests/test_browser_ext.py`, `tests/test_bridge.py`, `tests/test_extension_page_ops.py`; run those tests alone; write down what the extension can and cannot do today.
-5. Ask the owner (poll) **only** if the extension is not connected and you cannot tell why.
-6. Then work the loop in 8.6. Report at the first meaningful commit, not at the end.
+3. Create your worktree (8.2). Create `docs\collab\outbox\collab-live-check.md` on your branch with a one-line plan.
+4. Start C1: read `jarvis/tools/messaging.py`, `jarvis/tools/stickers.py`, `tests/_telegram_fakes.py`, `tests/test_sticker_tools.py`, `tests/test_telegram_voice.py`; run those tests alone; write down which functions the script will call and what each needs from the Telegram client.
+5. Then work the loop in 8.6 on Lane C, starting with C1. Report at the first meaningful commit, not at the end.
 
 **Tone of every message you send the owner:** short, warm, concrete, honest about what is and is not verified. Never pretend something works that you have not run.
