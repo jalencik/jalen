@@ -37,7 +37,8 @@ from .audit import AuditLog
 from . import conversation, habits, plan as planning
 from . import taint
 from .brain.router import (
-    Intent, IntentRouter, addressed_to_jalen, is_kill_phrase, solicits_an_answer,
+    Intent, IntentRouter, NAME_ACK, addressed_to_jalen, is_kill_phrase,
+    solicits_an_answer, widened_door, without_a_misheard_name,
 )
 from .config import CONFIG, SECRETS
 from . import crashlog
@@ -255,6 +256,46 @@ _SPOKEN_WORD = re.compile(r"[\w']+", re.UNICODE)
 # essentially always; a speaker bleeding into a microphone never does.
 ECHO_TAIL_S = 3.0
 
+# HOW LONG AFTER AN ANSWER WINDOW CLOSES A SENTENCE THAT BEGAN INSIDE IT CAN
+# STILL ARRIVE. See Jalen._window_outlived_by_the_sentence.
+#
+# The window is judged when he BEGAN to speak (run() remembers it), and the
+# sentence reaches the address gate only after it has ended and been
+# transcribed. One utterance is cut at vad.max_utterance_s (30), and that
+# buffer includes the trailing silence, so a sentence that began on the last
+# tick of the window ends at most that long after it closes; then it is
+# transcribed. That last step is `heard=` on the timing rows: 1.8s median,
+# 4.4s at p95 and 36s at the maximum over the 349 timing rows in
+# data/audit.jsonl. Five seconds covers the p95; the 36s case was a local
+# fallback transcription and is refused - which is the behaviour before this
+# existed, not a new failure.
+ANSWER_STT_SLACK_S = 5.0
+
+# HOW LONG AFTER HIS VOICE STOPS A SENTENCE MADE OF IT CAN STILL REACH THE GATE.
+# The echo test for every way in that has no name to vouch for it (the three
+# doors of router.all_doors, and an answer that outlived its window).
+#
+# It is NOT ECHO_TAIL_S, and the difference is the review's second finding.
+# ECHO_TAIL_S is how long the SOUND lingers in the room; this is how long
+# after the sound stopped the TEXT can arrive at the gate, because the gate is
+# asked at the end of the pipeline and not at the microphone:
+#
+#     3.0   the tail in the room (ECHO_TAIL_S, as before)
+#   + 4.0   the longest endpoint silence a sentence can wait through - the
+#           patient one, vad.silence_ms; the fast one is 1.4
+#   + 5.0   transcription: `heard=` on the 349 timing rows in data/audit.jsonl
+#           is 1.8s at the median and 4.4s at p95 (ANSWER_STT_SLACK_S)
+#   = 12.0
+#
+# Measured nowhere as a whole - the audio is not kept - so it is the sum of
+# three figures that each have a source, and it errs long on purpose: a door's
+# own sentences ("could you please ...") are almost never a run of what he has
+# just heard, so a long tail costs the doors nothing, whereas the same tail on
+# the ANSWER path would refuse "just the last message" to "...or just the last
+# message?" for twelve seconds. Jalen.__init__ recomputes it from the shipped
+# vad.silence_ms.
+ECHO_REACHES_THE_GATE_S = ECHO_TAIL_S + 4.0 + ANSWER_STT_SLACK_S
+
 
 # Words that turn an answer into a CORRECTION: he is not saying yes to what
 # was asked, he is saying what to do instead. Padded with spaces because the
@@ -324,12 +365,19 @@ class Expectation:
         expires_at monotonic, and stamped AFTER playback finished rather
                    than when the model produced the text — otherwise a
                    forty-second answer spends its whole window being spoken.
+        kind       "" for a question Jalen really asked; "bare-wake" for the
+                   "Yes, Boss?" window a wake word with nothing after it
+                   opens. A sentence admitted through the second has no
+                   question behind it, only a greeting, so the audit row
+                   names it separately and the false accepts of that window
+                   can be counted on their own.
     """
 
     question: str
     turn_id: int
     opened_at: float
     expires_at: float
+    kind: str = ""
 
 
 class Jalen:
@@ -430,9 +478,32 @@ class Jalen:
         # WHEN he last said it, because the echo test is a question about
         # time before it is a question about words. See ECHO_TAIL_S.
         self._last_reply_at = 0.0
+        # What has been handed to the speaker of a reply that is STILL BEING
+        # WRITTEN, a chunk at a time - see _note_voice. A streamed reply is
+        # filed as `_last_reply_text` only when it has finished playing, so
+        # for the whole time it is on air the gate had the PREVIOUS reply to
+        # compare against, and its own voice matched nothing.
+        self._voice_so_far = ""
         # Read once, here, not on the gate path - the file's own rule.
         self._answer_window_s = float(
             cfg.get_path("conversation.answer_window_s", 30))
+        # How long after his voice stops a sentence made of it can still reach
+        # the address gate - the long tail for the doors. See
+        # ECHO_REACHES_THE_GATE_S: the room, the longest endpoint, the STT.
+        self._door_echo_tail_s = (
+            ECHO_TAIL_S
+            + float(cfg.get_path("vad.silence_ms", 4000)) / 1000.0
+            + ANSWER_STT_SLACK_S)
+        # How long past the end of an answer window a sentence that BEGAN
+        # inside it can still arrive: the longest one utterance can run, plus
+        # the time to transcribe it. See ANSWER_STT_SLACK_S.
+        self._answer_overrun_s = float(
+            cfg.get_path("vad.max_utterance_s", 30)) + ANSWER_STT_SLACK_S
+        # How long he is listened to after a wake word that was followed by
+        # nothing - the follow-up length, not the answer window; see
+        # _say_yes_and_listen.
+        self._follow_up_s = float(
+            cfg.get_path("conversation.follow_up_timeout_s", 12))
         # IS THE BRAIN ABLE TO THINK AT ALL? Set when Claude answers with a
         # typed failure - an expired sign-in, a billing problem, a usage
         # limit - rather than an answer. See _latch_brain_down. Without it
@@ -1488,6 +1559,9 @@ class Jalen:
             return
 
         stream = self.speaker.open_stream()
+        # A new reply starts with nothing handed over. A turn that failed
+        # half way never reaches _note_said, which is what clears this.
+        self._voice_so_far = ""
         # "read my email out loud" removes the cap for THIS turn only. The
         # cap is a default about length, not a rule about what he may hear.
         read_it_all = wants_it_all(user_text)
@@ -1513,6 +1587,14 @@ class Jalen:
         # being ambushed by a long read was itself overstating by sixty per
         # cent. A warning that cries wolf gets ignored, and then the real
         # four-minute answer arrives unannounced.
+        # EVERYTHING HANDED TO THE SPEAKER IS ALSO REMEMBERED, as it is handed
+        # over: the address gate compares what the microphone hears against
+        # it, and the reply is not filed as `_last_reply_text` until it has
+        # finished playing. See _note_voice.
+        def push(piece: str) -> None:
+            stream.push(piece)
+            self._note_voice(piece)
+
         def maybe_warn_about_length(so_far: int) -> None:
             if state["warned"] or not read_it_all:
                 return
@@ -1520,8 +1602,8 @@ class Jalen:
             if seconds < 60:
                 return
             state["warned"] = True
-            stream.push(f" This runs to about {round(seconds / 60)} minutes — "
-                        f"say stop whenever you've heard enough. ")
+            push(f" This runs to about {round(seconds / 60)} minutes — "
+                 f"say stop whenever you've heard enough. ")
 
         def on_text(chunk: str) -> None:
             # Spec B15 still applies: long answers are summarised aloud and
@@ -1544,7 +1626,7 @@ class Jalen:
             room = max_spoken - state["chars"]
             state["chars"] += len(chunk)
             if state["chars"] <= max_spoken:
-                stream.push(chunk)
+                push(chunk)
                 maybe_warn_about_length(state["chars"])
                 return
 
@@ -1554,8 +1636,8 @@ class Jalen:
             if cut > 0:
                 head = head[: cut + 1]
             if head.strip():
-                stream.push(head)
-            stream.push(" That's the short version, the full text is on screen.")
+                push(head)
+            push(" That's the short version, the full text is on screen.")
 
         # A turn that calls tools first produces no text for seconds. Silence
         # reads as "it's broken" — he said exactly that, more than once, in
@@ -1565,7 +1647,7 @@ class Jalen:
 
         def acknowledge() -> None:
             if state["chars"] == 0:
-                stream.push("Give me a second.")
+                push("Give me a second.")
                 # RECORDED, so the stopwatch can tell this sound from the
                 # answer. Without it, 65% of brain turns reported the
                 # acknowledgement firing as their thinking time.
@@ -1596,6 +1678,7 @@ class Jalen:
             if timer is not None:
                 timer.filler_pushed = False
             stream.abandon()
+            self._voice_so_far = ""
             self.say(reply)
             return
 
@@ -1612,8 +1695,14 @@ class Jalen:
         stream.close()
         self.audit.utterance(reply, who="jarvis")
         self._note_said(reply)
+        # Filed whole now; what was kept piece by piece while it streamed is
+        # the same words and would only be compared twice. Cleared HERE and
+        # not in _note_said: an announcement spoken in the middle of a stream
+        # (say_blocking) files itself too, and must not wipe the reply that is
+        # still on air.
+        self._voice_so_far = ""
 
-    def process(self, text: str, *, from_him: bool = True) -> None:
+    def process(self, text: str, *, from_him: bool = True, door: str = "") -> None:
         """
         Handle one utterance.
 
@@ -1757,7 +1846,10 @@ class Jalen:
         # Whether what the router sees is exactly what he said. Expansion can
         # put READ text into the sentence, so an expanded one keeps the taint
         # check in handle_local.
-        his_own_words = expanded == text
+        # A sentence let in by a DOOR (a misheard name, a polite request, the
+        # bare-wake window - run() names it) is the least certain speech
+        # there is: it keeps the taint check, like an expanded one does.
+        his_own_words = expanded == text and not door
         if expanded != text:
             self.audit.write("system",
                              summary=f"read '{text[:60]}' as '{expanded[:80]}'")
@@ -1920,6 +2012,21 @@ class Jalen:
         # produces no speech is worth saying anything about — see the
         # empty-utterance branch at the bottom of this loop.
         wake_initiated = False
+        # WHICH GATE OPENED THE WINDOW, for the address gate to read:
+        #   "wake"       the wake word, the hotkey, or un-pausing
+        #   "follow_up"  a sound inside the 12 seconds after a reply
+        #   "answer"     a sound while a question of Jalen's is open
+        #   "barge"      a sound over his own speech
+        # Set at EVERY place `listening` becomes True - a window opened
+        # without saying why would inherit the previous one's, and a barge-in
+        # on a cough would walk in on the follow-up window's exemption.
+        opened_by = ""
+        # AND WHICH QUESTION OF JALEN'S WAS OPEN when a sound opened the
+        # window - the Expectation itself, or None. The window is asked again
+        # by the address gate once the sentence has ended, and a long answer
+        # that began inside it has outlived it by then. Reset at every place
+        # `listening` becomes True, exactly like `opened_by`.
+        vouched_by = None
         follow_up_until = 0.0
         follow_up_s = float(self.cfg.get_path("conversation.follow_up_timeout_s", 12))
         barge_in = bool(self.cfg.get_path("conversation.barge_in", True))
@@ -1934,7 +2041,7 @@ class Jalen:
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
 
         def dispatch_turn(text: str, turn_id: int, timer: TurnTimer,
-                          from_him: bool = True) -> None:
+                          from_him: bool = True, door: str = "") -> None:
             """
             Run process() on its own thread so this loop keeps reading mic
             frames while a turn is in flight — including while it's stuck
@@ -1960,7 +2067,7 @@ class Jalen:
             task_id = conversation.start_task(text[:80], conversation.THINKING)
             try:
                 with systools.com_initialized():
-                    self.process(text, from_him=from_him)
+                    self.process(text, from_him=from_him, door=door or "")
                 conversation.update_task(task_id, state=conversation.COMPLETED)
             except BaseException as exc:      # noqa: BLE001
                 conversation.update_task(task_id, state=conversation.FAILED,
@@ -2062,6 +2169,8 @@ class Jalen:
                         # press instead of say.
                         listening = True
                         wake_initiated = True
+                        opened_by = "wake"
+                        vouched_by = None
                         self.orb.set_state("listening")
                         self.collector._reset()
                         continue
@@ -2076,6 +2185,8 @@ class Jalen:
                         self.paused = False
                         listening = True
                         wake_initiated = True
+                        opened_by = "wake"
+                        vouched_by = None
                         self.orb.set_state("listening")
                         self.collector._reset()
                     continue
@@ -2155,6 +2266,8 @@ class Jalen:
                     )
                     self.speaker.stop()
                     listening = True
+                    opened_by = "barge"
+                    vouched_by = None     # a barge-in vouches for nothing
                     # NOT wake_initiated. This used to be True, reasoning
                     # that he had "talked over it on purpose" — but
                     # barge-in fires on any SOUND above the threshold, not
@@ -2203,6 +2316,14 @@ class Jalen:
                             and self.vad.probability(frame) >= self.vad.threshold):
                         listening = True
                         wake_initiated = False   # a sound opened this, not him
+                        # The follow-up window vouches for a polite request;
+                        # an open question has already vouched for anything.
+                        opened_by = "follow_up" if in_follow_up else "answer"
+                        # The question that is open at THIS instant - the
+                        # window the sound opened, whichever of the three
+                        # reasons above let it in. Taken here, not when the
+                        # sentence is over: by then it may have closed.
+                        vouched_by = self._open_expectation()
                         # _refresh_orb, NOT set_state("listening"). This is
                         # the line he saw: a noise during the follow-up window
                         # painted the orb blue while a turn was still working,
@@ -2211,6 +2332,8 @@ class Jalen:
                     elif self.wake.feed(frame):
                         listening = True
                         wake_initiated = True
+                        opened_by = "wake"
+                        vouched_by = None
                         follow_up_until = 0.0
                         self.orb.set_state("listening")
                         # Do NOT drain here. The frames still queued behind
@@ -2261,9 +2384,30 @@ class Jalen:
                     # question it had just asked, then cancelling the action
                     # for "no answer". Flash the orb instead: visible if he
                     # is looking, silent if he is not.
+                    #
+                    # AND WHEN HE DID SAY "hey Jalen", the answer is the one
+                    # the router gives the same words typed. The wake model
+                    # fires about 0.77s in, at the end of the name, so a call
+                    # that is only the name leaves nothing behind it - and
+                    # "I didn't catch that" to a person who has just said
+                    # your name is the deaf assistant. The words he gets
+                    # instead have a record: 6 of the 7 "Yes, Boss?" in the
+                    # log were followed by a sentence of his within 22s
+                    # (3 acted on, 3 dropped by the gate as it was) and none
+                    # was echoed back. Measured since the address gate
+                    # shipped: 50 of those announcements, and in 11 of them
+                    # he said something again within 40 seconds (4 within
+                    # 12). 21 of the 50 had no other activity in the 60
+                    # seconds before and seven sessions hold 31 of them, so
+                    # some are false wakes, and a false wake now opens a
+                    # window. That is why it is the follow-up length (12s)
+                    # and not the 30s a real question gets; 0 of the 105
+                    # ignored rows arrive within 12s of any of the 50.
                     self.orb.flash("blocked", 0.8)
+                    self._note_nothing_heard("no-speech", opened_by,
+                                             vouched=self._vouching(vouched_by))
                     if wake_initiated:
-                        self.say("I didn't catch that.")
+                        self._acknowledge_a_bare_wake()
                     self.orb.set_state("muted" if self.muted else "idle")
                     continue
 
@@ -2302,14 +2446,78 @@ class Jalen:
                 timer.stt_engine = getattr(self.stt, "last_engine", "") or ""
 
                 if not text:
+                    # Audio that was long enough to transcribe and came back
+                    # as nothing. Silent, as it always was - but written
+                    # down, because until now there was no row for it and
+                    # "how often does recognition return nothing" could not
+                    # be answered from the log.
+                    self._note_nothing_heard(
+                        "empty-transcript", opened_by,
+                        seconds=round(len(utterance) / float(self.collector.sample_rate), 1),
+                        vouched=self._vouching(vouched_by),
+                    )
                     self.orb.set_state("idle")
                     continue
 
-                if not self.should_act_on(text, wake_initiated):
+                # Decided BEFORE the gate, because the gate closes the answer
+                # window as it accepts: a sentence admitted as the answer to
+                # a question is an answer, and must reach the question
+                # untouched even if its first word is a name on the list.
+                # `outlived`: his sentence began inside an answer window that
+                # has closed since - see _window_outlived_by_the_sentence.
+                outlived = (
+                    vouched_by is not None and not self._expectation_open()
+                    and self._window_outlived_by_the_sentence(vouched_by)
+                )
+                was_an_answer = (
+                    self._awaiting_confirmation or self._awaiting_stop
+                    or self._awaiting_reply or self._rating_is_pending()
+                    or self._expectation_open() or outlived
+                    or self._continues_last_utterance(text)
+                )
+                # WHICH question it answers, taken before the gate closes it,
+                # so the row below can say whether it came through the window
+                # "Yes, Boss?" opened (which has no question behind it).
+                answered = self._open_expectation() or (vouched_by if outlived else None)
+                vouching = self._vouching(vouched_by)
+
+                # THE UNFINISHED SENTENCE IS ASKED ABOUT FIRST, AND THE WINDOW
+                # IS NOT USED UP BY ASKING. The utterance closed on the FAST
+                # threshold; if the words say he is mid-sentence ("...open
+                # chrome and"), put the audio back and keep listening on the
+                # patient one - but only if he would be heard at all. The
+                # whole phrase is re-transcribed once at the end rather than
+                # stitched from two partial transcripts - one Whisper pass
+                # over the complete audio is both more accurate and cheaper
+                # than two over halves of it.
+                #
+                # This used to come AFTER the gate, which closes the answer
+                # window as it accepts. The fragment was accepted and the
+                # window shut, the audio was put back, and the WHOLE sentence
+                # then met a gate with nothing left to answer: refused. The
+                # long dictated answers the outlived-window rule exists for
+                # are exactly the ones that pause on a connector. Television
+                # that ends on "and" is still refused at once, as it always
+                # was, and not held on to for four more seconds.
+                if (not self.collector.was_patient and looks_unfinished(text)
+                        and self.should_act_on(text, wake_initiated, opened_by=opened_by,
+                                               vouched_by=vouched_by, consume=False)):
+                    self.collector.resume(utterance)
+                    listening = True
+                    self.orb.set_state("listening")
+                    continue
+
+                if not self.should_act_on(text, wake_initiated, opened_by=opened_by,
+                                          vouched_by=vouched_by):
                     self.audit.write(
                         "system",
                         summary="ignored - not addressed to Jalen",
-                        detail={"heard": text[:200]},
+                        # `opened_by` and `vouched_by` are additive: the
+                        # history was read by `heard` alone, and the next
+                        # measurement can now split the refusals by the gate
+                        # that opened the window and by what was open.
+                        detail={"heard": text[:200], "opened_by": opened_by,
+                                "vouched_by": vouching},
                     )
                     self._refresh_orb()
                     continue
@@ -2323,18 +2531,37 @@ class Jalen:
                 # his name can do that; see the taint clear in process().
                 from_him = wake_initiated or addressed_to_jalen(text)
 
-                # The utterance closed on the FAST threshold. If the words
-                # say he is mid-sentence ("...open chrome and"), put the
-                # audio back and keep listening on the patient one. The
-                # whole phrase is re-transcribed once at the end rather
-                # than stitched from two partial transcripts — one Whisper
-                # pass over the complete audio is both more accurate and
-                # cheaper than two over halves of it.
-                if not self.collector.was_patient and looks_unfinished(text):
-                    self.collector.resume(utterance)
-                    listening = True
-                    self.orb.set_state("listening")
-                    continue
+                # HOW IT GOT IN, when it was not his name or the wake word -
+                # decided here, on the words as they were heard, and written
+                # below once the sentence is really going on to a turn: a
+                # sentence that is put back for more audio comes through this
+                # gate twice and must leave one row. Not for an answer, which
+                # is the question's own door and has always been free.
+                door = None
+                heard = text
+                if not wake_initiated and not from_him:
+                    if getattr(answered, "kind", "") == "bare-wake":
+                        door = "bare-wake-window"
+                    elif outlived:
+                        door = "after-the-window-closed"
+                    elif was_an_answer:
+                        door = None
+                    else:
+                        door = widened_door(text, opened_by)
+
+                # HIS NAME, MISHEARD, COMES OFF BEFORE THE ROUTER SEES IT.
+                # "Dylan, what time is it" reached the brain whole - a model
+                # round trip for a question the router answers in 90ms - and
+                # a bare "Helen." was a model call to say "Yes, Boss?".
+                # After `from_him` on purpose: rewriting the name to "Jalen"
+                # first would let a misheard name certify that it was him.
+                if not was_an_answer:
+                    text = without_a_misheard_name(text)
+
+                # Going on to a turn, so the row is written now - with the
+                # words as heard, not as the router will see them.
+                if door:
+                    self._note_how_it_got_in(door, heard, opened_by, vouched=vouching)
 
                 with self._turn_lock:
                     self._turn_seq += 1
@@ -2366,7 +2593,7 @@ class Jalen:
                 # turn is the one whose silence he is currently sitting in.
                 self._turn_timer = timer
                 threading.Thread(
-                    target=dispatch_turn, args=(text, turn_id, timer, from_him), daemon=True,
+                    target=dispatch_turn, args=(text, turn_id, timer, from_him, door), daemon=True,
                     name=f"jalen-turn-{turn_id}",
                 ).start()
 
@@ -2432,7 +2659,9 @@ class Jalen:
     # rather than volume: a sentence that does not begin with his name was
     # not addressed to him. No model, no threshold, and nothing a loud room
     # can defeat.
-    def should_act_on(self, text: str, wake_initiated: bool) -> bool:
+    def should_act_on(self, text: str, wake_initiated: bool,
+                      opened_by: str = "", vouched_by=None,
+                      consume: bool = True) -> bool:
         """
         Three ways through, and the middle one is the one he chose when asked.
 
@@ -2443,6 +2672,32 @@ class Jalen:
                             would be absurd, and it is the only reason the
                             follow-up window still exists
         starts with a name  everything else, in any pronunciation
+
+        And three narrower doors at the very end, for the sentences that were
+        plainly for him and were refused anyway - 40 of the 78 in
+        data/audit.jsonl once the question window was counted, of which these
+        rescue 13 (and the long answers that outlived their window, below,
+        another 5); see scripts/measure_address_gate.py and router.all_doors:
+
+        his name misheard  "Dylan, what time is it" - 7 names, each of which
+                           rescued a refused sentence; not in barge-in
+        "hey Jalen" last   "...open it. Hey Jalen."
+        a polite request   "could you please..." / "I would like you to...",
+                           but ONLY when `opened_by == "follow_up"`
+
+        `opened_by` is the other half of the two-gates rule. run() knows which
+        sound opened the microphone window ("follow_up", "answer", "barge" or
+        "wake"); this method used to be unable to see it, which is how a
+        window opened FOR his next sentence ended with that sentence thrown
+        away. Callers that do not know pass nothing and get no exemption.
+
+        `vouched_by` is the same idea for the answer window: the Expectation
+        that was open when the sound began, so a long answer is not refused
+        for ending after the window did. See the branch that reads it.
+
+        `consume=False` asks whether he WOULD be heard without using up the
+        question he is answering. run() asks that first of a sentence that
+        looks unfinished, which it may put back and ask about again whole.
 
         Rejection is SILENT at the call site, deliberately. Announcing "I
         didn't catch that" to a room that was not talking to him is the
@@ -2489,7 +2744,35 @@ class Jalen:
             # next reply opens its own window at its own tail if it asks
             # anything. The cost is a two-part answer - "yeah." then "the
             # second one" - where the second half now needs his name.
-            self._forget_expectation()
+            #
+            # Only when `consume`. run() asks first, without consuming, whether
+            # a sentence that looks unfinished would be heard at all: it is put
+            # back for more audio if so, and the WHOLE sentence is asked about
+            # a second time. Closing the window on the first, partial, ask
+            # left the second with nothing to be an answer to.
+            if consume:
+                self._forget_expectation()
+            return True
+        # AN ANSWER THAT OUTLIVED ITS WINDOW. The window above is asked at the
+        # END of his sentence, after the sentence itself, the endpoint and the
+        # transcription - but the microphone opened for it when the sentence
+        # BEGAN. A long answer that started in the last seconds of the 30 is
+        # open to one gate and shut to the other, and was refused for being
+        # late when it was not. run() hands over the question that was open
+        # when the sound began (`vouched_by`); it is honoured only while it is
+        # still the newest thing Jalen asked (identity, not time - a later
+        # turn that asks or forgets replaces it) and for as long as one
+        # utterance can run. The echo test is not optional: this is a way in
+        # without his name, and a late one, so it looks back as far as the
+        # doors do. `vouched_by is not None` comes first, so a caller that
+        # does not know (every older test double) never reaches the methods
+        # this needs.
+        door_tail = getattr(self, "_door_echo_tail_s", ECHO_REACHES_THE_GATE_S)
+        if vouched_by is not None and self._window_outlived_by_the_sentence(vouched_by):
+            if self._sounds_like_its_own_voice(text, tail_s=door_tail):
+                return False
+            if consume:
+                self._forget_expectation()
             return True
         # STILL THE SAME SENTENCE.
         #
@@ -2519,7 +2802,21 @@ class Jalen:
         # whatsoever.
         if is_kill_phrase(text, self.kill_phrases):
             return True
-        return addressed_to_jalen(text)
+        if addressed_to_jalen(text):
+            return True
+        # THE NARROW DOORS, and the echo test is not optional for any of them
+        # - this gate is the echo defence, and each of these is a way to be
+        # accepted without starting with his name. Jalen reading out an email
+        # that says "Dylan, could you please..." must not be a command.
+        #
+        # For the whole time his voice is on air and for `door_tail` after it
+        # stops: a sentence made of his own voice reaches here after the
+        # endpoint silence and the transcription, not when the sound stopped
+        # (ECHO_REACHES_THE_GATE_S). The test runs only for a sentence a door
+        # would admit, so the ordinary refusal stays as cheap as it was.
+        if widened_door(text, opened_by) is not None:
+            return not self._sounds_like_its_own_voice(text, tail_s=door_tail)
+        return False
 
     def _continues_last_utterance(self, text: str) -> bool:
         """Is this the rest of the sentence he was already saying?"""
@@ -2543,7 +2840,7 @@ class Jalen:
 
     # --------------------------------------------------- an open question
     def _expect_an_answer(self, question: str, turn_id: int,
-                          window_s: float | None = None) -> None:
+                          window_s: float | None = None, kind: str = "") -> None:
         """
         Jalen has just finished ASKING him something. Open the window.
 
@@ -2552,13 +2849,16 @@ class Jalen:
         generation time instead, a forty-second answer would spend its
         entire window being read out loud, and every answer to it would
         arrive "late".
+
+        `kind` is "bare-wake" for the window "Yes, Boss?" opens - see
+        Expectation.
         """
         if window_s is None:
             window_s = self._answer_window_s
         now = time.monotonic()
         self._expecting = Expectation(
             question=question, turn_id=turn_id,
-            opened_at=now, expires_at=now + window_s,
+            opened_at=now, expires_at=now + window_s, kind=kind,
         )
 
     def _note_said(self, text: str) -> None:
@@ -2573,8 +2873,142 @@ class Jalen:
         self._last_reply_text = text
         self._last_reply_at = time.monotonic()
 
+    def _note_voice(self, piece: str) -> None:
+        """
+        Record a piece of a reply that is being spoken while it is written.
+
+        The streamed path (every brain reply) hands the speaker one chunk at a
+        time and files the reply with _note_said only after the last of it has
+        been played. In between - which for a long answer is most of what
+        Jalen says all day - the address gate asked "was that his own voice?"
+        and had nothing to compare it with. The cap is 60,000 characters, about
+        45 minutes of speech at the measured 22.4 characters a second: text is
+        generated far faster than it is spoken, so what is being played can
+        be a long way behind the end of what has been handed over, and
+        dropping the oldest would drop exactly the part that is on air.
+        """
+        if not piece:
+            return
+        self._voice_so_far = (self._voice_so_far + " " + piece)[-60000:]
+
     def _forget_expectation(self) -> None:
         self._expecting = None
+
+    # ------------------------------------------- a window that heard nothing
+    @staticmethod
+    def _vouching(vouched_by) -> str:
+        """
+        What was open when the sound began, as the word the audit rows carry:
+        "" for nothing, "question" for something Jalen really asked, or the
+        Expectation's own kind ("bare-wake").
+        """
+        if vouched_by is None:
+            return ""
+        return getattr(vouched_by, "kind", "") or "question"
+
+    def _note_nothing_heard(self, stage: str, opened_by: str,
+                            seconds: float | None = None,
+                            vouched: str | None = None) -> None:
+        """
+        Leave a row when a microphone window ends with nothing to act on.
+
+        There was none. "I didn't catch that" was spoken (and now "Yes,
+        Boss?"), but a window that produced no speech, or audio that
+        transcribed to an empty string, left no trace in data/audit.jsonl -
+        so "how often does recognition return nothing, and which gate opened
+        the window it happened in" could only be guessed at. That is the
+        measurement this capability was blind to.
+
+        stage       "no-speech"        the collector gave up: 2.5s with no
+                                       sound above the VAD threshold
+                    "empty-transcript" there was audio and the transcript
+                                       came back empty
+        opened_by   see the comment in run()
+        vouched     what was open when the sound began, as _vouching words it
+                    ("" for nothing); run() always says, so every row it
+                    writes carries `vouched_by`, and rows from callers that do
+                    not say simply do not have the key
+        """
+        detail: dict = {"stage": stage, "opened_by": opened_by}
+        if vouched is not None:
+            detail["vouched_by"] = vouched
+        if seconds is not None:
+            detail["seconds"] = seconds
+        self.audit.write("system", summary=f"heard nothing - {stage}", detail=detail)
+
+    def _note_how_it_got_in(self, door: str, text: str, opened_by: str,
+                            vouched: str | None = None) -> None:
+        """
+        Leave a row when a sentence was acted on WITHOUT his name.
+
+        The "ignored" row counts what the gate refused; nothing counted what
+        the narrow doors admitted, so a door that was letting the television
+        in could only be found by reading the log by eye. With this row the
+        false accepts of each door are a count - `door` is one of
+        router.all_doors' names, "after-the-window-closed" for an answer that
+        began inside its window, or "bare-wake-window" for what came through
+        the twelve seconds "Yes, Boss?" opens (which has no question behind
+        it, so it is the least vouched-for way in there is) - and the figures
+        in the commit that added them can be checked against live use.
+        """
+        detail = {"heard": text[:200], "opened_by": opened_by}
+        if vouched is not None:
+            detail["vouched_by"] = vouched
+        self.audit.write(
+            "system",
+            summary=f"acted on without his name - {door}",
+            detail=detail,
+        )
+
+    def _acknowledge_a_bare_wake(self) -> None:
+        """
+        The wake word fired and no speech followed. Say so like the name alone.
+
+        Called from the microphone loop, so it must not block it: the work
+        waits for playback and runs on its own thread.
+
+        Not while a question is waiting on him. A RED confirmation, an AMBER
+        stop-window or an ask_user already has his next sentence spoken for,
+        and "I didn't catch that" over a delete confirmation - then
+        cancelling it for "no answer" - is the failure the old announcement
+        was caught doing.
+        """
+        if self._awaiting_confirmation or self._awaiting_stop or self._awaiting_reply:
+            return
+        threading.Thread(
+            target=self._say_yes_and_listen, daemon=True, name="jalen-bare-wake",
+        ).start()
+
+    def _say_yes_and_listen(self) -> None:
+        """
+        "Yes, Boss?" - and then listen for the command, for the follow-up
+        length.
+
+        The same words the router gives the bare name typed or caught by the
+        follow-up window, and for the same reason: it tells him he was
+        heard. The window opens only if something was actually said. A muted
+        Jalen says nothing, and a window stamped after silence is the
+        unbounded exemption dispatch_turn already refuses to create - see
+        `spoke_this_turn` there.
+        """
+        # Compared for a CHANGE, not for "later than a timestamp I took a
+        # moment ago": time.monotonic() ticks every ~15ms on Windows, and
+        # say() is called straight after, so "later than" can be false for a
+        # reply that was spoken.
+        before = self._last_reply_at
+        try:
+            self.say(NAME_ACK)
+            self._await_playback()
+            if self._last_reply_at != before:
+                # kind="bare-wake": this window has a greeting behind it and no
+                # question, so what comes through it is counted under its own
+                # door (`bare-wake-window`) and its false accepts can be read
+                # off the log on their own.
+                self._expect_an_answer(NAME_ACK, self._turn_seq,
+                                       window_s=self._follow_up_s,
+                                       kind="bare-wake")
+        finally:
+            self._refresh_orb()
 
     def _another_turn_in_flight(self) -> bool:
         """
@@ -2627,8 +3061,39 @@ class Jalen:
         pending = self._expecting
         return pending is not None and time.monotonic() < pending.expires_at
 
+    def _open_expectation(self) -> "Expectation | None":
+        """
+        The question that is open RIGHT NOW, as an object, or None.
+
+        What run() remembers at the instant a sound opens the microphone, so
+        that the address gate can be told which window the sentence came out
+        of - see `vouched_by` in should_act_on. Read once into a local, for
+        the reason _expectation_open gives: the field belongs to the turn
+        threads. Kept apart from _expectation_open rather than built on it,
+        because several test doubles bind that one alone.
+        """
+        pending = self._expecting
+        if pending is not None and time.monotonic() < pending.expires_at:
+            return pending
+        return None
+
+    def _window_outlived_by_the_sentence(self, vouched_by: "Expectation") -> bool:
+        """
+        Did the question that opened the microphone for this sentence close
+        while he was still saying it?
+
+        True only when `vouched_by` is STILL the newest thing Jalen asked -
+        the same object, so a later turn that asked something else, or asked
+        nothing and cleared it, ends the exemption - and the sentence cannot
+        have run on longer than one utterance can: see ANSWER_STT_SLACK_S.
+        """
+        pending = self._expecting
+        if pending is None or pending is not vouched_by:
+            return False
+        return time.monotonic() <= pending.expires_at + self._answer_overrun_s
+
     # ------------------------------------------------- is that him, or us?
-    def _sounds_like_its_own_voice(self, text: str) -> bool:
+    def _sounds_like_its_own_voice(self, text: str, tail_s: float | None = None) -> bool:
         """
         Is this the question coming back through the microphone?
 
@@ -2681,23 +3146,70 @@ class Jalen:
         and BOTH the question and whatever he last said are compared. Past
         that window his voice is not in the room any more and a text match
         is the user using his words, which is what answering a question is.
+
+        AND THE CLOCK STARTS WHEN HE STOPS TALKING, not when he started. An
+        independent review of the doors added since reproduced this: the
+        window was measured from the moment a reply was handed to the
+        speaker, so a seventeen-second reply read back at five seconds or at
+        ten was compared against nothing. Now his voice is a candidate for as
+        long as the speaker is on air, and for `tail_s` after it stops
+        (Speaker.quiet_for); on the streamed path, where the reply is only
+        filed when it has finished, what has been handed over so far
+        (`_voice_so_far`) is compared too.
+
+        `tail_s` is ECHO_TAIL_S for the answer path, and the doors pass the
+        longer ECHO_REACHES_THE_GATE_S. NOT FIXED, found while measuring it:
+        even 3s from the end is shorter than the pipeline - endpoint silence
+        and transcription put the gate 3.2s after the sound at the median - so
+        an echo of a QUESTION usually reaches the gate after the answer path's
+        tail has shut. Lengthening it would refuse "just the last message" as
+        an answer to "...or just the last message?"; the fix is to judge by
+        when the sound BEGAN, which needs a measured physical tail the log
+        cannot give (the audio is not kept).
         """
         now = time.monotonic()
-        candidates = []
-        if now - self._last_reply_at <= ECHO_TAIL_S:
-            candidates.append(self._last_reply_text)
+        tail = ECHO_TAIL_S if tail_s is None else tail_s
+        # The longest any rule below looks back. Only the two-word rule uses
+        # more than `tail`: it can afford to, because no answer is a two-word
+        # reply said back.
+        far = max(tail, getattr(self, "_door_echo_tail_s", ECHO_REACHES_THE_GATE_S))
+        # `getattr`, not attribute access: the speaker and the streamed text
+        # are new, and every test double built before them has neither. A
+        # double without a speaker keeps the older clock - since the reply
+        # was handed over - which is exactly what it always had.
+        quiet_for = getattr(getattr(self, "speaker", None), "quiet_for", None)
+        since_voice = quiet_for() if callable(quiet_for) else now - self._last_reply_at
+        since_voice = min(since_voice, now - self._last_reply_at)
+        candidates = []                       # (what he said, within `tail`?)
+        if since_voice <= far:
+            near = since_voice <= tail
+            candidates.append((self._last_reply_text, near))
+            streamed = getattr(self, "_voice_so_far", "")
+            if streamed:
+                candidates.append((streamed, near))
         pending = self._expecting
-        if pending is not None and now - pending.opened_at <= ECHO_TAIL_S:
-            candidates.append(pending.question)
+        if pending is not None and now - pending.opened_at <= far:
+            candidates.append((pending.question, now - pending.opened_at <= tail))
 
         heard_words = _SPOKEN_WORD.findall((text or "").lower())
-        if len(heard_words) < 3:
-            return False
         span = len(heard_words)
 
-        for said in candidates:
+        for said, near in candidates:
             said_words = _SPOKEN_WORD.findall((said or "").lower())
             if not said_words:
+                continue
+            # A TWO-WORD REPLY HEARD BACK WHOLE. "Yes, Boss?" is what a bare
+            # wake word is answered with, and its echo - "Yes, boss." - is two
+            # words, below the floor under which nothing is echo, so it was
+            # accepted as the answer to its own question and cost a model turn.
+            # The floor protects an ANSWER that happens to use words the
+            # question offered ("ChatGPT" to "ChatGPT or Gemini?"); nobody
+            # answers a two-word reply by saying it back, so this one looks
+            # back as far as the doors do.
+            if len(said_words) == 2 and span and span % 2 == 0 \
+                    and heard_words == said_words * (span // 2):
+                return True
+            if not near or span < 3:
                 continue
             for start in range(len(said_words) - span + 1):
                 if said_words[start:start + span] == heard_words:

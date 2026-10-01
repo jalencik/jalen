@@ -101,6 +101,10 @@ class Speaker:
         # When playback started, for speaking_for(). Set beside every
         # _speaking.set() so the two can never disagree.
         self._speaking_since = 0.0
+        # When the speaker last went quiet, for quiet_for(). Stamped beside
+        # every _speaking.clear(), exactly as _speaking_since is beside every
+        # set(). 0.0 means it has never spoken.
+        self._spoke_until = 0.0
         self._say_lock = threading.Lock()
         self._cache_lock = threading.Lock()
         self._audio_cache: dict[str, tuple[np.ndarray, int]] = {}
@@ -136,6 +140,28 @@ class Speaker:
         if not self._speaking.is_set() or not started:
             return 0.0
         return max(0.0, time.monotonic() - started)
+
+    def quiet_for(self) -> float:
+        """
+        Seconds since Jalen's voice last left the speakers: 0.0 while it is on
+        air, infinity if it has never spoken.
+
+        The address gate asks this to know whether a sentence it has just been
+        handed could be his own voice coming back. It used to ask how long ago
+        the reply BEGAN, which for a 17-second reply is over before the first
+        quarter of it has been spoken - so playback's own length counted
+        against the echo window. The anchor that is physically true is the
+        moment the sound stopped.
+
+        Not _speaking_since: that is when playback began, and it is reset to 0.0
+        when it ends.
+        """
+        if self._speaking.is_set():
+            return 0.0
+        ended = self._spoke_until
+        if not ended:
+            return float("inf")
+        return max(0.0, time.monotonic() - ended)
 
     def stop(self) -> None:
         """
@@ -478,6 +504,7 @@ class Speaker:
             finally:
                 self._speaking.clear()
                 self._speaking_since = 0.0
+                self._spoke_until = time.monotonic()
                 self._interrupt.clear()
                 self.on_state("idle")
 
@@ -836,6 +863,7 @@ class SpeechStream:
                         break
                 sp._speaking.clear()
                 sp._speaking_since = 0.0
+                sp._spoke_until = time.monotonic()
                 sp._interrupt.clear()
                 sp.on_state("idle")
                 self._done.set()

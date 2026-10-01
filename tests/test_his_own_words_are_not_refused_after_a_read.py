@@ -141,6 +141,31 @@ def test_an_unexpanded_router_match_sends_the_flag_through_process(jarvis, ran, 
     assert ran and ran[0][0] == "keyboard_shortcut"
 
 
+def test_a_sentence_admitted_by_a_door_keeps_the_taint_check(jarvis, ran, monkeypatch):
+    """
+    The listening work lets some sentences in WITHOUT his name (a misheard
+    name, a polite request, the bare-wake window). Those are the least certain
+    speech there is, so they are not "his own words" for the purpose of
+    skipping the taint check: found by the independent re-check of that work.
+    An ordinary follow-up (no door) keeps the exemption.
+    """
+    jarvis.say = lambda t, force=False: None
+
+    jarvis.process("scroll down", from_him=False, door="polite-request")
+    assert not ran, "a door-admitted sentence ran after a read"
+
+    jarvis.process("scroll down", from_him=False)
+    assert ran and ran[0][0] == "keyboard_shortcut"
+
+
+def test_run_carries_the_door_to_the_turn():
+    import inspect
+
+    source = inspect.getsource(Jalen.run)
+    assert "args=(text, turn_id, timer, from_him, door)" in source
+    assert "door=door" in source
+
+
 def test_the_brain_path_is_untouched():
     """The model's tool calls still take their origin from the taint."""
     import inspect

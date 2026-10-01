@@ -55,6 +55,11 @@ INTERNAL_SWITCHES = frozenset({
     # Overrides which /my-voice skill file the drafting tools read, for tests
     # that must not depend on the real one being installed.
     "JARVIS_VOICE_SKILL",
+    # Points scripts/measure_address_gate.py and the corpus tests in
+    # tests/test_not_pretending_to_be_deaf.py at a COPY of audit.jsonl. A git
+    # worktree has no data/, and the real log must not be moved or edited to
+    # give it one; unset, both read data/audit.jsonl as they always did.
+    "JALEN_AUDIT_LOG",
 })
 
 _READS = re.compile(

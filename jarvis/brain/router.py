@@ -165,6 +165,274 @@ def addressed_to_jalen(text: str) -> bool:
 
 
 # ----------------------------------------------------------------------------
+# THREE MORE WAYS A SENTENCE IS PLAINLY FOR HIM, and the gate refused all of
+# them - which, from his chair, is Jalen pretending to be deaf.
+#
+# MEASURED in data/audit.jsonl (scripts/measure_address_gate.py replays it).
+# 105 sentences were logged "ignored - not addressed to Jalen"; read by hand,
+# 78 were for him, 15 ambiguous, 12 background. 97 of them are older than the
+# answer window (20 September), so the replay puts each back through the gate
+# with the window it would have had; an answer closes it, as it does live.
+# Before the first change 38 of the 78 were acted on and 40 refused; after it
+# and the review's fixes, 56 are acted on and 22 refused (18 rescued, none of
+# them background or ambiguous):
+#
+#                                    before  after
+#     conversation, no name ........   11     10   NOT FIXED - see all_doors
+#     name misheard at the start ...    8      3   "Dylan, what do you mean by..."
+#                                                   (left: "Darling, please go...",
+#                                                   "Agile, make yourself bigger",
+#                                                   "Hey, child, I would like you
+#                                                   to..." - words, not names)
+#     answer to a statement ........    7      4   (3 of the 7 were long answers
+#                                                   that outlived their window -
+#                                                   see Jalen.should_act_on; the
+#                                                   rest NOT FIXED: a reply that
+#                                                   does not end in a question
+#                                                   opens no window, measured
+#                                                   and rejected in
+#                                                   solicits_an_answer's comment)
+#     polite request, no name ......    7      2   "I would like you to send it."
+#     name said last, not first ....    5      1   "...sign me in. Hey Jalen."
+#     fragment .....................    2      2
+#
+# Of the 56, 43 need no door at all (38 as before, 5 are the long answers);
+# 13 are rescued by one: misheard name 5 alone, "hey Jalen" last 3, polite
+# request 4 (one row is two of them). What each door lets in that it should
+# not is counted in `scripts/measure_address_gate.py`: 0 of the 12 background
+# rows and 0 of the 15 ambiguous ones, for every door. THAT 0 IS IN-SAMPLE AND
+# BOUNDS LITTLE - the regexes were written while reading those rows, they
+# hold no person speaking to another person, and 27 rows cannot put a rate on
+# anything. What the doors let in that is NOT in the log is why each one was
+# cut back to what has evidence (see below), and why every sentence admitted
+# is written to the audit log with the door's name, to be counted live.
+#
+# Everything below is a pure function of the text, so the gate and its tests
+# can ask it without a microphone. THE ECHO DEFENCE IS NOT HERE: it needs
+# what Jalen last said, so Jalen.should_act_on applies
+# _sounds_like_its_own_voice() to every one of these before acting on it - for
+# as long as his voice is on air and for 12s after (app.ECHO_REACHES_THE_GATE_S),
+# not 3s from when the reply began, which was the first version's and which a
+# 17-second reply read back at 5s and 10s walked straight through.
+# addressed_to_jalen() above is deliberately left exactly as it was - it also
+# decides whether the taint clears, what the politeness stripper removes and
+# what the kill phrase accepts, and none of those may learn these doors.
+
+# What Whisper has written for his voice, and for which it has been seen in
+# front of a sentence the gate REFUSED that was meant for him: "Helen."
+# "Dylan, what do you mean by old Windows cleanups?" "Hey, Delic. Could you
+# please?" - 7 names in 9 refused sentences (re-count with
+# scripts/measure_address_gate.py). The list is MEASURED and is kept short on
+# purpose: guessing the rest of the alphabet turns every greeting in the room
+# into a command, and tests/test_not_pretending_to_be_deaf.py caps its length.
+# It is also the only part of the name door that can be wrong about a person:
+# Helen, Ellen, Dylan and Alain are somebody's name, and a household with one
+# of them is the case no row in the log can speak to.
+#
+# THE ENTRY RULE: a name is on the list only if it has rescued a refused
+# sentence. Sixteen spellings have been seen in front of a real command, but
+# nine of them - galen, janet, janine, johnny, jolly, yellen, dallin, jameet,
+# ejjalin - only ever in sentences the wake word had already carried, so they
+# bought nothing and cost exposure ("Janet, can you pass me the salt" was acted
+# on). tests/test_listening_does_not_obey_other_people_or_itself.py checks the
+# rule against the log. To add a name, point at the refused row.
+#
+# Left OFF, though seen: darling (3), agile, child, gentlemen (2) - ordinary
+# words - and john, doris, quince, coke, which appeared with nothing after
+# them to say it was him. There is no "any other word followed by a comma and
+# a polite request" door any more either (it was "Rijal, could you please
+# open it"): a request that NAMES somebody else is the opposite of a sign it
+# is for Jalen. Nor a bare "please": "Darling, please go to my window" is not a
+# call, because "Mom, please, listen" and "Wait, please don't" are in every
+# television drama.
+MISHEARD_NAMES = frozenset({
+    "helen", "ellen", "alain", "dylan", "delic", "jalit", "e.j",
+})
+
+# What he says when he is called by the name alone. One string, because the
+# router answers the typed "Jalen" with it and the microphone loop now answers
+# a wake word followed by nothing with the same words.
+NAME_ACK = "Yes, Boss?"
+
+_FLAT_QUOTES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
+
+# "could you please ..." and "I would like you to ..." - how he asks, and the
+# only two forms of asking that are in the log in any number. Opening his 872
+# acted-on utterances and the 78 refused sentences meant for him:
+#
+#                            his utterances   refused, meant for him
+#     could you please ...          76                  7
+#     I would like you to ...       26                  5
+#     would you please ...           1                  1
+#     can you please ...             1                  0
+#     will you please ...            0                  0
+#     I'd like you to ...            0                  0
+#
+# so the four forms below the line are 3 sightings in 950 sentences and the two
+# above it are 114. They are also what a person says to another person in
+# earshot ("Can you please close the window", "I'd like you to meet my
+# friend"), which is the whole risk of a door that has no name in it, so the
+# door is the two forms he uses and no others. Deliberately NOT bare "please",
+# "can you", "would you like" or "I want you to" either: each of those opens
+# ordinary dialogue and song lyrics, which is what the 12 background rows are.
+_POLITE_REQUEST = (
+    r"(?:could\s+you\s+(?:please|kindly)\b"
+    r"|i\s+would\s+like\s+you\s+to\b)"
+)
+
+# One word at the very start - after "hey" or "ok", if there is one. Dots are
+# allowed only BETWEEN letters, so "E.J." is one token and "Helen." is "Helen".
+_VOCATIVE_AT_THE_START = re.compile(
+    r"^\s*(?:(?:hey|hi|yo|ok|okay)[.,!?;:\s]+)?([a-z](?:[a-z-]|\.(?=[a-z]))*)",
+    re.I,
+)
+_STARTS_WITH_POLITE_REQUEST = re.compile(r"\s*" + _POLITE_REQUEST, re.I)
+_OPENS_WITH_REQUEST = re.compile(
+    r"^\s*(?:(?:hey|hi|yeah|yes|so|and|ok|okay|man|boss|please)[.,!?;:\s]+){0,3}"
+    + _POLITE_REQUEST,
+    re.I,
+)
+_GREETS_HIM = re.compile(
+    r"(?:^|[.,!?;:\s])(?:hey|hi|yo|ok|okay)[.,!?;:\s]+" + _NAME + r"(?![\w])",
+    re.I,
+)
+
+
+def called_by_a_misheard_name(text: str):
+    """
+    If the sentence opens by calling him by a name recognition got wrong,
+    return what is left once the name is taken off ("" if that was all);
+    otherwise None. Test the result with `is not None` - "" is a call.
+
+    One door, and it is narrow: a name on MISHEARD_NAMES, followed by a
+    vocative mark or nothing - "Helen." "Dylan, what time is it" - or straight
+    into a polite request.
+
+    There used to be a second, for ANY word followed by a comma and a polite
+    request ("Rijal, could you please open it"). It is gone. A request that
+    names somebody who is not on the list is the opposite of a sign that it is
+    for him: "Sarah, could you please send me the report" was acted on in every
+    window, and the door rescued 1 of the 78 refused sentences meant for him
+    that nothing else did.
+
+    "Dylan Thomas wrote poems" and "Helen is my friend" are not calls: a name
+    with no mark after it and no request behind it is somebody's name.
+    """
+    flat = (text or "").translate(_FLAT_QUOTES)
+    found = _VOCATIVE_AT_THE_START.match(flat)
+    if not found:
+        return None
+    word = found.group(1).lower()
+    if word not in MISHEARD_NAMES:
+        return None
+    rest = flat[found.end():]
+    marked = rest.lstrip()[:1] in tuple(",.!?;:")
+    if not ((not rest.strip()) or marked or _STARTS_WITH_POLITE_REQUEST.match(rest)):
+        return None
+    return rest.lstrip(" \t,.!?;:")
+
+
+def without_a_misheard_name(text: str) -> str:
+    """
+    The sentence as the router should see it: his name, when it was a
+    mishearing, taken off - and "Jalen" put in its place when that was all
+    there was, so the typed-name rule answers "Yes, Boss?".
+
+    "Dylan, what time is it" reached the brain whole, a model round trip for
+    a question the router answers in 90ms. A sentence that already starts
+    with his real name, or is not a call at all, comes back untouched.
+    """
+    if addressed_to_jalen(text):
+        return text
+    rest = called_by_a_misheard_name(text)
+    if rest is None:
+        return text
+    return rest or "Jalen"
+
+
+def greets_him_mid_sentence(text: str) -> bool:
+    """
+    "Hey Jalen" said anywhere in the sentence, not only first.
+
+    "...sign me in to it. Hey Jalen. Hey Jalen." and "Could you please? Hey,
+    Jellin," were dropped for putting the greeting last - seven real
+    sentences, every one with "hey" in front of the name. The greeting is
+    required: "Jalen is fast" is about him, not to him, and a name said twice
+    without a greeting appeared in none of the seven, so it is not a door.
+    """
+    return bool(_GREETS_HIM.search((text or "").translate(_FLAT_QUOTES)))
+
+
+def opens_with_a_request(text: str) -> bool:
+    """
+    A polite request with no name in it: "Could you please continue",
+    "I would like you to send it." - behind at most three lead-ins
+    ("Hey man, yeah, could you please...").
+
+    Which window it arrived in is the caller's business: the address gate
+    accepts it only in the follow-up window the microphone itself opened.
+    """
+    return bool(_OPENS_WITH_REQUEST.match((text or "").translate(_FLAT_QUOTES)))
+
+
+def all_doors(text: str, opened_by: str = "") -> "list[str]":
+    """
+    EVERY door this sentence comes through, in the order they are tried.
+
+    "misheard-name", "greeting-last" and "polite-request" are the words the
+    audit row `acted on without his name - <door>` carries, so that the false
+    accepts of each door can be counted from the live log and not only from
+    the 105 rows they were designed on. The list exists for the measurement:
+    the gate only needs the first (widened_door), but "what does this door
+    rescue that no other does" needs all of them.
+
+    `opened_by` is which sound-gate opened the microphone window it came out
+    of - "follow_up", "answer", "barge" or "wake" - handed over by run(), and
+    the reason the two gates now agree. How much each window vouches for:
+
+        greeting-last   any window. It is his name, with a greeting in front.
+        misheard-name   the follow-up window only. Not barge-in, which fires
+                        on Jalen's own voice and on a cough and so vouches for
+                        nothing; none of the 9 refused sentences that began
+                        with a misheard name is estimated to have come out of
+                        one (the script attributes a sentence to barge-in when
+                        it began within 3s of a barge-in row). Not the answer
+                        window either: that vouches for ANSWERS, which need no
+                        door, and a caller that does not say gets nothing.
+        polite-request  the follow-up window only, for the same reason.
+
+    Says nothing about echo. The caller must refuse his own voice, and for
+    these it must do it with the long tail - see Jalen.should_act_on.
+
+    NOT A DOOR, and the largest thing still refused: conversation with no
+    name and no request - "what are you doing", "you're gonna click log in"
+    (10 of the 78 refused sentences meant for him). Inside a follow-up window
+    it is indistinguishable from the lyrics of the song Jalen has just started
+    or a podcast, and that is what most of the 12 background rows are. A
+    marker such as "you" admits both.
+    """
+    doors = []
+    if opened_by == "follow_up" and called_by_a_misheard_name(text) is not None:
+        doors.append("misheard-name")
+    if greets_him_mid_sentence(text):
+        doors.append("greeting-last")
+    if opened_by == "follow_up" and opens_with_a_request(text):
+        doors.append("polite-request")
+    return doors
+
+
+def widened_door(text: str, opened_by: str = "") -> "str | None":
+    """The first door this sentence comes through, or None. See all_doors."""
+    doors = all_doors(text, opened_by)
+    return doors[0] if doors else None
+
+
+def widened_address(text: str, opened_by: str = "") -> bool:
+    """Would this sentence be for him by any of the doors above?"""
+    return widened_door(text, opened_by) is not None
+
+
+# ----------------------------------------------------------------------------
 # IS THIS THE EMERGENCY STOP?
 #
 # Kill phrases used to be compared as an exact string after lowercasing and
@@ -653,7 +921,7 @@ def _rules() -> list[Rule]:
         # answer a summons — the single cheapest turn there is, priced like
         # the most expensive one.
         (R(r"^(?:hey |ok |okay )?" + _NAME + r"$", re.I),
-         "jalen_ack", n, "Yes, Boss?"),
+         "jalen_ack", n, NAME_ACK),
 
         # ---- the technician ------------------------------------------------
         # Symptom-first, because that is how he says it: he does not ask for

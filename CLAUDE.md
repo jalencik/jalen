@@ -98,6 +98,10 @@ There is no linter, no type checker, no CI and no git remote.
   conversational state whose lifetime one reader enforces and another does
   not (`_pending_rating` had a 300s expiry in `process()` and none in the
   gate). Grep for it before adding a fourth.
+  `opened_by` and `vouched_by` in the audit rows (`ignored`, `acted on without
+  his name`, `heard nothing`) record which window opened the microphone
+  (`wake`, `follow_up`, `answer`, `barge`) and which question of Jalen's, if
+  any, was open when the sound began (`question`, `bare-wake`, or empty).
 - **The address gate is also the echo defence**, because Jalen's own
   sentences do not begin with his name. Any exemption you add has to call
   `_sounds_like_its_own_voice()` or it is a self-triggering loop — the

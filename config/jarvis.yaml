@@ -271,6 +271,26 @@ stt:
 
 conversation:
   follow_up: true                  # C19 keep listening after it answers
+  # The microphone window after every reply. Three things read this length
+  # and they have to agree (run() tells the address gate which one opened
+  # the window - `opened_by`):
+  #   - a sound inside it opens a listening window, and a POLITE REQUEST
+  #     that comes out of that window - "could you please...", "I would like
+  #     you to..." and no other form of asking - is acted on without his name;
+  #     anything else is not. Measured: 12 of the 78 sentences the gate
+  #     refused that were meant for him open with one of the two (4 are acted
+  #     on only because of this door), and 0 of the 27 background or ambiguous
+  #     ones do. THAT 0 BOUNDS LITTLE: the 27 are hallucinated silence, his
+  #     own voice and fragments, and the log holds no sentence of one person
+  #     asking another in earshot - which is what this door admits by
+  #     construction. Every sentence it lets in is now written to the audit log
+  #     as "acted on without his name - polite-request", so after a live week
+  #     the false accepts are a count and not a hope.
+  #   - a wake word followed by nothing is answered "Yes, Boss?" and listens
+  #     for this long, not for answer_window_s below (a false wake - a song,
+  #     the television - opens it too). What comes through it is written as
+  #     "acted on without his name - bare-wake-window".
+  # scripts/measure_address_gate.py re-measures both from data/audit.jsonl.
   follow_up_timeout_s: 12
   # ANSWERING A QUESTION JALEN ASKED. A separate, longer window, and the
   # only state in which a sentence without his name is acted on.
@@ -299,6 +319,19 @@ conversation:
   # The clock starts when Jalen STOPS TALKING, not when the model finished
   # generating — see Jalen._expect_an_answer. Anchored the other way, a
   # forty-second answer spends its whole window being read out loud.
+  #
+  # AND IT IS JUDGED WHEN HE BEGAN SPEAKING, not when he finished. The
+  # microphone opens the window at the first sound; the address gate asks
+  # again once the sentence has ended and been transcribed, so a long answer
+  # that began inside the thirty seconds used to be refused for ending after
+  # them. 5 of the 78 refused sentences meant for him were exactly that (all
+  # 36 words or more - the log keeps 200 characters, so they were longer;
+  # replayed with this rule, 0 background rows move). It is honoured for
+  # vad.max_utterance_s + 5s past the window - see app.ANSWER_STT_SLACK_S -
+  # and only while it is still the newest question. A sentence that looks
+  # unfinished is asked about WITHOUT using the window up (should_act_on
+  # consume=False), because those long dictations are the ones that pause on
+  # a connector and are put back for more audio.
   answer_window_s: 30
   # If a fast endpoint split one instruction in two, the second half opens
   # on a connector ("and go to youtube") and means nothing alone. Within

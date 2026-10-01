@@ -286,7 +286,14 @@ def test_jarvis_stays_quiet_when_a_noise_opened_the_window():
     from jarvis.app import Jalen
 
     source = inspect.getsource(Jalen.run)
-    marker = 'if wake_initiated:\n                        self.say("I didn\'t catch that.")'
+    # WHAT IT SAYS CHANGED, THE RULE DID NOT. This marker used to be
+    # `self.say("I didn't catch that.")`: a wake word followed by nothing was
+    # answered with a failure to understand, to a man who had just said the
+    # name. It is now answered like the bare name ("Yes, Boss?") by
+    # _acknowledge_a_bare_wake - see tests/test_not_pretending_to_be_deaf.py.
+    # What this test exists to pin is unchanged: only a window HE opened with
+    # the wake word gets any spoken reaction at all.
+    marker = 'if wake_initiated:\n                        self._acknowledge_a_bare_wake()'
     assert marker in source, (
         "the empty-utterance branch must be gated on wake_initiated, or a "
         "room noise makes Jarvis interrupt itself"
