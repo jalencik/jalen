@@ -116,7 +116,7 @@ def telegram(monkeypatch, tmp_path):
     monkeypatch.setattr(messaging, "_enabled", lambda: None)
     monkeypatch.setattr(messaging, "have_session", lambda: True)
     monkeypatch.setattr(telegram_user, "have_session", lambda: True)
-    monkeypatch.setattr(messaging, "_speech_mp3", lambda words: b"mp3")
+    monkeypatch.setattr(messaging, "_speech_mp3", lambda words, language="": b"mp3")
     monkeypatch.setattr(messaging, "_to_voice_note", lambda mp3: (b"OggS" + bytes(16), 3.4))
     monkeypatch.setattr(messaging, "_voice_notice_given", False)
 
