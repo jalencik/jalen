@@ -1479,6 +1479,14 @@ class Jalen:
 
         try:
             result = systools.call(tool, intent.args)
+            if getattr(result, "failed", False):
+                # A tool that returns "this did not happen" as a sentence
+                # (system.DidNotWork) is a failure, not an executed action:
+                # close_app answered "I can't find a window called ..." and
+                # the audit still said executed. And a rule's canned reply
+                # describes the tool WORKING, so the truth is spoken instead.
+                self.audit.action(verdict, "failed", str(result))
+                return result
             self.audit.action(verdict, "executed")
             return intent.reply or result
         except KeyError:

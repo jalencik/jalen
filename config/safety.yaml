@@ -169,6 +169,11 @@ green:
     - create_folder        # ditto
     - get_time
     - get_date             # same shape as get_time — a read-only fact, missing before
+    - get_timezone         # reads the machine's own zone; nothing else
+    - time_in              # arithmetic on the clock for a place name; no network, no file
+    - get_uptime           # reads the boot time; nothing else
+    - foreground_app       # which program owns the front window: name and title, read-only
+    - running_programs     # process names and memory grouped by program; kills nothing
     - get_battery          # same shape as get_system_status — ditto
     - get_system_status
     - recall_memory

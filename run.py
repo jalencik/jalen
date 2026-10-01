@@ -6,6 +6,20 @@ import sys
 import threading
 
 
+def _warm_what_the_first_ask_needs(mode: str) -> None:
+    """
+    Text and Telegram modes never call Jalen.prewarm() (only the voice loop
+    does), so "what's filling my C drive" typed at a fresh start met a cold
+    scan and was answered "still scanning, ask again" (live QA, 2026-10-01).
+    Start the same background count voice mode starts, so it is already
+    underway - and usually finished - by the time anyone asks.
+    """
+    if mode in ("text", "telegram"):
+        from jarvis.tools import sysinfo
+
+        sysinfo.prewarm_system_scan()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Jalen voice assistant")
     parser.add_argument("--text", action="store_true", help="type instead of talk (no mic needed)")
@@ -128,6 +142,7 @@ def _serve(args) -> int:
     jalen = Jalen(mode=mode)
     if args.unmuted:
         jalen.muted = False
+    _warm_what_the_first_ask_needs(mode)
 
     if args.text:
         # Text mode prints whatever Jalen would have said, and that now

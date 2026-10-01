@@ -40,6 +40,8 @@ EXPECTED_TIERS = {
     "delete_file": Tier.RED,
     # desktop.py
     "get_window_list": Tier.GREEN,
+    "foreground_app": Tier.GREEN,      # which program is in front: reads, acts on nothing
+    "running_programs": Tier.GREEN,    # process names and memory: reads, kills nothing
     "read_screen": Tier.GREEN,
     "click_element": Tier.GREEN,
     "type_text": Tier.GREEN,

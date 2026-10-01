@@ -67,13 +67,44 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     "empty_recycle_bin": ("Permanently empty the Recycle Bin. Irreversible.", {}),
     "get_time": ("Current time.", {}),
     "get_date": ("Current date.", {}),
+    "get_timezone": (
+        "This computer's own time zone: its name, its offset from UTC and "
+        "the time there. Use for 'what's my time zone'.",
+        {},
+    ),
+    "time_in": (
+        "The time in another city or country, and how many hours ahead of or "
+        "behind him it is. Use for 'what time is it in New York'. Works without "
+        "a network; the reply says so when it does not know a place.",
+        {"place": ("string", "a city or country, e.g. 'Tokyo' or 'New York'", True)},
+    ),
+    "get_uptime": (
+        "How long this computer has been on, and since when. Use for 'how "
+        "long has my laptop been on'.",
+        {},
+    ),
     "get_battery": ("Battery level, if this machine has one.", {}),
     "get_system_status": ("CPU, memory and disk usage.", {}),
     "screenshot": ("Take a screenshot and save it to disk.", {
         "path": ("string", "optional destination path; a sensible default is used if omitted", False),
     }),
     # ---- desktop.py --------------------------------------------------------
-    "get_window_list": ("List currently visible top-level windows.", {}),
+    "get_window_list": (
+        "The windows open on screen, which one is in front and which program "
+        "each belongs to. Use for 'what windows are open'.",
+        {},
+    ),
+    "foreground_app": (
+        "Which program is in front right now, the one he is using. Use for "
+        "'which app is in front'.",
+        {},
+    ),
+    "running_programs": (
+        "The programs running now, by name, with the ones that have a window "
+        "open first and each one's memory. Use for 'what programs are "
+        "running'. For memory totals use memory_report.",
+        {"top_n": ("integer", "how many programs to list; defaults to 8", False)},
+    ),
     "read_screen": (
         "Read a window's UI as text via the accessibility tree — far cheaper "
         "and more reliable than a screenshot for reading what's on screen. "
@@ -237,9 +268,12 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
     }),
     # ---- sysinfo.py -----------------------------------------------------------
     "disk_report": (
-        "Report free space per drive, plus the biggest folders and files in the "
-        "user's Desktop, Documents, Downloads and Temp folders. Read-only.",
-        {},
+        "Report free space on every drive, then the five biggest places on the system "
+        "drive (or the drive named), counted from the drive's root, with sizes. Use for "
+        "'what's filling my C drive', 'how much free space do I have'. If the count is "
+        "still running the reply says so and already holds what it has found; give him "
+        "that, do not just say you are scanning. Read-only; it never deletes anything.",
+        {"drive": ("string", "a drive letter such as 'D'; defaults to the drive Windows is on", False)},
     ),
     "cleanup_suggestions": (
         "Report specifically safe-to-delete things with real measured sizes: Temp "

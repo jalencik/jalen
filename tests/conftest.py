@@ -93,6 +93,53 @@ def _every_test_starts_with_no_form_read():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _no_test_walks_a_real_drive(tmp_path_factory):
+    """
+    disk_report() counts a whole drive from its root: measured 131 s and 216 s
+    on this C: in two runs, a million files listed. tests/test_sysinfo_tools.py calls it against
+    "the real machine", so without this every test run would walk his C: in the
+    background, and the walk would still be going when the suite ended. The one
+    seam, sysinfo._scan_target, points every scan at a small scratch folder.
+    Tests of the walk itself build their own trees and call DriveScan directly.
+    """
+    from jarvis.tools import sysinfo
+
+    fake = tmp_path_factory.mktemp("jarvis-fake-drive")
+    (fake / "Users" / "pretend" / "Documents").mkdir(parents=True)
+    (fake / "Users" / "pretend" / "Documents" / "notes.txt").write_bytes(b"x" * 2048)
+    (fake / "Program Files").mkdir()
+    (fake / "Program Files" / "tool.bin").write_bytes(b"x" * 4096)
+
+    saved = sysinfo._scan_target
+    sysinfo._scan_target = lambda root: str(fake)
+    try:
+        yield fake
+    finally:
+        sysinfo._scan_target = saved
+
+
+@pytest.fixture(autouse=True)
+def _every_test_starts_and_ends_with_no_drive_scan():
+    """
+    The scans disk_report keeps (sysinfo._slots) are process-wide, like taint:
+    one test's finished scan would be served to the next test as "recent", and
+    one test's fake scan would answer another's real ask, by file order. The
+    cleanup report's own cache (sysinfo._cache) is the same shape: a test that
+    stubbed the report left its stub as the "recent answer" for the next one.
+    """
+    from jarvis.tools import sysinfo
+
+    def forget() -> None:
+        sysinfo._forget_scans()
+        with sysinfo._cache_lock:
+            sysinfo._cache.clear()
+
+    forget()
+    yield
+    forget()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _keep_tests_out_of_real_data(tmp_path_factory):
     scratch = tmp_path_factory.mktemp("jarvis-test-data")
 

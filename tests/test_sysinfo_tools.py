@@ -26,6 +26,9 @@ from jarvis.tools import sysinfo  # noqa: E402
 
 # --------------------------------------------------------------- live smoke
 def test_disk_report_runs_against_the_real_machine():
+    # The drives and their free space are the real ones. The count of what is on
+    # the drive is a walk of a small scratch folder: tests/conftest.py points
+    # sysinfo._scan_target there, because a real walk of C: is minutes of disk.
     result = sysinfo.disk_report()
     assert isinstance(result, str) and result
     assert "free" in result.lower()

@@ -136,6 +136,95 @@ _CUT_SHORT_NOTE = (
 )
 
 
+def _same_words(text: str) -> str:
+    """What "the same sentence again" means: case and spacing do not count."""
+    return " ".join((text or "").split()).casefold()
+
+
+class _ReplyJoiner:
+    """
+    Puts the stretches of speech around a tool call back together.
+
+    The brain talks, calls a tool, and talks again, and each stretch is its
+    own text block in its own model message. ask() used to "".join the token
+    deltas of every block, so the last word of one block touched the first
+    word of the next: 65 of the 828 replies in data/audit.jsonl (read
+    2026-10-01) have a full stop jammed against a capital ("...from
+    here.Right, no uptime tool here, Boss."). Spoken, that is two sentences
+    run together.
+
+    Two rules, both applied to what is SPOKEN as well as to what is returned,
+    because app.py compares the microphone against the returned text and the
+    two must be the same words:
+
+      - a separator between blocks, never inside one, and only when neither
+        side already has whitespace there;
+      - a block that repeats an earlier block exactly (case and spacing
+        aside) is not said again.
+
+    The repeat rule needs a block's whole text, but speech is streaming. So
+    a block is held back only WHILE what it has said so far is still the
+    start of an earlier block, and released the moment it goes its own way.
+    Almost every block differs from the first word, so almost nothing is
+    ever held; a block that really is a repeat is held to its end and
+    dropped, and nothing of it was spoken. NOT MEASURED: the typical hold is
+    one chunk of one block; no timing was taken.
+
+    Near-repeats ("7.8 gigs free" said again in other words) are not
+    detected. That is the system prompt's job, not this class's.
+    """
+
+    def __init__(self) -> None:
+        self._out: list[str] = []   # what has been handed on, in order
+        self._last = ""             # last character handed on
+        self._done: list[str] = []  # finished blocks, as _same_words
+        self._cur = ""              # the block being written
+        self._released = False      # has this block started to come out?
+
+    @property
+    def text(self) -> str:
+        return "".join(self._out)
+
+    def _emit(self, piece: str) -> str:
+        if not piece:
+            return ""
+        if not self._released:
+            # First thing out of this block: the only place a separator can go.
+            self._released = True
+            if self._last and not self._last.isspace() and not piece[0].isspace():
+                piece = " " + piece
+        self._out.append(piece)
+        self._last = piece[-1]
+        return piece
+
+    def feed(self, chunk: str) -> str:
+        """One token delta in; the text that may be handed on now comes out."""
+        if not chunk:
+            return ""
+        self._cur += chunk
+        if self._released:
+            return self._emit(chunk)
+        seen = _same_words(self._cur)
+        if not seen or any(done.startswith(seen) for done in self._done):
+            return ""  # still possibly a repeat; hold it
+        return self._emit(self._cur)
+
+    def new_block(self) -> str:
+        """The block just ended (or a new one is starting). Returns whatever
+        the end releases: a held block that turned out not to be a repeat."""
+        out = ""
+        cur, seen = self._cur, _same_words(self._cur)
+        if cur and not self._released and seen and seen not in self._done:
+            out = self._emit(cur)
+        if seen and seen not in self._done:
+            self._done.append(seen)
+        self._cur = ""
+        self._released = False
+        return out
+
+    finish = new_block
+
+
 # Windows only. CreateProcess flag meaning "give this child no console".
 _CREATE_NO_WINDOW = 0x08000000
 
@@ -1190,7 +1279,7 @@ class Brain:
                     raise
                 await self._restart_client()
                 await self._client.query(text)
-            streamed: list[str] = []
+            joiner = _ReplyJoiner()
             blocks: list[str] = []
             final = ""
             # What went wrong, read from the fields the SDK TYPES rather than
@@ -1207,17 +1296,34 @@ class Brain:
                 # below instead of crashing the turn.
                 event = getattr(message, "event", None)
                 if isinstance(event, dict):
-                    if event.get("type") == "content_block_delta":
+                    kind_of_event = event.get("type")
+                    if kind_of_event == "content_block_delta":
                         delta = event.get("delta") or {}
                         if delta.get("type") == "text_delta":
                             chunk = delta.get("text") or ""
                             if chunk:
-                                streamed.append(chunk)
-                                if on_text is not None:
-                                    on_text(chunk)
+                                out = joiner.feed(chunk)
+                                if out and on_text is not None:
+                                    on_text(out)
+                    elif kind_of_event in ("message_start", "message_stop",
+                                           "content_block_stop") or (
+                            kind_of_event == "content_block_start"
+                            and (event.get("content_block") or {}).get("type") == "text"):
+                        # A stretch of speech ended or a new one begins: the
+                        # words around a tool call are separate blocks, and
+                        # they were being glued together. See _ReplyJoiner.
+                        out = joiner.new_block()
+                        if out and on_text is not None:
+                            on_text(out)
                     continue
 
                 if isinstance(message, AssistantMessage):
+                    # A whole model message is over. Normally the events above
+                    # already said so; an SDK that sends none of them still
+                    # gets its separator from here.
+                    out = joiner.new_block()
+                    if out and on_text is not None:
+                        on_text(out)
                     kind = getattr(message, "error", None)
                     if kind:
                         # The synthetic error message. Its text is the CLI's
@@ -1248,20 +1354,34 @@ class Brain:
                         stopped_early = subtype
                     break
 
-            if error_kind and not streamed:
+            # The last block may still be held back while it was being checked
+            # for a repeat; the stream is over, so it is now known.
+            tail = joiner.finish()
+            if tail and on_text is not None:
+                on_text(tail)
+
+            if error_kind and not joiner.text:
                 raise BrainUnavailable(error_kind, error_text)
 
             # Precedence matters. When deltas arrived, they are what was
             # actually SPOKEN, so they must win: returning the SDK's `result`
             # instead would hand app.py a string that differs from the audio
             # already playing, and the tail would be spoken twice.
-            if streamed:
+            if joiner.text:
                 if (error_kind or stopped_early) and on_text is not None:
                     # Report done and not-done in the same breath.
                     on_text(_CUT_SHORT_NOTE)
-                return "".join(streamed).strip()
+                return joiner.text.strip()
 
-            answer = (final or " ".join(blocks)).strip()
+            # No deltas: the finished blocks, with an exact repeat said once.
+            said: set[str] = set()
+            distinct: list[str] = []
+            for block_text in blocks:
+                key = _same_words(block_text)
+                if key and key not in said:
+                    said.add(key)
+                    distinct.append(block_text)
+            answer = (final or " ".join(distinct)).strip()
             if stopped_early and not answer:
                 # A tool-only turn that hit max_turns returned '' here, and
                 # say('') returns before speaking or logging anything, so
