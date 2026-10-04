@@ -467,3 +467,23 @@ def test_the_microphone_loop_primes_the_answer_window():
     assert "prime(list(preroll))" in source[opened:opened + 1500], (
         "the answer window no longer starts with the sound that opened it")
     assert "preroll.append(frame)" in source
+
+
+# ---------------------------------------------------------------------------
+# Typed mode and the Telegram bot replace say_blocking: the question goes there
+# ---------------------------------------------------------------------------
+def test_typed_mode_prints_the_question_and_never_speaks_it(speaker):
+    """run.py --text sets jalen.say_blocking = print-to-console on the instance."""
+    j = _jalen(speaker)
+    printed = []
+    j.say_blocking = lambda text: printed.append(text)
+    j.muted = True
+    spoken_before = list(speaker.played)
+    pending = Confirmation(question=QUESTION, kind=DELETE)
+    thread, out = _confirm_in_background(j, pending)
+    assert _until(lambda: pending.listening_started_at)
+    assert printed == [QUESTION], "the typed front door never showed the question"
+    assert speaker.played == spoken_before, "a typed session's question went to the speakers"
+    j.process("yes")                      # typed: no onset time
+    thread.join(timeout=5.0)
+    assert out["answer"].outcome == "yes"

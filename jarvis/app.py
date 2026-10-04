@@ -915,7 +915,13 @@ class Jalen:
         from .audio.tts import HeldPrompt
 
         ask = getattr(getattr(self, "speaker", None), "ask", None)
-        if ask is None:
+        # TEXT MODE REPLACES say_blocking WITH print() on the instance
+        # (run.py --text), and so do test doubles. That replacement is the
+        # front door he is using: the question must come out of it, not out
+        # of the speakers of a laptop he is typing at.
+        overridden = (getattr(self.say_blocking, "__func__", None)
+                      is not getattr(type(self), "say_blocking", None))
+        if ask is None or overridden:
             began = time.monotonic()
             said = self.say_blocking(text)
             return HeldPrompt(said is not False, began, time.monotonic())
