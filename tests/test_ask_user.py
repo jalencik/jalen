@@ -119,6 +119,11 @@ def _make_bare():
 
     bare = Bare()
     bare._wait_for_reply = lambda timeout: Jalen._wait_for_reply(bare, timeout)
+    # ask_user now holds the speaker silent for the answer and shows the
+    # question (2026-10-04); these are the real methods, bound to the double.
+    bare._ask_aloud = lambda text: Jalen._ask_aloud(bare, text)
+    bare._show_question = lambda text: Jalen._show_question(bare, text)
+    bare._refresh_orb = lambda listening=False: Jalen._refresh_orb(bare, listening)
     return bare
 
 

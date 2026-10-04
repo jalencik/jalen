@@ -32,6 +32,11 @@ there and behaves differently depending on what it is doing.
     blocked    a hard on/off BLINK plus an exclamation mark on the core, so
                the meaning survives with colour vision removed. RED.
     muted      the globe, unlit, with a diagonal slash. Static.
+    awaiting   the listening waves, plus a question mark on the core. VIOLET.
+               Jalen asked him something (a confirmation, a question) and
+               the microphone is open for the answer. Added 2026-10-04: the
+               wait used to show as `thinking`, yellow, at the exact moment
+               it needed him to speak.
 
 IDLE IS VISIBLE, DELIBERATELY. It used to be a near-black dot (#161c24), from
 an earlier "black when stopped" instruction. He then reported the orb as
@@ -69,7 +74,7 @@ CHROMA = "#010203"  # a colour nothing else will use
 # it looking like a screensaver — one contrasting hue reads as instrumentation.
 ACCENT = "#ff8a3d"
 
-STATES = ("idle", "listening", "thinking", "speaking", "blocked", "muted")
+STATES = ("idle", "listening", "thinking", "speaking", "blocked", "muted", "awaiting")
 
 # How long a heard transcript stays on screen before it auto-hides (ui.show_transcript).
 TRANSCRIPT_TTL_S = 8.0
@@ -95,7 +100,7 @@ MAX_ORB = 900
 
 # States whose animation is worth a smooth ~25fps redraw. Everything else
 # (idle, muted) redraws at ~7fps — see module docstring.
-_ACTIVE_STATES = ("listening", "thinking", "speaking", "blocked")
+_ACTIVE_STATES = ("listening", "thinking", "speaking", "blocked", "awaiting")
 
 # ---------------------------------------------------------------------------
 # Win32 click-through (ui.click_through_when_idle)
@@ -412,6 +417,7 @@ class Orb:
             "thinking": theme.get("thinking", "#ffd60a"),
             "speaking": theme.get("speaking", "#3ddc84"),
             "blocked": theme.get("blocked", "#ff4d4f"),
+            "awaiting": theme.get("awaiting", "#b36bff"),
             "muted": "#4a4a4a",
         }
         self._q: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -732,6 +738,29 @@ class Orb:
         # Each gets its own MOTION signature, which is what he asked for:
         # something moving while it listens, something different while it
         # thinks.
+        if state == "awaiting":
+            # Listening - the same outward waves on live microphone energy,
+            # because the microphone IS open - plus a question mark on the
+            # core, so the meaning survives with colour vision removed.
+            for index in range(3):
+                phase = ((now * 1.1) + index / 3.0) % 1.0
+                ring = r * (0.95 + phase * 0.75)
+                fade = 1.0 - phase
+                canvas.create_oval(
+                    cx - ring, cy - ring, cx + ring, cy + ring,
+                    outline=_mix(CHROMA, colour, 0.70 * fade),
+                    width=max(1, int(4 * fade)),
+                )
+            level = self._level
+            self._draw_wireframe(canvas, cx, cy, r, now, colour)
+            self._draw_mesh(canvas, cx, cy, r, now, colour, spin=0.30,
+                            energy=0.35 + 0.65 * level)
+            self._draw_rim(canvas, cx, cy, r, now, colour, speed=55)
+            self._glow(canvas, cx, cy, r * (0.40 + 0.18 * level), colour)
+            canvas.create_text(cx, cy, text="?", fill="#1a1a1a",
+                               font=("Segoe UI", max(10, int(base * 0.22)), "bold"))
+            return
+
         if state == "listening":
             # WAVES travelling outward from the core, the way a voice
             # assistant that is hearing you should look, with the core

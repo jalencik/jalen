@@ -171,6 +171,24 @@ class UtteranceCollector:
             self._started = True
         self.vad.reset()
 
+    def prime(self, frames: list) -> None:
+        """
+        Start a new utterance with audio heard just before the window opened.
+
+        The last of `frames` is the one the VAD scored as speech - the sound
+        that opened the window - so it counts as speech here too; the ones
+        before it are the quiet start of the word, kept as audio only. See
+        PREROLL_S in app.py for why: a short answer used to lose its first
+        frames and arrive too short to transcribe.
+        """
+        self._reset()
+        kept = [np.asarray(f, dtype=np.float32) for f in (frames or []) if f is not None and len(f)]
+        if not kept:
+            return
+        self._buf.extend(kept)
+        self._speech_ms = self.frame_ms
+        self._started = True
+
     def feed(self, frame: np.ndarray) -> np.ndarray | None:
         """
         Returns None while you're still talking; returns the full utterance as a

@@ -654,7 +654,9 @@ class Room:
         jalen._follow_up_s = float(CONFIG.get_path("conversation.follow_up_timeout_s", 12))
         jalen.kill_phrases = set(CONFIG.get_path("safety.kill_phrases"))
         if sync_turns:
-            jalen.process = lambda text, from_him=True, door="": self.processed.append(
+            # began_at: when the sound began, passed since 2026-10-04 so a
+            # sound older than the question it would answer is not its answer.
+            jalen.process = lambda text, from_him=True, door="", began_at=None: self.processed.append(
                 (text, from_him, door))
             jalen._await_playback = lambda *a, **k: None
             jalen._finish_timing = lambda *a, **k: None

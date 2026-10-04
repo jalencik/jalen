@@ -162,7 +162,9 @@ def test_run_carries_the_door_to_the_turn():
     import inspect
 
     source = inspect.getsource(Jalen.run)
-    assert "args=(text, turn_id, timer, from_him, door)" in source
+    # The sound's onset rides along since 2026-10-04 (an answer older than
+    # the question it would answer is not its answer); the door still does.
+    assert "args=(text, turn_id, timer, from_him, door, sound_began_at)" in source
     assert "door=door" in source
 
 

@@ -16,6 +16,7 @@ Design notes worth knowing before you change anything here:
 from __future__ import annotations
 
 import asyncio
+import collections
 import queue
 import re
 import sys
@@ -52,6 +53,16 @@ from .ui.orb import Orb, TranscriptWindow
 # of the command and is dropped. Anything under it is the tail of the phrase
 # still being spoken and must be kept — see the wake handler in run().
 STALE_AUDIO_S = 1.5
+
+# How much audio from just BEFORE a sound opened an answer or follow-up window
+# is kept as the start of the utterance. The window opens on the first frame
+# the VAD scores over its threshold, and the soft start of a word - the "y" of
+# "yes" - scores under it, so before this a one-word answer reached the
+# collector with its beginning missing, or under min_speech_ms and dropped.
+# [NOT MEASURED] on his microphone: Silero needs voiced energy in its 32 ms
+# window, so it crosses 0.5 a frame or a few into a word; 300 ms covers that
+# with room and adds well under a second of audio to transcribe.
+PREROLL_S = 0.3
 
 # --------------------------------------------------------------------------
 # Endpointing support: deciding, from the WORDS, whether he has finished.
@@ -383,17 +394,25 @@ class ConfirmAnswer:
                      instead". `words` carries his sentence, so the model can
                      act on the correction inside the turn that asked, rather
                      than a second turn being started in parallel.
+        unspoken     the question could not be played, so nothing was asked
+                     and nothing was waited for (2026-10-04)
 
     Before this, every falsy answer reached the model as "He said no. Don't
     retry", so a timeout was reported to him as a refusal he never made
     (2026-08-24T05:10, emptying the recycle bin).
     """
 
-    __slots__ = ("outcome", "words")
+    __slots__ = ("outcome", "words", "confirmation_id", "began_at")
 
-    def __init__(self, outcome: str, words: str = "") -> None:
+    def __init__(self, outcome: str, words: str = "", confirmation_id=None,
+                 began_at: float = 0.0) -> None:
         self.outcome = outcome
         self.words = words
+        # Which Confirmation (jarvis/confirmation.py) this answers, stamped
+        # by process(); None for one routed without an open confirmation.
+        self.confirmation_id = confirmation_id
+        # When the sound of it began (time.monotonic), 0.0 if typed.
+        self.began_at = began_at
 
     def __bool__(self) -> bool:
         return self.outcome == "yes"
@@ -525,6 +544,12 @@ class Jalen:
         self._confirm_question = ""
         self._confirm_asked_at = 0.0
         self._confirm_reasked = False
+        # The Confirmation object being asked right now (jarvis/confirmation.py),
+        # or None. An answer is stamped with its id, and one whose sound began
+        # before this question started playing is not an answer to it.
+        self._confirmation = None
+        # When the open ask_user() question started playing; the same rule.
+        self._reply_question_started_at = 0.0
         # "after the work has been done, it should ask the user, Hey boss,
         # How do you rate my work out of 10". Holds the context of the job
         # being rated, or None. Deliberately NOT reusing _awaiting_reply:
@@ -775,7 +800,7 @@ class Jalen:
             if self._voice_so_far == handed:
                 self._voice_so_far = ""
 
-    def say_blocking(self, text: str) -> None:
+    def say_blocking(self, text: str) -> bool:
         """
         Say it and wait until it has actually been said.
 
@@ -790,10 +815,10 @@ class Jalen:
         the log looked completely normal.
         """
         if not text:
-            return
+            return True
         self.audit.utterance(text, who="jarvis")
         self._note_said(text)
-        self.speaker.say_now(text)
+        return self.speaker.say_now(text) is not False
 
     # ------------------------------------------------------------ confirmations
     def _prompt_lock(self) -> asyncio.Lock:
@@ -819,34 +844,126 @@ class Jalen:
         from an older caller (wrapped into a generic one)."""
         from .confirmation import as_confirmation
 
-        question = as_confirmation(question).question
+        pending = as_confirmation(question)
+        question = pending.question
         timeout = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
+        loop = asyncio.get_running_loop()
+        prompt = None
         async with self._prompt_lock():
-            self.orb.set_state("blocked")
-            self.say_blocking(question)
-            # Stamped AFTER the question has finished playing, so the echo
-            # window measures the tail of "...Confirm?" arriving back through
-            # the microphone - not the length of the question.
+            # ARMED BEFORE THE QUESTION PLAYS, and that ordering is the fix
+            # for the deaf gap. The answer window used to open only after
+            # say_blocking() returned, and the question itself went out on a
+            # stream that kept the speaker "speaking" for the whole wait - see
+            # HeldPrompt. Now: the answer path knows what is being asked from
+            # the first word, the speaker goes silent the moment the last word
+            # ends, and the microphone loop opens a window on his first sound.
+            # Echo is handled by what is asked (_echoes_the_confirmation) and
+            # by when a sound began (process()), never by being deaf.
+            self._confirmation = pending
             self._confirm_question = question
-            self._confirm_asked_at = time.monotonic()
+            self._confirm_asked_at = time.monotonic()   # restamped at the end
             self._confirm_reasked = False
-            self._awaiting_confirmation = True
             self._drain_answers()
+            self._awaiting_confirmation = True
+            self._show_question(question)
             try:
-                answer = await asyncio.get_running_loop().run_in_executor(
-                    None, self._wait_for_answer, timeout
-                )
+                # On an executor, not inline: speaking takes seconds, and the
+                # brain's event loop must not stall for them.
+                prompt = await loop.run_in_executor(None, self._ask_aloud, question)
+                pending.question_started_at = prompt.started_at
+                pending.spoken_at = prompt.ended_at
+                # The echo window measures the tail of "...Confirm?" coming
+                # back through the microphone, from when it ended.
+                self._confirm_asked_at = prompt.ended_at or time.monotonic()
+                if not prompt.spoken:
+                    answer = ConfirmAnswer("unspoken")
+                else:
+                    pending.listening_started_at = time.monotonic()
+                    self._refresh_orb()
+                    answer = await loop.run_in_executor(
+                        None, self._wait_for_answer_to, pending, timeout
+                    )
             finally:
                 self._awaiting_confirmation = False
-                self.orb.set_state("thinking")
+                self._confirmation = None
+                if prompt is not None:
+                    prompt.release()
+                self._refresh_orb()
         if answer is None:
+            pending.outcome = "timeout"
+            pending.decided_at = time.monotonic()
+            self._audit_confirmation(pending)
             self.say_blocking("No answer, so I've cancelled it.")
             return ConfirmAnswer("timeout")
-        if isinstance(answer, ConfirmAnswer):
+        if not isinstance(answer, ConfirmAnswer):
+            # A bare bool: the kill switch puts False, deliberately - the AMBER
+            # stop-window below tests `is False` on the same queue.
+            answer = ConfirmAnswer("yes" if answer else "no")
+        pending.outcome = answer.outcome
+        pending.decided_at = time.monotonic()
+        self._audit_confirmation(pending)
+        return answer
+
+    def _ask_aloud(self, text: str):
+        """
+        Say a question and hold the speaker silent for the answer.
+
+        Returns a HeldPrompt (jarvis/audio/tts.py); the caller MUST release
+        it. A speaker without ask() - a test double - is asked through
+        say_blocking, as before.
+        """
+        from .audio.tts import HeldPrompt
+
+        ask = getattr(getattr(self, "speaker", None), "ask", None)
+        if ask is None:
+            began = time.monotonic()
+            said = self.say_blocking(text)
+            return HeldPrompt(said is not False, began, time.monotonic())
+        self.audit.utterance(text, who="jarvis")
+        self._note_said(text)
+        return ask(text)
+
+    def _show_question(self, question: str) -> None:
+        """The same sentence on screen as on air - one object, two outputs."""
+        caption = getattr(self.orb, "set_transcript", None)
+        if caption is not None:
+            try:
+                caption(question)
+            except Exception:  # noqa: BLE001 - a caption must never cost the question
+                pass
+
+    def _audit_confirmation(self, pending) -> None:
+        """One row per confirmation: what was asked, the outcome, where the time went."""
+        try:
+            self.audit.write("system", summary=f"confirmation {pending.outcome}",
+                             detail=pending.audit_detail())
+        except Exception:  # noqa: BLE001 - instrumentation must never cost an answer
+            pass
+
+    def _wait_for_answer_to(self, pending, timeout: float):
+        """
+        _wait_for_answer, but only an answer stamped for THIS confirmation.
+
+        An answer carries the id of the confirmation that was open when
+        process() routed it. One for an earlier question - it timed out while
+        his "yes" was still being transcribed, and the model asked again - is
+        not a yes to this one, and is dropped while the clock keeps running.
+        The kill switch's bare False is for whatever is open.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            answer = self._wait_for_answer(remaining)
+            if answer is None:
+                return None
+            meant_for = getattr(answer, "confirmation_id", None)
+            if meant_for is not None and meant_for != pending.id:
+                continue
+            if not getattr(pending, "first_sound_at", 0.0):
+                pending.first_sound_at = getattr(answer, "began_at", 0.0) or 0.0
             return answer
-        # A bare bool: the kill switch puts False, deliberately - the AMBER
-        # stop-window below tests `is False` on the same queue.
-        return ConfirmAnswer("yes" if answer else "no")
 
     async def announce(self, text: str) -> None:
         """AMBER tier: say it, then give a short window to say stop."""
@@ -944,6 +1061,51 @@ class Jalen:
                 hits = sum(1 for word in heard if word in vocabulary)
                 return hits / len(heard) >= _CONFIRM_ECHO_SHARE
         return False
+
+    def _began_before(self, began_at, started_at, text: str = "") -> bool:
+        """
+        Did this sound begin before the question it would answer was on air?
+
+        Then it is not the answer to it, whatever it says. Two ways that
+        happened: he was still finishing a sentence when the brain decided to
+        ask, and that sentence reached the answer path; or a confirmation
+        timed out while his "yes" was being transcribed, the model asked
+        again, and the late yes approved the SECOND question, which he had
+        never heard. Such a sound is handled as what it is - something he
+        said before the question - and goes on as an ordinary instruction.
+
+        `started_at` None means there is no question object to judge by
+        (typed answers, and callers that keep no clock): never refused here.
+        0.0 means the question exists but has not started playing yet.
+        """
+        if began_at is None or started_at is None:
+            return False
+        if started_at and began_at >= started_at:
+            return False
+        try:
+            self.audit.write("system", summary="not an answer - it began before the question",
+                             detail={"heard": (text or "")[:200]})
+        except Exception:  # noqa: BLE001 - a log line must never cost a turn
+            pass
+        return True
+
+    def _say_inside_the_prompt(self, line: str) -> None:
+        """
+        Speak while a question holds the speaker: THROUGH the held stream.
+
+        say() would queue behind the lock the parked stream holds, so "was
+        that a yes or a no?" would be heard after the confirmation had
+        already timed out. say_now() hands it to the stream, which speaks it
+        and goes silent again. The echo window restarts from it.
+        """
+        say_now = getattr(self.speaker, "say_now", None)
+        if say_now is None or getattr(self, "muted", False):
+            self.say(line)
+            return
+        self.audit.utterance(line, who="jarvis")
+        self._note_said(line)
+        say_now(line)
+        self._confirm_asked_at = time.monotonic()
 
     def _drain_answers(self) -> None:
         while not self._answer_q.empty():
@@ -1141,9 +1303,6 @@ class Jalen:
         Returns "" if he never answers, and the caller must treat that as
         "stop", never as "carry on without it".
         """
-        self.orb.set_state("blocked")
-        self.say_blocking(question)
-        self._awaiting_reply = True
         # Drain first: anything already queued predates the question and is
         # an answer to something else.
         while not self._reply_q.empty():
@@ -1151,13 +1310,28 @@ class Jalen:
                 self._reply_q.get_nowait()
             except queue.Empty:
                 break
+        # ARMED BEFORE THE QUESTION PLAYS, and the speaker HELD silent after
+        # it - the same deaf gap confirm() had, and the same fix. A sound that
+        # began before the question was on air is not its answer (0.0 until
+        # it is; see _began_before).
+        loop = asyncio.get_running_loop()
+        self._reply_question_started_at = 0.0
+        self._awaiting_reply = True
+        self._show_question(question)
+        prompt = None
         try:
-            answer = await asyncio.get_running_loop().run_in_executor(
-                None, self._wait_for_reply, timeout_s
-            )
+            prompt = await loop.run_in_executor(None, self._ask_aloud, question)
+            self._reply_question_started_at = prompt.started_at or time.monotonic()
+            if not prompt.spoken:
+                answer = ""
+            else:
+                self._refresh_orb()
+                answer = await loop.run_in_executor(None, self._wait_for_reply, timeout_s)
         finally:
             self._awaiting_reply = False
-            self.orb.set_state("thinking")
+            if prompt is not None:
+                prompt.release()
+            self._refresh_orb()
         if not answer:
             self.say_blocking("No answer, so I've left that one.")
             return ""
@@ -1868,7 +2042,8 @@ class Jalen:
         # still on air.
         self._voice_so_far = ""
 
-    def process(self, text: str, *, from_him: bool = True, door: str = "") -> None:
+    def process(self, text: str, *, from_him: bool = True, door: str = "",
+                began_at: float | None = None) -> None:
         """
         Handle one utterance.
 
@@ -1878,6 +2053,10 @@ class Jalen:
         continuation - because that may be the television. Every other front
         door (text mode, the Telegram bot, the extension's chat panel) is
         text he typed, so the default is True.
+
+        `began_at` is when the SOUND began (time.monotonic), from the
+        microphone loop; None for typed text. A sound that began before a
+        question started playing cannot be the answer to it.
         """
         text = (text or "").strip()
         if not text:
@@ -1925,18 +2104,24 @@ class Jalen:
         # "open chrome" said in answer to "what's your phone number" is an
         # answer, not a command, and routing it would be both wrong and
         # irreversible.
-        if self._awaiting_reply:
+        if self._awaiting_reply and not self._began_before(
+                began_at, getattr(self, "_reply_question_started_at", None), text):
             self.audit.utterance(text, who="user")
             self._reply_q.put(text)
             return
 
         # a pending yes/no takes priority over everything else
-        if self._awaiting_confirmation:
+        pending = getattr(self, "_confirmation", None)
+        if self._awaiting_confirmation and not self._began_before(
+                began_at, getattr(pending, "question_started_at", None), text):
             # Jalen's own "...Confirm?" coming back through the microphone.
             # Ignored silently: it is not him, so it is neither an answer
-            # nor a new instruction.
-            if self._echoes_the_confirmation(text):
+            # nor a new instruction. Judged from when the sound BEGAN where
+            # the microphone knows it.
+            if self._echoes_the_confirmation(text, began_at):
                 return
+            stamp = {"confirmation_id": getattr(pending, "id", None),
+                     "began_at": began_at or 0.0}
             # "Send it to Rodion instead." Not a yes to what was asked - it
             # was approving the ORIGINAL action - and not a plain no either:
             # it is what he wants done. His words go back with it, so the
@@ -1944,12 +2129,12 @@ class Jalen:
             # through and starting a second turn in parallel.
             if self._is_correction(text):
                 self.audit.utterance(text, who="user")
-                self._answer_q.put(ConfirmAnswer("correction", text))
+                self._answer_q.put(ConfirmAnswer("correction", text, **stamp))
                 return
             answer = self._parse_yes_no(text)
             if answer is not None:
                 self.audit.utterance(text, who="user")
-                self._answer_q.put(ConfirmAnswer("yes" if answer else "no", text))
+                self._answer_q.put(ConfirmAnswer("yes" if answer else "no", text, **stamp))
                 return
             # Not readable as either. It used to fall straight through to
             # the router and the brain, starting a second turn while the
@@ -1959,7 +2144,7 @@ class Jalen:
             if not getattr(self, "_confirm_reasked", False):
                 self._confirm_reasked = True
                 self.audit.utterance(text, who="user")
-                self.say("Sorry - was that a yes or a no?")
+                self._say_inside_the_prompt("Sorry - was that a yes or a no?")
                 return
 
         # ------------------------------------------------------------------
@@ -2201,6 +2386,11 @@ class Jalen:
         # at every place `listening` becomes True, next to `opened_by`: a
         # window opened without it would be judged by the last one's moment.
         sound_began_at = time.monotonic()
+        # The last few frames heard while no window was open, so the window a
+        # sound opens can start with the sound's own beginning - see where it
+        # is used, and PREROLL_S.
+        preroll: collections.deque = collections.deque(
+            maxlen=max(1, int(PREROLL_S * 1000 / max(1, int(getattr(self.collector, "frame_ms", 32))))))
         follow_up_until = 0.0
         follow_up_s = float(self.cfg.get_path("conversation.follow_up_timeout_s", 12))
         barge_in = bool(self.cfg.get_path("conversation.barge_in", True))
@@ -2215,7 +2405,8 @@ class Jalen:
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
 
         def dispatch_turn(text: str, turn_id: int, timer: TurnTimer,
-                          from_him: bool = True, door: str = "") -> None:
+                          from_him: bool = True, door: str = "",
+                          heard_began_at: float | None = None) -> None:
             """
             Run process() on its own thread so this loop keeps reading mic
             frames while a turn is in flight — including while it's stuck
@@ -2241,7 +2432,8 @@ class Jalen:
             task_id = conversation.start_task(text[:80], conversation.THINKING)
             try:
                 with systools.com_initialized():
-                    self.process(text, from_him=from_him, door=door or "")
+                    self.process(text, from_him=from_him, door=door or "",
+                                 began_at=heard_began_at)
                 conversation.update_task(task_id, state=conversation.COMPLETED)
             except BaseException as exc:      # noqa: BLE001
                 conversation.update_task(task_id, state=conversation.FAILED,
@@ -2491,6 +2683,7 @@ class Jalen:
                     # repeating his name: 31 of 49 arrived more than twelve
                     # seconds after the question. Saying the name again is
                     # what you do when the window has shut.
+                    preroll.append(frame)
                     if ((in_follow_up or awaiting_reply or self._expectation_open())
                             and self.vad.probability(frame) >= self.vad.threshold):
                         listening = True
@@ -2505,6 +2698,16 @@ class Jalen:
                         vouched_by = self._open_expectation()
                         # And WHEN: this frame is the first of the sound.
                         sound_began_at = time.monotonic()
+                        # THE FIRST WORD IS KEPT. The frame that crossed the
+                        # threshold - and the ones just before it, where a
+                        # word like "yes" begins quietly - used to be spent
+                        # deciding to listen and never reached the collector,
+                        # so a one-word answer arrived clipped or too short to
+                        # transcribe. They start the utterance now.
+                        prime = getattr(self.collector, "prime", None)
+                        if prime is not None:
+                            prime(list(preroll))
+                        preroll.clear()
                         # _refresh_orb, NOT set_state("listening"). This is
                         # the line he saw: a noise during the follow-up window
                         # painted the orb blue while a turn was still working,
@@ -2776,7 +2979,8 @@ class Jalen:
                 # turn is the one whose silence he is currently sitting in.
                 self._turn_timer = timer
                 threading.Thread(
-                    target=dispatch_turn, args=(text, turn_id, timer, from_him, door), daemon=True,
+                    target=dispatch_turn, args=(text, turn_id, timer, from_him, door, sound_began_at),
+                    daemon=True,
                     name=f"jalen-turn-{turn_id}",
                 ).start()
 
@@ -2816,13 +3020,17 @@ class Jalen:
     #
     #     muted/paused  it is switched off
     #     speaking      it is talking to you           GREEN
+    #     awaiting      it asked you; answer now        VIOLET
     #     working       a turn is in flight            YELLOW
     #     listening     a window is open for you       BLUE
     #     idle          nothing is happening           TEAL
     #
     # "Working beats listening" is the whole fix: while it is thinking, a
     # noise in the room must not make it look like it is waiting for you.
-    ORB_PRIORITY = ("muted", "speaking", "thinking", "listening", "idle")
+    # And "awaiting beats working" (2026-10-04): a question is asked from
+    # inside a turn, so without it the orb was yellow while it waited for
+    # him to answer. See _refresh_orb.
+    ORB_PRIORITY = ("muted", "speaking", "awaiting", "thinking", "listening", "idle")
 
     # ---------------------------------------------------------- who counts
     #
@@ -3624,14 +3832,31 @@ class Jalen:
         return True
 
     def _refresh_orb(self, listening: bool = False) -> None:
-        """Recompute what the orb should show from what is actually true."""
-        if self.muted or self.paused:
+        """
+        Recompute what the orb should show from what is actually true.
+
+        WAITING FOR HIS ANSWER BEATS WORKING. A confirmation or an ask_user
+        question is always asked from INSIDE a turn, so with "working beats
+        listening" alone the orb turned yellow the moment the question ended
+        and stayed yellow for the whole wait - telling him Jalen was busy at
+        the exact moment it needed him to speak (the yellow half of the deaf
+        confirmation report, 2026-10-04). It has its own state, `awaiting`:
+        the listening waves with a question mark, in violet, so "it wants an
+        answer from me" cannot be mistaken for "it is listening for a
+        command" or "it is thinking".
+        """
+        speaker = getattr(self, "speaker", None)
+        waiting = (getattr(self, "_awaiting_confirmation", False)
+                   or getattr(self, "_awaiting_reply", False))
+        if getattr(self, "muted", False) or getattr(self, "paused", False):
             state = "muted"
-        elif self.speaker.speaking:
+        elif speaker is not None and getattr(speaker, "speaking", False):
             state = "speaking"
-        elif self._active_turns:
+        elif waiting:
+            state = "awaiting"
+        elif getattr(self, "_active_turns", None):
             state = "thinking"
-        elif listening or self._awaiting_reply or self._awaiting_confirmation:
+        elif listening:
             state = "listening"
         else:
             state = "idle"

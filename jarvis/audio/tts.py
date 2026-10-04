@@ -656,9 +656,49 @@ class Speaker:
         if stream is not None and not stream.finished:
             if stream.interject(text):
                 return True
-            # It finished, or could not get to it in time. The lock is free
-            # (or about to be), so the ordinary path is safe now.
+            if not stream.finished:
+                # STILL RUNNING AND IT COULD NOT SAY IT (the render failed, or
+                # it did not get there in time). say() would now wait on the
+                # lock that stream holds for the rest of the turn - the very
+                # deadlock this method exists to prevent, arriving by the
+                # back door. Report it unsaid; the caller decides.
+                return False
+            # It finished. The lock is free (or about to be), so the ordinary
+            # path is safe now.
         return self.say(text)
+
+    def ask(self, text: str) -> HeldPrompt:
+        """
+        Say a question, then keep the speaker SILENT until the HeldPrompt is
+        released: confirmations and ask_user. See HeldPrompt.
+
+        Inside a streamed reply the stream parks after the line. With no
+        stream, this is a blocking say() - nothing else holds the speaker,
+        so release() has nothing to do.
+        """
+        stream = self._active_stream
+        if stream is not None and not stream.finished:
+            hold = threading.Event()
+            item = stream.interject_item(text, hold=hold)
+            if item is not None and item.spoken:
+                return HeldPrompt(True, item.started_at, item.ended_at, item.interrupted, hold)
+            hold.set()
+            if not stream.finished:
+                # Same reason as say_now(): falling back to say() here would
+                # deadlock on the stream's lock.
+                return HeldPrompt(False)
+        mark = time.monotonic()
+        finished = self.say(text)
+        began, ended = self._on_air_since(mark)
+        return HeldPrompt(began > 0.0, began, ended, interrupted=not finished)
+
+    def _on_air_since(self, mark: float) -> tuple[float, float]:
+        """(first start, last end) of what was played since `mark`; (0, 0) if nothing."""
+        with self._played_lock:
+            kept = [entry for entry in self._played if entry[1] >= mark]
+        if not kept:
+            return 0.0, 0.0
+        return kept[0][1], max((entry[2] or time.monotonic()) for entry in kept)
 
     def summarise_if_long(self, text: str) -> tuple[str, str | None]:
         """
@@ -701,12 +741,65 @@ class _Urgent:
     it does so silently.
     """
 
-    __slots__ = ("text", "done", "spoken")
+    __slots__ = ("text", "done", "spoken", "hold", "started_at", "ended_at", "interrupted")
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, hold: "threading.Event | None" = None) -> None:
         self.text = text
         self.done = threading.Event()
         self.spoken = False
+        # Set by whoever asked, when his answer is in. Until then the stream
+        # stays parked and SILENT after this line - see SpeechStream._park.
+        self.hold = hold
+        self.started_at = 0.0
+        self.ended_at = 0.0
+        self.interrupted = False
+
+
+# HOW LONG A PARKED STREAM WAITS FOR ITS RELEASE, at most. A backstop and
+# nothing else: confirm() and ask_user() release it in their `finally`, and
+# their own timeouts are 20s and 180s. [NOT MEASURED] - chosen to be well past
+# the longest of those, so it can only ever fire on a bug, and to bound that
+# bug to minutes rather than to a stream (and its lock) held forever.
+HOLD_CEILING_S = 600.0
+
+
+class HeldPrompt:
+    """
+    A question that has been said out loud, and the silence kept open for its answer.
+
+    THE DEAF CONFIRMATION, 2026-10-04. A brain turn speaks through a
+    SpeechStream, and the stream keeps `speaker.speaking` set for the whole
+    turn so that the gaps between sentences are not mistaken for him. A RED
+    confirmation is asked from inside that turn, so the stream was still open
+    - and `speaking` still set - for every second Jalen waited for the answer.
+    The microphone loop throws away every frame while `speaking` is set, unless
+    the sound is loud and long enough to count as talking over him, and then
+    the frames that proved it are thrown away too. A plain "yes" was either
+    dropped whole or arrived with its first ~200ms missing, too short to
+    transcribe; twenty seconds later he heard "No answer, so I've cancelled it."
+
+    So the line is spoken and then the speaker is HELD: the thread that owns it
+    stops, `speaking` is cleared, nothing else is played until release() -
+    and the microphone hears him like it would on an idle Jalen.
+
+    `spoken` is True only if audio for the question really started; the caller
+    must not wait for an answer to a question nobody heard.
+    """
+
+    __slots__ = ("spoken", "started_at", "ended_at", "interrupted", "_hold")
+
+    def __init__(self, spoken: bool, started_at: float = 0.0, ended_at: float = 0.0,
+                 interrupted: bool = False, hold: "threading.Event | None" = None) -> None:
+        self.spoken = spoken
+        self.started_at = started_at
+        self.ended_at = ended_at
+        self.interrupted = interrupted
+        self._hold = hold
+
+    def release(self) -> None:
+        """His answer is in (or the wait is over): the reply may carry on."""
+        if self._hold is not None:
+            self._hold.set()
 
 
 class SpeechStream:
@@ -801,17 +894,34 @@ class SpeechStream:
         to the ordinary locking path, which is safe once the stream has let
         the lock go.
         """
+        item = self.interject_item(text, timeout)
+        return bool(item is not None and item.spoken)
+
+    def interject_item(self, text: str, timeout: float = 30.0,
+                       hold: "threading.Event | None" = None) -> "_Urgent | None":
+        """
+        interject(), returning the line itself: when it started and ended, and
+        whether barge-in cut it. None if the stream finished first or did not
+        get to it within `timeout`.
+
+        With `hold`, the stream PARKS after the line - silent, `speaking`
+        cleared - until `hold` is set. See HeldPrompt for why.
+        """
         if self._done.is_set() or not text:
-            return False
-        item = _Urgent(text)
+            return None
+        item = _Urgent(text, hold)
         self._urgent.put(item)
         # The consumer is very likely parked on self._q.get(), waiting for
         # the model's next sentence. Nudge it so it goes round the loop and
         # sees the urgent lane.
         self._q.put(_WAKE)
         if not item.done.wait(timeout):
-            return False
-        return item.spoken
+            # Too late to be the question he heard. If the consumer gets to it
+            # after all, it must not park on a hold nobody will release.
+            if hold is not None:
+                hold.set()
+            return None
+        return item
 
     def _drain_urgent(self, sp: "Speaker") -> None:
         """Say anything waiting in the urgent lane, in order."""
@@ -820,21 +930,92 @@ class SpeechStream:
                 item = self._urgent.get_nowait()
             except queue.Empty:
                 return
-            try:
-                rendered = sp._render_cached(item.text)
-                if rendered is not None:
-                    pcm, rate = rendered
-                    self._first_audio.set()
-                    sp._play_sentence(item.text, pcm, rate)
-                    item.spoken = True
-            except Exception:
-                # A confirmation that cannot be rendered must not take the
-                # reply down with it — but it must also not report success,
-                # or the caller will wait for an answer to a question that
-                # was never asked out loud.
-                item.spoken = False
-            finally:
+            self._speak_urgent(sp, item)
+            if item.hold is not None and item.spoken:
+                self._park(sp, item)
+
+    def _speak_urgent(self, sp: "Speaker", item: "_Urgent") -> None:
+        """Play one urgent line and record it. Never parks; see _park."""
+        try:
+            if sp._interrupt.is_set():
+                # Stopped before a single sample of it played: a kill switch,
+                # or barge-in on the line before it. Not spoken - the caller
+                # must not wait for an answer to a question nobody heard.
+                return
+            rendered = sp._render_cached(item.text)
+            if rendered is None:
+                return
+            pcm, rate = rendered
+            if not sp._speaking.is_set():
+                # Back on air after a park.
+                sp._speaking.set()
+                sp.on_state("speaking")
+            # THE BARGE-IN GRACE IS COUNTED FROM THIS LINE, not from when the
+            # stream opened. A question asked thirty seconds into a turn had
+            # no grace at all, so its own voice coming back through the
+            # microphone could cut it off mid-word - the "he didn't actually
+            # ask me" half of the deaf-confirmation report.
+            sp._speaking_since = time.monotonic()
+            self._first_audio.set()
+            item.started_at = time.monotonic()
+            played = sp._play_sentence(item.text, pcm, rate)
+            item.ended_at = time.monotonic()
+            item.interrupted = not played
+            item.spoken = True
+        except Exception:
+            # A confirmation that cannot be rendered must not take the
+            # reply down with it — but it must also not report success,
+            # or the caller will wait for an answer to a question that
+            # was never asked out loud.
+            item.spoken = False
+        finally:
+            if item.hold is None or not item.spoken:
                 item.done.set()
+
+    def _park(self, sp: "Speaker", item: "_Urgent") -> None:
+        """
+        Stay silent until `item.hold` is set: Jalen asked, now he listens.
+
+        This thread owns the speaker's lock, so while it waits here nothing
+        else can be played - which is the point: nothing of the reply talks
+        over his answer. `speaking` is cleared so the microphone loop treats
+        the room as his; `_spoke_until` is stamped so the echo tests know the
+        question has just ended. An urgent line that arrives while parked
+        ("Sorry - was that a yes or a no?") is still spoken, then the silence
+        resumes.
+        """
+        def go_quiet(ended: float) -> None:
+            sp._speaking.clear()
+            sp._speaking_since = 0.0
+            sp._spoke_until = ended or time.monotonic()
+            # A barge-in that cut the question short was him starting to
+            # answer, not a request to drop the rest of the reply. A kill
+            # switch said during the wait sets it again (Speaker.stop).
+            sp._interrupt.clear()
+            sp.on_state("idle")
+
+        go_quiet(item.ended_at)
+        item.done.set()
+        deadline = time.monotonic() + HOLD_CEILING_S
+        while not item.hold.is_set() and time.monotonic() < deadline:
+            try:
+                extra = self._urgent.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            self._speak_urgent(sp, extra)
+            if extra.hold is not None and extra.spoken:
+                # A second question inside the first wait: answer it first,
+                # then this one is still open, so silence again.
+                self._park(sp, extra)
+                go_quiet(time.monotonic())
+            elif extra.spoken:
+                go_quiet(extra.ended_at)
+        # Back to the reply. `speaking` covers the whole stream again, as it
+        # did before the question, so the gaps between the sentences still to
+        # come are not taken for him.
+        sp._speaking_since = time.monotonic()
+        sp._speaking.set()
+        sp.on_state("speaking")
 
     # ------------------------------------------------------------- consuming
     @property
