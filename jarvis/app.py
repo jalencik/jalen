@@ -812,8 +812,14 @@ class Jalen:
             self._confirm_lock = asyncio.Lock()
         return self._confirm_lock
 
-    async def confirm(self, question: str) -> "ConfirmAnswer":
-        """RED tier: ask out loud and wait for a real yes (spec F45/F46)."""
+    async def confirm(self, question) -> "ConfirmAnswer":
+        """RED tier: ask out loud and wait for a real yes (spec F45/F46).
+
+        `question` is a jarvis.confirmation.Confirmation, or a bare sentence
+        from an older caller (wrapped into a generic one)."""
+        from .confirmation import as_confirmation
+
+        question = as_confirmation(question).question
         timeout = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
         async with self._prompt_lock():
             self.orb.set_state("blocked")
