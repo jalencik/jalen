@@ -21,7 +21,9 @@ safety.yaml's never_touch patterns stop Jalen's own file tools reading it.
     --logout   sign out and delete the session
 
 Stop Jalen first: only one process may use the session file at a time, and
-that includes --status.
+that includes --status. This script takes Jalen's own single-instance lock
+(mode "telegram-connect"), so it refuses while Jalen or the live Telegram
+check is running, and Jalen refuses to start while this runs.
 """
 from __future__ import annotations
 
@@ -35,17 +37,27 @@ from jarvis.integrations import telegram_user  # noqa: E402
 
 BAR = "=" * 68
 
+# How run.py --status names this process while it holds the lock.
+LOCK_MODE = "telegram-connect"
+CONNECT_COMMAND = ".venv\\Scripts\\python.exe scripts\\connect_telegram.py"
+STOP_COMMAND = ".venv\\Scripts\\python.exe run.py --stop"
+# Two-step verification password attempts before giving up. Telegram itself
+# rate-limits wrong passwords; three is the same allowance as the login code.
+PASSWORD_ATTEMPTS = 3
+
 
 async def _status() -> int:
     if not telegram_user.have_session():
-        print("Not signed in. Run this script with no arguments to sign in.")
+        print("Not signed in. Sign in with:")
+        print(f"    {CONNECT_COMMAND}")
         return 1
     client = telegram_user.build_client()
     await client.connect()
     try:
         if not await client.is_user_authorized():
-            print("A session file exists but is no longer authorised.")
-            print("It was probably revoked from another device. Sign in again.")
+            print("A session file exists but Telegram no longer accepts it - it was")
+            print("signed out, probably from Telegram > Settings > Devices. Sign in again:")
+            print(f"    {CONNECT_COMMAND}")
             return 1
         me = await client.get_me()
         name = " ".join(x for x in (me.first_name, me.last_name) if x)
@@ -78,8 +90,11 @@ async def _logout() -> int:
 
 async def _connect() -> int:
     from telethon.errors import (
+        FloodWaitError,
+        PasswordHashInvalidError,
         PhoneCodeExpiredError,
         PhoneCodeInvalidError,
+        PhoneNumberInvalidError,
         SessionPasswordNeededError,
     )
 
@@ -117,7 +132,16 @@ async def _connect() -> int:
             print("  It needs the country code, starting with +.")
             return 1
 
-        await client.send_code_request(phone)
+        try:
+            await client.send_code_request(phone)
+        except PhoneNumberInvalidError:
+            print("  Telegram did not accept that number. Use the full international")
+            print("  form with the country code, e.g. +998901234567.")
+            return 1
+        except FloodWaitError as exc:
+            print(f"  Telegram asks to wait {getattr(exc, 'seconds', 0)} seconds before")
+            print("  another login code. Run this again after that.")
+            return 1
         print()
         print("  Telegram has sent a code to your other Telegram devices.")
         print("  (Check the Telegram app, not SMS, if you have it installed.)")
@@ -144,8 +168,19 @@ async def _connect() -> int:
 
                 print()
                 print("  You have two-step verification on.")
-                password = getpass.getpass("  Telegram password (hidden): ")
-                await client.sign_in(password=password)
+                for left in range(PASSWORD_ATTEMPTS - 1, -1, -1):
+                    password = getpass.getpass("  Telegram password (hidden): ")
+                    try:
+                        await client.sign_in(password=password)
+                        break
+                    except PasswordHashInvalidError:
+                        if not left:
+                            print("  That password wasn't right. Run the script again.")
+                            return 1
+                        print(f"  That password wasn't right. {left} attempt(s) left.")
+                    finally:
+                        # Not kept a moment longer than the call that needs it.
+                        password = None
                 break
 
         me = await client.get_me()
@@ -160,13 +195,15 @@ async def _connect() -> int:
         print("  and Jalen's own file tools are blocked from reading it.")
         print("  To revoke: this script with --logout, or Telegram >")
         print("  Settings > Devices > terminate session.")
+        print()
+        print("  Next: start Jalen (.\\jalen.ps1 start) - he picks the session up.")
         return 0
     finally:
         await client.disconnect()
 
 
-if __name__ == "__main__":
-    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+def main(argv: list[str]) -> int:
+    arg = argv[0] if argv else ""
     # Any other argument falls through to _connect(), so without this line
     # "--help" started a real Telegram sign-in instead of printing help.
     if arg in ("-h", "--help"):
@@ -175,9 +212,39 @@ if __name__ == "__main__":
         except (AttributeError, ValueError):
             pass
         print(__doc__)
-        raise SystemExit(0)
-    if arg == "--status":
-        raise SystemExit(asyncio.run(_status()))
-    if arg == "--logout":
-        raise SystemExit(asyncio.run(_logout()))
-    raise SystemExit(asyncio.run(_connect()))
+        return 0
+
+    # ONE TELEGRAM CLIENT AT A TIME, ENFORCED. The docstring always said
+    # "stop Jalen first", and nothing checked: run while Jalen was up, this
+    # opened a second Telethon client on the same session file - the
+    # collision that gets a session thrown out by Telegram. It now takes the
+    # same lock run.py and scripts/live_telegram_check.py take.
+    from jarvis import runtime
+
+    already = runtime.acquire(LOCK_MODE)
+    if already is not None:
+        if already.mode == LOCK_MODE:
+            print(f"Another Telegram sign-in is already running (pid {already.pid}). "
+                  "Finish it first.")
+        else:
+            print(f"Jalen is running (pid {already.pid}, {already.mode} mode), and only one "
+                  "program may use the Telegram session at a time. Stop him first:")
+            print(f"    {STOP_COMMAND}")
+            print("then run this again.")
+        return 2
+    try:
+        if arg == "--status":
+            return asyncio.run(_status())
+        if arg == "--logout":
+            return asyncio.run(_logout())
+        return asyncio.run(_connect())
+    except KeyboardInterrupt:
+        print()
+        print("Stopped. Nothing was changed unless it said 'Signed in'.")
+        return 130
+    finally:
+        runtime.release()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
