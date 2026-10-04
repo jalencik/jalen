@@ -19,10 +19,10 @@ import numpy as np
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis.app import is_continuation, looks_unfinished          # noqa: E402
-from jarvis.audio.vad import VAD, UtteranceCollector              # noqa: E402
-from jarvis.brain.router import IntentRouter                      # noqa: E402
-from jarvis.config import CONFIG                                  # noqa: E402
+from jalen.app import is_continuation, looks_unfinished          # noqa: E402
+from jalen.audio.vad import VAD, UtteranceCollector              # noqa: E402
+from jalen.brain.router import IntentRouter                      # noqa: E402
+from jalen.config import CONFIG                                  # noqa: E402
 
 AUDIT = ROOT / "data" / "audit.jsonl"
 MISSES = ROOT / "data" / "router_misses.log"
@@ -155,7 +155,7 @@ def tts_cache() -> None:
     print(BAR)
     print("TTS PHRASE CACHE — the ack line must itself be instant")
     print(BAR)
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     speaker = Speaker(CONFIG)
     for phrase in ("Give me a second.", "That's the short version, the full text is on screen."):

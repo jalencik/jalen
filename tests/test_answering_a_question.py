@@ -70,9 +70,9 @@ import time
 
 import pytest
 
-from jarvis.app import Jalen
-from jarvis.brain.router import solicits_an_answer
-from jarvis.config import CONFIG
+from jalen.app import Jalen
+from jalen.brain.router import solicits_an_answer
+from jalen.config import CONFIG
 
 
 class _Gate:
@@ -599,7 +599,7 @@ def test_naming_one_of_the_options_is_an_answer_not_an_echo():
     Echo is acoustic and cannot arrive more than a moment after Jalen
     stopped, so time is the gate and text is only the test.
     """
-    from jarvis.app import ECHO_TAIL_S, Expectation
+    from jalen.app import ECHO_TAIL_S, Expectation
 
     question = ("Gmail's live now, Boss. Do you want the whole thread read "
                 "out, or just the last message?")

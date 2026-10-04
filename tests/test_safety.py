@@ -14,8 +14,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.config import load_config  # noqa: E402
-from jarvis.safety import SafetyEngine, Tier  # noqa: E402
+from jalen.config import load_config  # noqa: E402
+from jalen.safety import SafetyEngine, Tier  # noqa: E402
 
 
 @pytest.fixture

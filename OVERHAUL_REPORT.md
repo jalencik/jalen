@@ -1,4 +1,4 @@
-# Jarvis — Overhaul Report
+# Jalen — Overhaul Report
 
 Written for someone who wants to understand what actually happened, in plain
 terms. Every number here was measured on the real machine, not estimated.
@@ -326,7 +326,7 @@ information.
 ## 8. How to use it
 
 ```powershell
-cd C:\Users\user\Desktop\Jarvis-setup\jarvis
+cd C:\path\to\jalen
 
 .venv\Scripts\python.exe run.py --check      # health check
 .venv\Scripts\python.exe run.py --unmuted    # voice

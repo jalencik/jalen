@@ -56,8 +56,8 @@ import copy
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.safety import SELF_CHAT_ALIASES, SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SELF_CHAT_ALIASES, SafetyEngine, Tier
 
 CHANNEL = "AI engineering & Machine learning"
 
@@ -185,7 +185,7 @@ def test_every_self_alias_is_one_the_resolver_sends_to_him(alias):
     the exact split this fix exists to close. Checked by running the real
     resolver, so a change to either side fails here.
     """
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     client = _FakeClient()
     got = asyncio.run(messaging._resolve(client, alias))
@@ -194,7 +194,7 @@ def test_every_self_alias_is_one_the_resolver_sends_to_him(alias):
 
 @pytest.mark.parametrize("not_self", ["mes", "saved messages backup", "notes", "my"])
 def test_near_misses_do_not_resolve_to_him_either(not_self):
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     client = _FakeClient()
     asyncio.run(messaging._resolve(client, not_self))
@@ -290,8 +290,8 @@ def test_the_destination_he_named_is_recorded_when_his_instruction_starts():
     import threading
     from types import SimpleNamespace
 
-    from jarvis import taint
-    from jarvis.app import Jalen
+    from jalen import taint
+    from jalen.app import Jalen
 
     class _Stop(Exception):
         pass
@@ -335,8 +335,8 @@ def test_the_destination_he_named_is_recorded_when_his_instruction_starts():
 def test_both_callers_pass_what_he_named_to_the_gate():
     import inspect
 
-    from jarvis.app import Jalen
-    from jarvis.brain.agent import Brain
+    from jalen.app import Jalen
+    from jalen.brain.agent import Brain
 
     assert "named_by_him=" in inspect.getsource(Jalen)
     assert "named_by_him=" in inspect.getsource(Brain)

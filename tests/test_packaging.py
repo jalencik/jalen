@@ -39,20 +39,40 @@ def test_the_entry_points_name_functions_that_exist():
 
 def test_dependencies_come_from_the_one_list():
     """
-    requirements.txt is the source of truth and pyproject reads it. A second
+    requirements.txt is the source of truth and setup.py reads it. A second
     hand-maintained copy drifts, and the failure mode is an install that
     imports and then dies at the first real call.
     """
     data = pyproject()
     assert "dependencies" in data["project"]["dynamic"]
-    assert data["tool"]["setuptools"]["dynamic"]["dependencies"]["file"] == [
-        "requirements.txt"
+    import runpy
+
+    build = runpy.run_path(str(ROOT / "setup.py"), run_name="test_build_metadata")
+    dependencies = build["read_dependencies"](ROOT / "requirements.txt")
+    assert dependencies
+    assert any(item.startswith("claude-agent-sdk") for item in dependencies)
+    assert all(not item.startswith("-") for item in dependencies)
+    assert "--only-binary claude-agent-sdk" in (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+
+def test_pip_options_do_not_become_package_dependencies(tmp_path):
+    import runpy
+
+    build = runpy.run_path(str(ROOT / "setup.py"), run_name="test_build_metadata")
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(
+        "# install policy\n--only-binary claude-agent-sdk\n\n"
+        "claude-agent-sdk>=0.2.140,<0.3.0 # native CLI\npytest>=8.0.0\n",
+        encoding="utf-8",
+    )
+    assert build["read_dependencies"](requirements) == [
+        "claude-agent-sdk>=0.2.140,<0.3.0", "pytest>=8.0.0"
     ]
 
 
 def test_the_delegation_libraries_are_declared_dependencies():
     """
-    jarvis/tools/agents.py imports `openai` (Hermes and ChatGPT) and
+    jalen/tools/agents.py imports `openai` (Hermes and ChatGPT) and
     `google.genai` (Gemini) INSIDE the call, per this repo's function-local
     import convention. That convention keeps startup cheap, and it also means a
     missing package is completely invisible until the moment someone actually
@@ -95,7 +115,7 @@ def test_the_gesture_extra_is_gone_along_with_the_feature():
     extras = pyproject()["project"].get("optional-dependencies", {})
     assert "gestures" not in extras
     assert not (ROOT / "requirements-gestures.txt").exists()
-    assert not (ROOT / "jarvis/ui/gestures.py").exists()
+    assert not (ROOT / "jalen/ui/gestures.py").exists()
     for name in ("mediapipe", "opencv"):
         assert name not in (ROOT / "requirements.txt").read_text(encoding="utf-8")
 

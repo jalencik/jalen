@@ -39,9 +39,9 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.app import Jalen
-from jarvis.brain.router import addressed_to_jalen
-from jarvis.config import CONFIG
+from jalen.app import Jalen
+from jalen.brain.router import addressed_to_jalen
+from jalen.config import CONFIG
 
 
 class _Gate:

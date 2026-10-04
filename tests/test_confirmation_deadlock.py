@@ -39,7 +39,7 @@ import time
 
 import pytest
 
-from jarvis.audio.tts import Speaker
+from jalen.audio.tts import Speaker
 
 
 class Cfg:
@@ -167,7 +167,7 @@ def test_the_app_asks_through_the_non_blocking_path():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.say_blocking)
     assert "say_now" in source, (

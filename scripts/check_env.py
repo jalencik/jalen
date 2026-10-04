@@ -86,7 +86,7 @@ def main() -> int:
 
     print("\nMicrophone")
     try:
-        from jarvis.audio.mic import Microphone
+        from jalen.audio.mic import Microphone
 
         devices = Microphone.list_devices()
         if not devices:
@@ -94,14 +94,14 @@ def main() -> int:
             problems += 1
         for d in devices[:8]:
             print(f"{OK}[{d['index']}] {d['name']}")
-        print("      (set audio.input_device in config/jarvis.yaml to pin one)")
+        print("      (set audio.input_device in config/jalen.yaml to pin one)")
     except Exception as exc:
         print(f"{BAD}Can't list devices: {exc}")
         problems += 1
 
     print("\nCredentials")
     try:
-        from jarvis.config import SECRETS
+        from jalen.config import SECRETS
 
         checks = [
             ("GROQ_API_KEY", SECRETS.groq_api_key, True, "speech recognition"),
@@ -129,7 +129,7 @@ def main() -> int:
     # NOT shutil.which("claude"). That probes npm's shim on PATH, which is not
     # the binary the brain spawns, and it once reported a healthy plan through
     # a twenty-minute outage. resolved_cli_path() is the brain's own answer.
-    from jarvis.brain.agent import resolved_cli_path
+    from jalen.brain.agent import resolved_cli_path
 
     claude_path, where, spawnable = resolved_cli_path()
     if claude_path and not spawnable:
@@ -195,8 +195,8 @@ def main() -> int:
 
     print("\nConfig")
     try:
-        from jarvis.config import CONFIG
-        from jarvis.safety import SafetyEngine
+        from jalen.config import CONFIG
+        from jalen.safety import SafetyEngine
 
         engine = SafetyEngine(CONFIG)
         counts = {}
@@ -262,7 +262,7 @@ def _check_accounts() -> int:
     problems = 0
     print("\nAccounts")
     try:
-        from jarvis.integrations import google_auth
+        from jalen.integrations import google_auth
 
         if not google_auth.have_token():
             print(f"{BAD}Google is not connected - email and calendar can't work")
@@ -281,8 +281,8 @@ def _check_accounts() -> int:
         problems += 1
 
     try:
-        from jarvis import runtime
-        from jarvis.config import CONFIG
+        from jalen import runtime
+        from jalen.config import CONFIG
 
         # ONE CLIENT PER SESSION FILE. run.py --check returns before taking
         # the single-instance lock, so this check used to connect even while
@@ -291,12 +291,12 @@ def _check_accounts() -> int:
         # is not a problem; the program using it shows whether it works.
         holder = runtime.running_instance()
         if not CONFIG.get_path("telegram.personal.enabled", False):
-            print(f"{WARN}personal Telegram is switched off in config/jarvis.yaml")
+            print(f"{WARN}personal Telegram is switched off in config/jalen.yaml")
         elif holder is not None:
             print(f"{WARN}personal Telegram not checked: pid {holder.pid} ({holder.mode} mode) "
                   "is using the session, and only one program may at a time")
         else:
-            from jarvis.tools.messaging import telegram_status
+            from jalen.tools.messaging import telegram_status
 
             status = telegram_status()
             if status.startswith("Personal Telegram signed in"):
@@ -309,7 +309,7 @@ def _check_accounts() -> int:
         problems += 1
     finally:
         try:
-            from jarvis.integrations.telegram_user import RUNTIME
+            from jalen.integrations.telegram_user import RUNTIME
 
             RUNTIME.shutdown()
         except Exception:  # noqa: BLE001
@@ -362,7 +362,7 @@ def _check_manual_steps() -> None:
     """
     print("\nSetup still outstanding")
 
-    from jarvis.tools import vault
+    from jalen.tools import vault
 
     if vault.VAULT_PATH.exists():
         print(f"{OK}credentials vault created")
@@ -396,10 +396,10 @@ def _check_last_exit() -> None:
     """
     Did the previous run stop for a reason, or just vanish?
 
-    A vanished run is the 21 August bug (jarvis/crashlog.py). Surfacing it
+    A vanished run is the 21 August bug (jalen/crashlog.py). Surfacing it
     here means the answer is one command away instead of a forensic exercise.
     """
-    from jarvis import crashlog
+    from jalen import crashlog
 
     record = crashlog.previous_exit()
     if record is None:

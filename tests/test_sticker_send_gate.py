@@ -28,8 +28,8 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 CHANNEL = "AI engineering & Machine learning"
 
@@ -142,7 +142,7 @@ def test_the_destination_argument_is_the_same_one_the_tool_takes():
     assert SafetyEngine._DESTINATION_ARG["send_sticker"] == "to"
     import inspect
 
-    from jarvis.tools import stickers
+    from jalen.tools import stickers
 
     assert "to" in inspect.signature(stickers.send_sticker).parameters
 
@@ -158,13 +158,13 @@ def test_the_preapproval_is_still_after_the_injection_check():
 # ------------------------------------------- the rest of the system knows it
 def test_a_draft_or_a_read_request_can_never_become_a_sticker_send():
     """plan.py's forbidden list: 'draft it' must not run send_sticker."""
-    from jarvis import plan
+    from jalen import plan
 
     for verb in ("draft", "save", "read"):
         assert "send_sticker" in plan.ACTIONS[verb], verb
 
 
 def test_a_sticker_send_counts_as_real_work_for_the_rating_prompt():
-    from jarvis.tools import feedback
+    from jalen.tools import feedback
 
     assert "send_sticker" in feedback._REAL_WORK

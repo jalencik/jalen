@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import browsertabs
+from jalen.tools import browsertabs
 
 
 def fake_windows(*pages):
@@ -154,11 +154,11 @@ def test_no_browser_windows_says_so(monkeypatch):
 
 # ----------------------------------------------------------- reachability
 def test_tiers_and_grammar():
-    from jarvis import tools
-    from jarvis.brain.router import IntentRouter
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.router import IntentRouter
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     for name, tier in (
@@ -197,8 +197,8 @@ def test_generic_window_words_are_not_page_names(phrase, expected):
     as page="last", so two commands that had worked for months stopped —
     silently, because both still returned something plausible.
     """
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is not None and hit.tool == expected, (
@@ -211,8 +211,8 @@ def test_closing_a_whole_app_is_still_a_different_thing():
     "Close Chrome" means quit the browser. "Close the YouTube window" means
     one window. Collapsing them would make the coarse command unreachable.
     """
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     router = IntentRouter(CONFIG)
     assert router.route("close chrome").tool == "close_app"

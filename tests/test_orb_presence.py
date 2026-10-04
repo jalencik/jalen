@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.ui.orb import MAX_ORB, MIN_ORB, WAVE_HEADROOM, Orb
+from jalen.config import CONFIG
+from jalen.ui.orb import MAX_ORB, MIN_ORB, WAVE_HEADROOM, Orb
 
 
 class FakeRoot:
@@ -78,7 +78,7 @@ def test_every_state_has_a_colour():
     orb would go dark exactly when it had something to tell him.
     """
     orb = Orb(CONFIG)
-    from jarvis.ui.orb import STATES
+    from jalen.ui.orb import STATES
 
     for state in STATES:
         assert orb.colours.get(state), f"{state} has no colour"
@@ -127,8 +127,8 @@ def test_the_orb_has_no_controls_at_all():
     nothing on the window meant to be clicked, it is click-through in every
     state, and no sequence of events can make it eat a click again.
     """
-    from jarvis.brain.router import IntentRouter
-    from jarvis.ui.orb import Orb
+    from jalen.brain.router import IntentRouter
+    from jalen.ui.orb import Orb
 
     router = IntentRouter(CONFIG)
     for phrase in ("make the orb bigger", "make yourself smaller",
@@ -148,7 +148,7 @@ def test_resize_does_not_hijack_a_bare_adjective(phrase):
     a rule matching a bare "smaller" would swallow a word meant for whatever
     he was actually talking about.
     """
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is None or hit.tool != "jalen_orb_size"
@@ -173,7 +173,7 @@ def test_the_window_handle_used_for_styling_is_the_top_level():
     """
     import inspect
 
-    from jarvis.ui import orb as orbmod
+    from jalen.ui import orb as orbmod
 
     source = inspect.getsource(orbmod)
     # The two ctypes calls that style the window must never be handed
@@ -194,7 +194,7 @@ def test_an_unrealized_window_reports_no_handle_rather_than_the_wrong_one():
     _click_through_applied was then True it was never reconsidered for the
     rest of the session. Returning 0 makes the caller wait instead.
     """
-    from jarvis.ui.orb import toplevel_hwnd
+    from jalen.ui.orb import toplevel_hwnd
 
     class Unrealized:
         def winfo_id(self):
@@ -216,7 +216,7 @@ def test_styling_is_skipped_until_the_handle_resolves():
     """
     import inspect
 
-    from jarvis.ui import orb as orbmod
+    from jalen.ui import orb as orbmod
 
     source = inspect.getsource(orbmod.Orb._run)
     assert "if not self._hwnd:" in source
@@ -232,7 +232,7 @@ def test_topmost_is_re_asserted_rather_than_set_once():
     """
     import inspect
 
-    from jarvis.ui import orb as orbmod
+    from jalen.ui import orb as orbmod
 
     assert orbmod.TOPMOST_REASSERT_TICKS > 0
     source = inspect.getsource(orbmod.raise_to_top)
@@ -248,7 +248,7 @@ def test_the_win32_calls_have_prototypes():
     truncated handle that still looks plausible — and every later call then
     styles nothing, or something else.
     """
-    from jarvis.ui.orb import _user32
+    from jalen.ui.orb import _user32
 
     lib = _user32()
     if lib is None:
@@ -267,7 +267,7 @@ def test_the_orb_carries_its_name_under_it():
 
 def test_the_name_follows_a_renamed_assistant():
     """A second user must not stare at somebody else's name on their desktop."""
-    from jarvis.config import Cfg
+    from jalen.config import Cfg
 
     cfg = Cfg({"identity": {"name": "Ada"}, "ui": {"orb": True}})
     assert Orb(cfg).label == "Ada"

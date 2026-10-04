@@ -30,9 +30,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.tools import messaging
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.tools import messaging
 
 from test_telegram_dms import (  # noqa: F401 - _clean_taint is an autouse fixture
     ALI, CHANNEL, Dialog, FakeClient, Group, Msg, NOW, SAM, STRANGER, User,
@@ -43,7 +43,7 @@ DAY = 24 * 60
 
 
 def _route(phrase):
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     return IntentRouter(CONFIG).route(phrase)
 
@@ -349,7 +349,7 @@ def test_an_ordinary_fence_label_is_unchanged(monkeypatch):
 # 6. The brain is not offered the router's forms, and cannot take them
 # =========================================================================
 def _brain_calls(name, args):
-    from jarvis.brain.tools import _make_wrapper
+    from jalen.brain.tools import _make_wrapper
 
     reply = asyncio.run(_make_wrapper(name)(args))
     return reply["content"][0]["text"]
@@ -373,7 +373,7 @@ def test_the_brain_asking_for_the_headline_gets_the_fenced_digest(monkeypatch, t
 
 
 def test_the_router_still_gets_its_own_forms(monkeypatch):
-    from jarvis import tools as systools
+    from jalen import tools as systools
     from test_telegram_dms import _ali_spoken_chat
 
     _ali_spoken_chat(monkeypatch)
@@ -382,7 +382,7 @@ def test_the_router_still_gets_its_own_forms(monkeypatch):
 
 
 def test_every_router_only_argument_is_stripped_and_nothing_else():
-    from jarvis.brain.tools import ROUTER_ONLY_ARGS, TOOL_SPECS
+    from jalen.brain.tools import ROUTER_ONLY_ARGS, TOOL_SPECS
 
     assert ROUTER_ONLY_ARGS == {
         "read_telegram": ("spoken",),
@@ -402,7 +402,7 @@ def test_the_habits_comment_counts_the_router_spoken_forms_correctly():
     read_telegram's spoken=True); the comment said two."""
     import inspect
 
-    from jarvis import habits
+    from jalen import habits
 
     source = inspect.getsource(habits)
     assert "spoken form for two of them" not in source

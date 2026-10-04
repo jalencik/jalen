@@ -23,7 +23,7 @@ import sys
 
 import pytest
 
-from jarvis import crashlog
+from jalen import crashlog
 
 
 @pytest.fixture()
@@ -250,7 +250,7 @@ def test_shutdown_records_the_stop_even_when_teardown_explodes(crash_dir, monkey
     the only record of the exit down with it, and a process that had clearly
     stopped left a log saying nothing had happened.
     """
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     written: list[str] = []
 
@@ -305,7 +305,7 @@ def test_shutdown_records_the_stop_even_when_teardown_explodes(crash_dir, monkey
 
 
 def test_shutdown_prefers_an_explicit_reason_over_the_recorded_one(crash_dir):
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     written: list[str] = []
     jalen = Jalen.__new__(Jalen)
@@ -345,8 +345,8 @@ def test_a_microphone_that_stops_delivering_is_written_down(crash_dir, monkeypat
     PortAudio does not raise when a capture device stops producing. Before
     this, a deaf Jalen and a listening Jalen left identical evidence: none.
     """
-    from jarvis.audio.mic import Microphone
-    from jarvis.config import CONFIG
+    from jalen.audio.mic import Microphone
+    from jalen.config import CONFIG
 
     mic = Microphone(CONFIG)
     mic.last_callback_at = __import__("time").monotonic() - 60.0
@@ -370,8 +370,8 @@ def test_portaudio_status_flags_are_kept(crash_dir):
     """
     import numpy as np
 
-    from jarvis.audio.mic import Microphone
-    from jarvis.config import CONFIG
+    from jalen.audio.mic import Microphone
+    from jalen.config import CONFIG
 
     mic = Microphone(CONFIG)
     data = np.zeros((mic.blocksize, 1), dtype="float32")
@@ -386,8 +386,8 @@ def test_portaudio_status_flags_are_kept(crash_dir):
 def test_status_flags_cannot_grow_without_bound(crash_dir):
     import numpy as np
 
-    from jarvis.audio.mic import Microphone
-    from jarvis.config import CONFIG
+    from jalen.audio.mic import Microphone
+    from jalen.config import CONFIG
 
     mic = Microphone(CONFIG)
     data = np.zeros((mic.blocksize, 1), dtype="float32")

@@ -38,7 +38,7 @@ model, with newlines in it. Every line after the first was being discarded in
 silence, and Claude Code then started work on a fragment. And he writes Uzbek,
 which the console codepage does not carry.
 
-THE REPO ALREADY KNOWS THIS. jarvis/brain/agent.py refuses a .cmd outright -
+THE REPO ALREADY KNOWS THIS. jalen/brain/agent.py refuses a .cmd outright -
 "a batch script the Agent SDK refuses to spawn" - and CLAUDE.md documents the
 native installer as the way to get a real binary. coding.py never got the
 message: its _CANDIDATES list puts "claude.cmd" FIRST.
@@ -54,7 +54,7 @@ import sys
 
 import pytest
 
-from jarvis.tools import coding
+from jalen.tools import coding
 
 # The regression payload, built from escapes.
 PAYLOAD = (
@@ -89,7 +89,7 @@ def test_a_real_executable_is_preferred_over_the_batch_shim(monkeypatch, tmp_pat
 
 def test_the_sdk_bundled_binary_counts_as_a_real_executable(monkeypatch, tmp_path):
     """
-    The brain already runs it (jarvis/brain/agent.py chosen_cli_path), so a
+    The brain already runs it (jalen/brain/agent.py chosen_cli_path), so a
     machine with the SDK installed always has a usable executable even when
     npm only ever put a shim on PATH.
     """

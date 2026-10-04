@@ -24,7 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.tools import foldermove as fm  # noqa: E402
+from jalen.tools import foldermove as fm  # noqa: E402
 
 WINDOWS_ONLY = pytest.mark.skipif(os.name != "nt", reason="junctions are an NTFS thing")
 
@@ -69,7 +69,7 @@ def isolated(tmp_path, monkeypatch):
     fm._forget_plans()
     yield
     fm._forget_plans()
-    from jarvis import taint
+    from jalen import taint
 
     taint.he_asked_again()
 
@@ -108,7 +108,7 @@ class Launched:
 
 @pytest.fixture
 def launched(monkeypatch):
-    from jarvis.tools import devwork
+    from jalen.tools import devwork
 
     spy = Launched()
     monkeypatch.setattr(devwork, "start_background_run", spy)
@@ -561,7 +561,7 @@ def test_more_protected_files_than_can_be_named_one_by_one_refuses_the_folder(tm
 
 
 def test_the_question_never_raises_whatever_it_is_given(engine):
-    from jarvis.tools import foldermove
+    from jalen.tools import foldermove
 
     for args in ({}, {"path": 3, "destination": None}, {"path": "", "destination": "d"}, {"path": "x"}):
         assert foldermove.confirmation_summary(args) is None
@@ -715,8 +715,8 @@ def test_a_failed_write_of_the_progress_record_does_not_stop_the_move_part_way(
 # ============================================================================
 @pytest.fixture
 def router():
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     return IntentRouter(CONFIG)
 
@@ -813,8 +813,8 @@ def test_a_folder_that_appears_at_the_destination_is_called_that_not_something_i
 # 7. A page must not be able to arm a move
 # ============================================================================
 def test_the_dry_run_is_refused_when_the_request_came_from_something_he_read():
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False
@@ -823,7 +823,7 @@ def test_the_dry_run_is_refused_when_the_request_came_from_something_he_read():
 
 
 def test_a_dry_run_made_on_a_turn_that_read_a_page_is_not_remembered_for_move_it(downloads, drive_d, two_volumes):
-    from jarvis import taint
+    from jalen import taint
 
     taint.mark("web page on example.com")
     fm.plan_folder_move(str(downloads), str(drive_d))
@@ -835,8 +835,8 @@ def test_a_dry_run_made_on_a_turn_that_read_a_page_is_not_remembered_for_move_it
 # ============================================================================
 @pytest.fixture
 def engine():
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     e = SafetyEngine(CONFIG)
     e.paranoid = False
@@ -872,7 +872,7 @@ def test_a_confirmation_without_a_dry_run_behind_it_says_so(downloads, drive_d, 
 # ============================================================================
 @pytest.fixture
 def desk(tmp_path, monkeypatch):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
 
     root = tmp_path / "Desktop"
     root.mkdir()
@@ -892,7 +892,7 @@ def desk(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("spoken", ["the stuff folder", "stuff", "the things folder", "my stuff"])
 def test_a_folder_really_called_stuff_or_things_is_opened(desk, spoken):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
 
     word = spoken.replace("the ", "").replace("my ", "").replace(" folder", "")
     (desk.path / word.title()).mkdir()
@@ -903,7 +903,7 @@ def test_a_folder_really_called_stuff_or_things_is_opened(desk, spoken):
 
 @pytest.mark.parametrize("spoken", ["that thing", "this one", "it up", "that stuff again"])
 def test_a_pronoun_phrase_is_still_asked_about_even_when_a_file_contains_the_word(desk, spoken):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
 
     (desk.path / "something_else.txt").write_text("x")
     (desk.path / "one_more.txt").write_text("x")
@@ -913,7 +913,7 @@ def test_a_pronoun_phrase_is_still_asked_about_even_when_a_file_contains_the_wor
 
 
 def test_a_script_found_in_place_of_a_missing_path_is_never_launched(desk, monkeypatch, tmp_path):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
 
     downloads = tmp_path / "Downloads"
     downloads.mkdir()
@@ -926,7 +926,7 @@ def test_a_script_found_in_place_of_a_missing_path_is_never_launched(desk, monke
 
 
 def test_a_document_found_in_place_of_a_missing_path_is_still_opened_and_announced(desk, monkeypatch, tmp_path):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
 
     downloads = tmp_path / "Downloads"
     downloads.mkdir()
@@ -1102,7 +1102,7 @@ def test_the_exception_does_not_leak_into_any_other_tool(tmp_path, engine):
     The carve-out lives inside the folder-move path only. Every other tool
     still refuses the very same files, and the list itself is unchanged.
     """
-    from jarvis.safety import Tier
+    from jalen.safety import Tier
 
     env = str(tmp_path / "Cafe" / ".env")
     token = str(tmp_path / "Cafe" / "config" / "token.json")
@@ -1131,8 +1131,8 @@ def test_the_never_touch_list_is_exactly_what_it_was(engine):
 
 
 def test_planning_a_move_does_not_change_what_the_safety_engine_protects(project, drive_d, two_volumes):
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     before = SafetyEngine(CONFIG)
     patterns = list(before._never_patterns)

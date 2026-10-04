@@ -20,7 +20,7 @@ import threading
 
 import pytest
 
-from jarvis.tools import interaction
+from jalen.tools import interaction
 
 
 @pytest.fixture(autouse=True)
@@ -115,7 +115,7 @@ class Bare:
 
 
 def _make_bare():
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     bare = Bare()
     bare._wait_for_reply = lambda timeout: Jalen._wait_for_reply(bare, timeout)
@@ -123,7 +123,7 @@ def _make_bare():
 
 
 def test_it_actually_blocks_until_an_answer_arrives():
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     bare = _make_bare()
     result = {}
@@ -149,7 +149,7 @@ def test_it_actually_blocks_until_an_answer_arrives():
 
 
 def test_a_timeout_returns_empty_and_says_so_out_loud():
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     bare = _make_bare()
     answer = asyncio.new_event_loop().run_until_complete(
@@ -164,7 +164,7 @@ def test_stale_answers_are_drained_before_the_question():
     Anything already queued predates the question and answers something
     else. Accepting it would put the previous answer into this field.
     """
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     bare = _make_bare()
     bare._reply_q.put("an answer to an older question")
@@ -191,7 +191,7 @@ def test_while_a_question_is_open_everything_he_says_is_the_answer():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.process)
     assert source.index("_awaiting_reply") < source.index("self.router.route")
@@ -204,7 +204,7 @@ def test_the_mic_stays_open_while_a_question_is_pending():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.run)
     assert "self._awaiting_reply" in source
@@ -217,7 +217,7 @@ def test_the_two_answer_queues_are_separate():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.__init__)
     assert "_reply_q" in source and "_answer_q" in source
@@ -229,10 +229,10 @@ def test_it_is_reachable_and_ungated():
     confirmation before every question, which is absurd — what he approves
     AFTERWARDS is gated on its own merits.
     """
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     assert "ask_user" in tools.REGISTRY
     assert "ask_user" in TOOL_SPECS

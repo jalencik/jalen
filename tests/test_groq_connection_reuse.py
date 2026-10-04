@@ -44,8 +44,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from jarvis.audio import stt
-from jarvis.config import CONFIG
+from jalen.audio import stt
+from jalen.config import CONFIG
 
 
 class _Secrets:
@@ -88,11 +88,11 @@ def test_the_pooled_connection_outlives_the_gap_between_turns(transcriber):
 
 def test_the_keepalive_is_configurable_and_the_key_is_read(monkeypatch):
     """
-    This repo's rule: a key in jarvis.yaml that no code reads is worse than
+    This repo's rule: a key in jalen.yaml that no code reads is worse than
     no key at all, because the file promises no code changes are needed.
     """
     assert CONFIG.get_path("stt.groq_keepalive_s", None) is not None, (
-        "stt.groq_keepalive_s is missing from config/jarvis.yaml"
+        "stt.groq_keepalive_s is missing from config/jalen.yaml"
     )
     cfg = dict(CONFIG)
     t = stt.Transcriber(CONFIG, _Secrets())
@@ -227,7 +227,7 @@ def test_shutdown_actually_calls_close(transcriber):
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.shutdown)
     assert "self._close_stt" in source, (
@@ -249,7 +249,7 @@ def test_shutdown_actually_calls_close(transcriber):
 
 def test_close_stt_survives_a_half_built_jalen():
     """The thing the method form buys, asserted rather than assumed."""
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     bare = Jalen.__new__(Jalen)
     Jalen._close_stt(bare)          # no self.stt at all - must not raise

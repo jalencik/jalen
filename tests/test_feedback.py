@@ -23,7 +23,7 @@ import json
 
 import pytest
 
-from jarvis.tools import feedback
+from jalen.tools import feedback
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ The published latency median was the time to "Give me a second."
 
 WHAT THE STOPWATCH USED TO CLAIM
 --------------------------------
-jarvis/timing.py documented `wait_s` as "the whole silence he sits through.
+jalen/timing.py documented `wait_s` as "the whole silence he sits through.
 This is the latency number; if only one figure is ever reported, report this
 one." It is neither the whole silence nor always silence, and both halves of
 that are measurable.
@@ -12,7 +12,7 @@ ONE: THE STOPWATCH STARTS AFTER THE SILENCE HE SAT IN
 -----------------------------------------------------
 `speech_end` is stamped in run() the instant UtteranceCollector.feed() hands
 the utterance over - and feed() only does that once the endpoint threshold of
-continuous quiet has ALREADY elapsed. config/jarvis.yaml ships
+continuous quiet has ALREADY elapsed. config/jalen.yaml ships
 vad.fast_silence_ms: 1400 and vad.silence_ms: 4000, so the mark named
 "speech_end" is 1.4 seconds after he stopped talking on the common path and
 4 seconds after on the patient one. He sits through every one of those
@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.timing import MARKS, TurnTimer
+from jalen.timing import MARKS, TurnTimer
 
 
 def _timer(**kw) -> TurnTimer:
@@ -250,7 +250,7 @@ class _Jalen:
     _mark_first_audio = None        # bound below
 
 
-from jarvis.app import Jalen as _RealJalen        # noqa: E402
+from jalen.app import Jalen as _RealJalen        # noqa: E402
 
 _Jalen._mark_first_audio = _RealJalen._mark_first_audio
 
@@ -340,7 +340,7 @@ def test_the_filler_arithmetic_lives_in_the_app_not_in_this_file():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen._mark_first_audio)
     assert "audio_starts" in source

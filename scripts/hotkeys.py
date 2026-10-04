@@ -2,7 +2,7 @@
 The global hotkey. This is how Jalen starts without typing anything.
 
     Ctrl+Alt+J        wake him — launch him if he isn't running, listen if he is
-    Ctrl+Alt+K        the kill switch (config/jarvis.yaml, safety.kill_switch_hotkey)
+    Ctrl+Alt+K        the kill switch (config/jalen.yaml, safety.kill_switch_hotkey)
 
 Run it with:
     .venv\\Scripts\\pythonw.exe scripts\\hotkeys.py
@@ -25,7 +25,7 @@ someone's credentials, "cannot see your keystrokes" is worth more than the
 convenience of a nicer API.
 
 FALLBACKS, BECAUSE COMBINATIONS COLLIDE. Found live on this machine:
-Ctrl+Alt+Space — the combination config/jarvis.yaml has promised as the kill
+Ctrl+Alt+Space — the combination config/jalen.yaml has promised as the kill
 switch since day one — is already owned by another application.
 RegisterHotKey returned failure, and because this runs under pythonw there
 was no console for the error to appear in, so the kill switch simply did
@@ -48,8 +48,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis import runtime  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
+from jalen import runtime  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
 
 LOG_PATH = ROOT / "data" / "hotkeys.log"
 

@@ -8,7 +8,7 @@ deletes the file, his browser has no link until Jalen restarts.
 
 Found 2026-10-01 on main 7d4be52 - three writers, none redirected by
 conftest.py (which redirects audit, crash log, memory, vault and browser
-profile, but nothing under jarvis.bridge):
+profile, but nothing under jalen.bridge):
 
   1. test_bridge.py::test_the_host_connects_and_authenticates builds
      BridgeServer() on the real file "ON PURPOSE ... Restored after" - but
@@ -32,13 +32,13 @@ LIVE = (ROOT / "data" / "bridge.json").resolve()
 
 
 def test_a_server_built_with_defaults_does_not_advertise_on_the_live_file():
-    from jarvis.bridge.server import BridgeServer
+    from jalen.bridge.server import BridgeServer
     srv = BridgeServer()   # __init__ only records the path; nothing is bound
     assert Path(srv._bridge_file).resolve() != LIVE
 
 
 def test_the_native_host_module_does_not_read_the_live_file():
-    from jarvis.bridge import native_host
+    from jalen.bridge import native_host
     assert Path(native_host.BRIDGE_FILE).resolve() != LIVE
 
 

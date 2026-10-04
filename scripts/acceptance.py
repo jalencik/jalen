@@ -59,7 +59,7 @@ def build_jalen():
     run.py --text rebinds it, so what comes back is exactly what he would
     have heard.
     """
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     jalen = Jalen(mode="text")
     said: list[str] = []
@@ -70,7 +70,7 @@ def build_jalen():
 
 def intercept(monkey: dict):
     """Replace real side effects with recorders. Returns the call log."""
-    from jarvis import tools
+    from jalen import tools
 
     calls: list[tuple[str, dict]] = []
     original = {}
@@ -88,7 +88,7 @@ def intercept(monkey: dict):
 
 
 def restore(original: dict) -> None:
-    from jarvis import tools
+    from jalen import tools
 
     tools.REGISTRY.update(original)
 
@@ -111,7 +111,7 @@ def main() -> int:
     # ---- 1. the readiness probe -------------------------------------------
     print("  1. Readiness")
     try:
-        from jarvis import conversation, plan, taint  # noqa: F401
+        from jalen import conversation, plan, taint  # noqa: F401
 
         check("the probe imports and the new machinery is present", PASS)
     except Exception as exc:  # noqa: BLE001
@@ -122,8 +122,8 @@ def main() -> int:
     try:
         import ctypes
 
-        from jarvis.config import CONFIG
-        from jarvis.ui.orb import GWL_EXSTYLE, WS_EX_TRANSPARENT, Orb
+        from jalen.config import CONFIG
+        from jalen.ui.orb import GWL_EXSTYLE, WS_EX_TRANSPARENT, Orb
 
         orb = Orb(CONFIG)
         orb.start()
@@ -159,7 +159,7 @@ def main() -> int:
         check("building Jalen", FAIL, f"{type(exc).__name__}: {exc}")
         return report()
 
-    from jarvis import conversation, taint
+    from jalen import conversation, taint
 
     def turn(text: str) -> str:
         """One complete turn. Returns everything Jalen said."""
@@ -172,7 +172,7 @@ def main() -> int:
 
     # ---- 5. the destination contract --------------------------------------
     try:
-        from jarvis import plan as planning
+        from jalen import plan as planning
 
         contract = planning.read_plan("send it to my saved messages")
         wrong = contract.betrayed_by(["community_post_guide", "save_telegram_draft"])
@@ -188,7 +188,7 @@ def main() -> int:
 
     # ---- 4. confirmation ---------------------------------------------------
     try:
-        from jarvis.app import Jalen
+        from jalen.app import Jalen
 
         yes = [Jalen._parse_yes_no(p) for p in
                ("of course", "yeah of course", "yes, open Telegram, please",
@@ -246,9 +246,9 @@ def main() -> int:
 
     # ---- the injection guard, end to end -----------------------------------
     try:
-        from jarvis.config import CONFIG
-        from jarvis.safety import SafetyEngine, Tier
-        from jarvis.tools import gmail
+        from jalen.config import CONFIG
+        from jalen.safety import SafetyEngine, Tier
+        from jalen.tools import gmail
 
         taint.he_asked_again()
         before = SafetyEngine(CONFIG).classify(
@@ -271,7 +271,7 @@ def main() -> int:
 
     # ---- 11. rating --------------------------------------------------------
     try:
-        from jarvis.tools import feedback
+        from jalen.tools import feedback
 
         got = feedback.parse_rating(
             "Jalen I rate your work out of 10 is 5 because you didn't "
@@ -286,7 +286,7 @@ def main() -> int:
 
     # ---- 8. read to the end ------------------------------------------------
     try:
-        from jarvis.app import wants_it_all
+        from jalen.app import wants_it_all
 
         on = all(wants_it_all(p) for p in
                  ("read that email till the end", "read it out loud",
@@ -302,7 +302,7 @@ def main() -> int:
     # ---- 2/3. the browser, up to the human step ---------------------------
     print("\n  2-3. The browser, as far as it goes without you")
     try:
-        from jarvis.tools import webagent
+        from jalen.tools import webagent
 
         state = webagent.web_sign_in_state("chatgpt")
         webagent._Session.get().stop()

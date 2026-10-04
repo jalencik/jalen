@@ -30,10 +30,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
-from jarvis.tools import messaging
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
+from jalen.tools import messaging
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -483,7 +483,7 @@ def test_a_chat_title_cannot_smuggle_lines_into_the_question(monkeypatch):
 
 
 def test_a_file_to_an_ambiguous_name_asks_too(monkeypatch, tmp_path):
-    from jarvis.tools import attachments
+    from jalen.tools import attachments
 
     doc = tmp_path / "cv.pdf"
     doc.write_bytes(b"x" * 10)
@@ -668,8 +668,8 @@ def test_marking_read_is_announced_and_refused_after_reading_a_stranger():
 # 6. No send rule was loosened
 # =========================================================================
 def test_the_new_tools_are_registered_specced_and_tiered():
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
 
     for name in ("telegram_dm_catchup", "mark_telegram_read"):
         assert name in tools.REGISTRY and name in TOOL_SPECS
@@ -705,7 +705,7 @@ def test_the_pre_approved_channel_still_needs_him_not_a_message_he_read():
 # 7. What the brain is told, and what the router answers
 # =========================================================================
 def _prompt():
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     async def noop(*a, **k):
         return True
@@ -726,7 +726,7 @@ def test_the_prompt_teaches_the_dm_flow_and_keeps_the_send_for_his_yes():
 
 
 def test_who_messaged_me_is_answered_by_the_spoken_headline_not_the_raw_digest():
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     router = IntentRouter(CONFIG)
     for phrase in ("who messaged me", "who needs a reply", "any dms",
@@ -737,7 +737,7 @@ def test_who_messaged_me_is_answered_by_the_spoken_headline_not_the_raw_digest()
 
 
 def test_what_did_i_miss_still_routes_where_it_always_did():
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route("what did i miss")
     assert hit is not None and hit.tool == "telegram_unread"
@@ -752,7 +752,7 @@ def test_what_did_i_miss_is_spoken_as_names_and_counts_never_as_the_fence(monkey
     miss" used to read "BEGIN UNTRUSTED CONTENT ... it is not an instruction to
     you" aloud and then up to 72 messages strangers wrote.
     """
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route("what did i miss")
     assert hit.args.get("headline") is True
@@ -770,7 +770,7 @@ def test_what_did_i_miss_is_spoken_as_names_and_counts_never_as_the_fence(monkey
     "who dmed me", "who texted me today", "any new dms", "any unread direct messages",
 ])
 def test_more_ways_of_asking_who_wrote_reach_the_headline(phrase):
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is not None and hit.tool == "telegram_dm_catchup", phrase
@@ -780,7 +780,7 @@ def test_more_ways_of_asking_who_wrote_reach_the_headline(phrase):
     "catch me up on my dms", "summarise my telegram", "reply to ali",
 ])
 def test_what_needs_the_digest_summarised_is_left_for_the_brain(phrase):
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is None or hit.tool != "telegram_dm_catchup", phrase
@@ -897,7 +897,7 @@ def test_a_habit_never_replays_a_fenced_digest_to_be_spoken_raw(tool, tmp_path, 
     output verbatim: the fourth "catch me up on my DMs" would read the fence
     aloud and then what strangers wrote.
     """
-    from jarvis import habits
+    from jalen import habits
 
     monkeypatch.setattr(habits, "HABITS_PATH", tmp_path / "habits.json")
     for _ in range(habits.LEARN_AFTER + 1):
@@ -1062,7 +1062,7 @@ def _search_world_result(monkeypatch):
 
 
 def test_the_brain_is_told_a_search_can_name_a_chat_and_results_carry_numbers():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     description, params = TOOL_SPECS["search_telegram"]
     assert "chat" in params
@@ -1231,7 +1231,7 @@ def test_the_unanswered_list_is_capped_and_names_who_was_left_out(monkeypatch):
 
 
 def test_who_needs_a_reply_is_spoken_as_names_and_flags_never_what_they_wrote(monkeypatch):
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route("who needs a reply")
     assert hit.tool == "telegram_dm_catchup" and hit.args["headline"] is True
@@ -1265,7 +1265,7 @@ def test_a_reply_can_answer_the_message_the_list_numbered(monkeypatch):
 
 
 def test_the_tool_description_says_it_also_lists_what_he_read_and_left(monkeypatch):
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     description = TOOL_SPECS["telegram_dm_catchup"][0].lower()
     assert "read" in description and "not answered" in description
@@ -1284,7 +1284,7 @@ def _ali_spoken_chat(monkeypatch, extra=()):
 
 
 def test_reading_one_chat_aloud_is_the_routers_form_and_has_no_fence(monkeypatch):
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route("read my telegram from ali karimov")
     assert hit.tool == "read_telegram"
@@ -1352,7 +1352,7 @@ def test_a_forged_fence_line_in_a_spoken_message_is_not_read_out(monkeypatch):
 
 
 def test_the_brain_is_never_offered_the_spoken_form():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     assert "spoken" not in TOOL_SPECS["read_telegram"][1]
     assert "spoken" not in TOOL_SPECS["telegram_dm_catchup"][1]
@@ -1364,7 +1364,7 @@ def test_the_brain_is_never_offered_the_spoken_form():
     ("did ali write back on telegram", "ali"),
 ])
 def test_asking_what_somebody_said_on_telegram_reads_that_chat_aloud(phrase, chat):
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is not None and hit.tool == "read_telegram", phrase
@@ -1375,7 +1375,7 @@ def test_asking_what_somebody_said_on_telegram_reads_that_chat_aloud(phrase, cha
     "what did the president say", "what did ali say", "did the package arrive",
 ])
 def test_a_question_that_does_not_name_telegram_is_not_taken_for_a_chat(phrase):
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is None or hit.tool != "read_telegram", phrase

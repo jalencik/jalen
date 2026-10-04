@@ -14,7 +14,7 @@ asyncio.run(). This drives two consecutive brain turns through the real
 Jarvis.process()/_run_coro()/handle_with_brain() path and asserts the
 second one succeeds exactly like the first.
 
-We substitute jarvis.brain.agent.Brain with a fake that reproduces the
+We substitute jalen.brain.agent.Brain with a fake that reproduces the
 precise shape of the hazard — a resource that only works when start() and
 later calls run on the same loop — rather than driving the real Claude
 Agent SDK, which needs live `claude setup-token` auth (Phase B, not this
@@ -32,12 +32,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.app import Jalen  # noqa: E402
+from jalen.app import Jalen  # noqa: E402
 
 
 class _LoopBoundFakeBrain:
     """
-    Stands in for jarvis.brain.agent.Brain. start() records which event loop
+    Stands in for jalen.brain.agent.Brain. start() records which event loop
     it ran on — exactly like ClaudeSDKClient binding its internal transport
     to the loop it was opened in. ask() raises if it's ever invoked from a
     different loop. Under the old asyncio.run()-per-turn code, turn 2 runs on
@@ -71,42 +71,42 @@ class _LoopBoundFakeBrain:
 
 
 @pytest.fixture
-def jarvis(monkeypatch):
-    monkeypatch.setattr("jarvis.brain.agent.Brain", _LoopBoundFakeBrain)
+def jalen(monkeypatch):
+    monkeypatch.setattr("jalen.brain.agent.Brain", _LoopBoundFakeBrain)
     return Jalen()
 
 
-def test_two_consecutive_brain_turns_both_succeed(jarvis):
+def test_two_consecutive_brain_turns_both_succeed(jalen):
     """The exact scenario from §3: drive two turns, the second must succeed."""
     try:
-        first = jarvis._run_coro(jarvis.handle_with_brain("what's the weather"))
-        second = jarvis._run_coro(jarvis.handle_with_brain("and tomorrow"))
+        first = jalen._run_coro(jalen.handle_with_brain("what's the weather"))
+        second = jalen._run_coro(jalen.handle_with_brain("and tomorrow"))
     finally:
-        jarvis.shutdown()
+        jalen.shutdown()
 
     assert first == "reply 1"
     assert second == "reply 2"
 
 
-def test_persistent_loop_is_reused_across_calls(jarvis):
+def test_persistent_loop_is_reused_across_calls(jalen):
     """The loop itself — not just the outcome — must be the same object."""
     async def _current_loop():
         return asyncio.get_running_loop()
 
     try:
-        loop_during_first = jarvis._run_coro(_current_loop())
-        loop_during_second = jarvis._run_coro(_current_loop())
+        loop_during_first = jalen._run_coro(_current_loop())
+        loop_during_second = jalen._run_coro(_current_loop())
     finally:
-        jarvis.shutdown()
+        jalen.shutdown()
 
     assert loop_during_first is loop_during_second
     assert loop_during_first is not None
 
 
-def test_shutdown_stops_the_loop_and_is_idempotent(jarvis):
+def test_shutdown_stops_the_loop_and_is_idempotent(jalen):
     """shutdown() must tear the loop down cleanly and tolerate being called twice."""
-    jarvis._run_coro(jarvis.handle_with_brain("hello"))
-    jarvis.shutdown()
-    assert jarvis._loop is None
+    jalen._run_coro(jalen.handle_with_brain("hello"))
+    jalen.shutdown()
+    assert jalen._loop is None
 
-    jarvis.shutdown()  # must not raise
+    jalen.shutdown()  # must not raise

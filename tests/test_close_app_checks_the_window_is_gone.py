@@ -33,7 +33,7 @@ import types
 
 import pytest
 
-from jarvis.tools import system
+from jalen.tools import system
 
 
 class _FakeWindow:
@@ -184,9 +184,9 @@ def test_wait_until_gone_gives_up_on_a_window_that_stays(monkeypatch):
 def jalen(monkeypatch):
     """A real Jalen, without his Chrome-extension bridge: Jalen() binds a socket and
     publishes data/bridge.json, and a test that does that over the live file steals the
-    extension out of his running Chrome (see jarvis/bridge/server.py)."""
-    from jarvis.app import Jalen
-    from jarvis.bridge import server
+    extension out of his running Chrome (see jalen/bridge/server.py)."""
+    from jalen.app import Jalen
+    from jalen.bridge import server
 
     inert = types.SimpleNamespace(on_event=lambda callback: None, start=lambda: None, stop=lambda: None)
     monkeypatch.setattr(server, "get_server", lambda: inert)
@@ -199,8 +199,8 @@ def jalen(monkeypatch):
 
 
 def _outcomes(jalen, monkeypatch, tool_result):
-    from jarvis import tools as systools
-    from jarvis.brain.router import Intent
+    from jalen import tools as systools
+    from jalen.brain.router import Intent
 
     rows = []
     monkeypatch.setattr(jalen.audit, "action",
@@ -226,8 +226,8 @@ def test_a_close_that_worked_is_still_filed_as_executed(jalen, monkeypatch):
 def test_a_failure_is_spoken_even_when_the_rule_has_a_canned_reply(jalen, monkeypatch):
     """intent.reply is what a rule says when its tool WORKED. A tool that did not
     work must not be covered over by it."""
-    from jarvis import tools as systools
-    from jarvis.brain.router import Intent
+    from jalen import tools as systools
+    from jalen.brain.router import Intent
 
     monkeypatch.setattr(jalen.audit, "action", lambda *a, **k: None)
     monkeypatch.setattr(systools, "call",

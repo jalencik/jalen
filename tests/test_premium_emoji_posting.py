@@ -33,7 +33,7 @@ import asyncio
 
 import pytest
 
-from jarvis.tools import messaging
+from jalen.tools import messaging
 from tests._telegram_fakes import FakeAccount, FakeChannel, emoji_doc, set_info
 
 ROCKET, PIN, HAND = 5368324170671202286, 5368324170671202287, 5368324170671202288
@@ -240,7 +240,7 @@ def test_a_post_without_premium_emoji_is_unchanged(account):
 
 
 def test_send_posts_counts_a_premium_post_as_sent(account):
-    from jarvis.tools import drafting
+    from jalen.tools import drafting
 
     reply = drafting.send_posts(to="AI engineering & Machine learning", posts=[POST])
     assert reply.startswith("1 of 1 sent")

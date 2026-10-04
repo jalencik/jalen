@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.brain.router import NAME_ALIASES, IntentRouter
-from jarvis.config import CONFIG
+from jalen.brain.router import NAME_ALIASES, IntentRouter
+from jalen.config import CONFIG
 
 
 @pytest.fixture(scope="module")

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import messaging
+from jalen.tools import messaging
 
 
 class FakeEntity:
@@ -163,8 +163,8 @@ def test_draft_is_green_and_send_is_still_red():
     would ask permission for something nobody can see; if sending ever
     became GREEN, a post would go out unreviewed.
     """
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     assert engine.classify("save_telegram_draft", {}).tier is Tier.GREEN
@@ -176,7 +176,7 @@ def test_the_post_format_guide_is_readable_and_complete():
     The guide is loaded by a tool, so a missing or truncated file shows up
     as a badly formatted post rather than an error. Check the load path.
     """
-    from jarvis.tools.voice import community_post_guide
+    from jalen.tools.voice import community_post_guide
 
     guide = community_post_guide()
     assert "couldn't read" not in guide

@@ -1,5 +1,5 @@
 """
-Tests for jarvis/tools/sysinfo.py.
+Tests for jalen/tools/sysinfo.py.
 
 disk_report/cleanup_suggestions/memory_report all run against the REAL
 machine (psutil, real drives, real processes) rather than mocks, matching
@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.tools import sysinfo  # noqa: E402
+from jalen.tools import sysinfo  # noqa: E402
 
 
 # --------------------------------------------------------------- live smoke
@@ -165,7 +165,7 @@ def test_old_downloads_size_only_counts_files_past_the_cutoff(tmp_path, monkeypa
 
 # -------------------------------------------------------------------- registry
 def test_registered_in_unified_registry():
-    from jarvis import tools
+    from jalen import tools
 
     for name in ("disk_report", "cleanup_suggestions", "memory_report"):
         assert name in tools.REGISTRY
@@ -180,8 +180,8 @@ def test_size_str_is_spoken_friendly():
 
 # ----------------------------------------------------------------------- tier
 def test_all_three_tools_are_explicit_green_in_safety_yaml():
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False

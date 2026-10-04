@@ -7,7 +7,7 @@ prewarm() runs it in a background thread at startup for exactly that reason.
 
 WHAT IT ACTUALLY SKIPS
 ----------------------
-`import edge_tts` appears at exactly ONE place in jarvis/audio/tts.py - inside
+`import edge_tts` appears at exactly ONE place in jalen/audio/tts.py - inside
 _synthesise. And _synthesise is called from warmup() only here:
 
     already_warm = len(list(self.CACHE_DIR.glob("*.npz"))) >= max(8, ...)
@@ -46,7 +46,7 @@ import inspect
 
 import pytest
 
-from jarvis.audio import tts
+from jalen.audio import tts
 
 
 class _Counter:

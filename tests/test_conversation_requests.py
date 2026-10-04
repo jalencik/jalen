@@ -32,11 +32,11 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis import tools  # noqa: E402
-from jarvis.brain.router import IntentRouter  # noqa: E402
-from jarvis.brain.tools import TOOL_SPECS  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.safety import SafetyEngine  # noqa: E402
+from jalen import tools  # noqa: E402
+from jalen.brain.router import IntentRouter  # noqa: E402
+from jalen.brain.tools import TOOL_SPECS  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.safety import SafetyEngine  # noqa: E402
 
 e = SafetyEngine(CONFIG)
 r = IntentRouter(CONFIG)
@@ -69,12 +69,12 @@ CHECKS = [
     # there is no longer any combination of circumstances where it can take a
     # click meant for something underneath it.
     ("M1", "1. the orb never touches the cursor",
-     lambda: not (ROOT / "jarvis/ui/gestures.py").exists()
-             and not hasattr(__import__("jarvis.ui.orb", fromlist=["x"]).Orb, "resize_by")
+     lambda: not (ROOT / "jalen/ui/gestures.py").exists()
+             and not hasattr(__import__("jalen.ui.orb", fromlist=["x"]).Orb, "resize_by")
              and "set_click_through(self._hwnd, True)" in
-                 (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
+                 (ROOT / "jalen/ui/orb.py").read_text(encoding="utf-8")),
     ("M1", "2. silent exit -> diagnosable",
-     lambda: (ROOT / "jarvis/crashlog.py").exists() and "--why" in (ROOT / "run.py").read_text(encoding="utf-8")),
+     lambda: (ROOT / "jalen/crashlog.py").exists() and "--why" in (ROOT / "run.py").read_text(encoding="utf-8")),
     ("M1", "3. wake model / his voice",
      lambda: (ROOT / "scripts/record_wake_samples.py").exists()
              and float(CONFIG.get_path("wake.threshold")) <= 0.5),
@@ -86,9 +86,9 @@ CHECKS = [
     ("M1", "6a. onboarding for a 2nd user",
      lambda: (ROOT / "scripts/onboard.py").exists()),
     ("M1", "6b. per-user config, not hardcoded",
-     lambda: "USER_CONFIG" in (ROOT / "jarvis/config.py").read_text(encoding="utf-8")),
+     lambda: "USER_CONFIG" in (ROOT / "jalen/config.py").read_text(encoding="utf-8")),
     ("M1", "6c. my-voice skill is portable",
-     lambda: "personal.voice_guide" in (ROOT / "jarvis/tools/voice.py").read_text(encoding="utf-8")),
+     lambda: "personal.voice_guide" in (ROOT / "jalen/tools/voice.py").read_text(encoding="utf-8")),
     ("M1", "6d. packaging",
      lambda: (ROOT / "pyproject.toml").exists()),
     ("M1", "6e. licence",
@@ -108,18 +108,18 @@ CHECKS = [
     ("M3", "2a. orb visible when idle",
      lambda: max(int(CONFIG.get_path("ui.theme.idle")[i:i + 2], 16) for i in (1, 3, 5)) >= 120),
     ("M3", "2b. orb always on top, re-asserted",
-     lambda: "TOPMOST_REASSERT_TICKS" in (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
+     lambda: "TOPMOST_REASSERT_TICKS" in (ROOT / "jalen/ui/orb.py").read_text(encoding="utf-8")),
     ("M3", "2c. name written below the orb",
-     lambda: "_draw_name" in (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
+     lambda: "_draw_name" in (ROOT / "jalen/ui/orb.py").read_text(encoding="utf-8")),
     ("M3", "2d. sphere like the photo (mesh + rim)",
-     lambda: all(x in (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")
+     lambda: all(x in (ROOT / "jalen/ui/orb.py").read_text(encoding="utf-8")
                  for x in ("_draw_mesh", "_draw_rim", "_draw_wireframe"))),
     ("M3", "2e. listening = waves",
-     lambda: "WAVES travelling outward" in (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
+     lambda: "WAVES travelling outward" in (ROOT / "jalen/ui/orb.py").read_text(encoding="utf-8")),
     ("M3", "2f. thinking = different motion",
-     lambda: "cannot be mistaken for listening" in (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
+     lambda: "cannot be mistaken for listening" in (ROOT / "jalen/ui/orb.py").read_text(encoding="utf-8")),
     ("M3", "2g. the orb stays put and stays out of the way",
-     lambda: not hasattr(__import__("jarvis.ui.orb", fromlist=["x"]).Orb, "move_to")),
+     lambda: not hasattr(__import__("jalen.ui.orb", fromlist=["x"]).Orb, "move_to")),
     ("M3", "4. new-user sweep exists",
      lambda: (ROOT / "tests/test_new_user_sweep.py").exists()),
 
@@ -127,16 +127,16 @@ CHECKS = [
     ("M4", "1a. passphrase redacted in the audit",
      lambda: e.classify("unlock_vault", {"passphrase": "x"}).detail["args"]["passphrase"] == "***redacted***"),
     ("M4", "1b. spoken passphrase not transcribed to log",
-     lambda: "_SECRET_SHAPES" in (ROOT / "jarvis/audit.py").read_text(encoding="utf-8")),
+     lambda: "_SECRET_SHAPES" in (ROOT / "jalen/audit.py").read_text(encoding="utf-8")),
     ("M4", "1c. typed unlock box",
      lambda: "unlock_vault_prompt" in tools.REGISTRY),
     ("M4", "2. speech no longer cuts off",
      lambda: float(CONFIG.get_path("conversation.barge_in_grace_s", 0)) >= 0.8
              and int(CONFIG.get_path("conversation.barge_in_frames", 1)) >= 3),
     ("M4", "2b. barge-in fires once per reply",
-     lambda: "barge_fired" in (ROOT / "jarvis/app.py").read_text(encoding="utf-8")),
+     lambda: "barge_fired" in (ROOT / "jalen/app.py").read_text(encoding="utf-8")),
     ("M4", "3. speaker ID - measured, not shipped",
-     lambda: not (ROOT / "jarvis/audio/voiceid.py").exists()),
+     lambda: not (ROOT / "jalen/audio/voiceid.py").exists()),
     ("M4", "4a. hand off to Claude Code",
      lambda: "start_coding_job" in tools.REGISTRY),
     ("M4", "4b. open folders in VS Code",
@@ -146,11 +146,11 @@ CHECKS = [
     ("M4", "4d. read the agent's outcome",
      lambda: "review_coding_job" in tools.REGISTRY),
     ("M4", "4e. notified when the agent finishes",
-     lambda: "_announce_finished_jobs" in (ROOT / "jarvis/app.py").read_text(encoding="utf-8")),
+     lambda: "_announce_finished_jobs" in (ROOT / "jalen/app.py").read_text(encoding="utf-8")),
     ("M4", "4f. judge % of expectations met",
-     lambda: "NOW JUDGE IT" in (ROOT / "jarvis/tools/devwork.py").read_text(encoding="utf-8")),
+     lambda: "NOW JUDGE IT" in (ROOT / "jalen/tools/devwork.py").read_text(encoding="utf-8")),
     ("M4", "4g. agent may actually WRITE files",
-     lambda: __import__("jarvis.tools.devwork", fromlist=["x"]).PERMISSION_MODE == "acceptEdits"),
+     lambda: __import__("jalen.tools.devwork", fromlist=["x"]).PERMISSION_MODE == "acceptEdits"),
     ("M4", "4h. authenticate to sites / fill credentials",
      lambda: all(t in tools.REGISTRY for t in ("fill_credential", "site_permission", "remember_site_decision"))),
     ("M4", "4i. ask him for a human step (API keys)",
@@ -166,7 +166,7 @@ CHECKS = [
     ("M5", "Jalen opens its own VS Code",
      lambda: "open_own_project" in tools.REGISTRY),
     ("M5", "self-control is read-only on its own code",
-     lambda: "write_text(" not in (ROOT / "jarvis/tools/selfcontrol.py").read_text(encoding="utf-8")),
+     lambda: "write_text(" not in (ROOT / "jalen/tools/selfcontrol.py").read_text(encoding="utf-8")),
 
     # ---- MESSAGE 7: navigate me ---------------------------------------
     ("M7", "one command shows what is left",
@@ -195,12 +195,12 @@ CHECKS = [
      lambda: (ROOT / "scripts/capabilities.py").exists()
              and '"can"' in (ROOT / "jalen.ps1").read_text(encoding="utf-8")),
     ("M8", "4. orb shows WORKING while working",
-     lambda: "_refresh_orb" in (ROOT / "jarvis/app.py").read_text(encoding="utf-8")),
+     lambda: "_refresh_orb" in (ROOT / "jalen/app.py").read_text(encoding="utf-8")),
     ("M8", "5. a turn is not held for three minutes",
      lambda: "_WAKE" in __import__("inspect").getsource(
-         __import__("jarvis.audio.tts", fromlist=["x"]).Speaker.stop)),
+         __import__("jalen.audio.tts", fromlist=["x"]).Speaker.stop)),
     ("M8", "6. every long answer reaches the screen",
-     lambda: "shown_count" in (ROOT / "jarvis/ui/orb.py").read_text(encoding="utf-8")),
+     lambda: "shown_count" in (ROOT / "jalen/ui/orb.py").read_text(encoding="utf-8")),
 
     # ---- invariants that must never break ------------------------------
     ("INV", "injection guard before pre-approval",
@@ -215,7 +215,7 @@ CHECKS = [
     # Now there is no camera code at all, which is a promise about the
     # binary — a strictly stronger thing to be able to assert.
     ("INV", "no camera code anywhere",
-     lambda: not (ROOT / "jarvis/ui/gestures.py").exists()
+     lambda: not (ROOT / "jalen/ui/gestures.py").exists()
              and CONFIG.get_path("ui.hand_gestures") is None
              and "mediapipe" not in (ROOT / "requirements.txt").read_text(encoding="utf-8")),
 ]

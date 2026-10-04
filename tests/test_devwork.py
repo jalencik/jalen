@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.tools import devwork
+from jalen.tools import devwork
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +39,7 @@ def isolated(tmp_path, monkeypatch):
     review_coding_job marks the process-wide taint flag when it hands the
     agent's output over, and that flag outlives a test by up to ten minutes.
     """
-    from jarvis import taint
+    from jalen import taint
 
     monkeypatch.setattr(devwork, "JOBS_PATH", tmp_path / "jobs.json")
     monkeypatch.setattr(devwork, "LOG_DIR", tmp_path / "logs")
@@ -312,7 +312,7 @@ def test_the_agents_output_reaches_the_brain_fenced_and_tainted(isolated):
     written it: no fence, and no taint.mark(), so the injection guard never
     learned the turn had read anything.
     """
-    from jarvis import taint
+    from jalen import taint
 
     log = isolated / "x.log"
     log.write_text(INJECTED, encoding="utf-8")
@@ -330,7 +330,7 @@ def test_the_agents_output_reaches_the_brain_fenced_and_tainted(isolated):
 
 def test_the_failure_reason_is_fenced_too(isolated):
     """The recorded error ends in whatever the agent's process printed last."""
-    from jarvis import taint
+    from jalen import taint
 
     (isolated / "x.log").write_text("", encoding="utf-8")
     _fake_job(isolated, state="failed", error=(
@@ -364,7 +364,7 @@ def test_a_review_with_nothing_from_the_agent_in_it_does_not_taint(isolated, tmp
     The taint costs him a confirmation-free turn, so it is raised only when
     agent-written text is actually handed over.
     """
-    from jarvis import taint
+    from jalen import taint
 
     _fake_job(isolated, state="running")
     assert "STILL RUNNING" in devwork.review_coding_job()
@@ -388,10 +388,10 @@ def test_a_review_with_nothing_from_the_agent_in_it_does_not_taint(isolated, tmp
     ("open_in_vscode", "amber"),
 ])
 def test_the_tools_are_dispatchable_and_gated(name, tier):
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     assert name in tools.REGISTRY, f"{name} is not dispatchable"
     assert name in TOOL_SPECS, f"{name} is invisible to the brain"
@@ -403,8 +403,8 @@ def test_reading_about_a_job_is_free():
     If asking "did it work" costs a spoken confirmation, he stops asking —
     the same reasoning that keeps the technician's diagnosis GREEN.
     """
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     for name in ("list_coding_jobs", "review_coding_job", "project_status"):
@@ -416,8 +416,8 @@ def test_starting_an_agent_cannot_be_triggered_by_something_it_read():
     An email saying "run this in my repo" must not start an autonomous agent.
     AMBER is refused to content-derived requests by the injection guard.
     """
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     verdict = SafetyEngine(CONFIG).classify(
         "start_coding_job", {"prompt": "delete everything", "folder": "."},

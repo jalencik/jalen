@@ -1,5 +1,5 @@
 """
-Tests for jarvis/ui/orb.py.
+Tests for jalen/ui/orb.py.
 
 The orb is a tkinter overlay — actual rendering can't be asserted from
 pytest, and that part was verified by running it (see the session notes /
@@ -18,8 +18,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.config import CONFIG, Cfg  # noqa: E402
-from jarvis.ui.orb import (  # noqa: E402
+from jalen.config import CONFIG, Cfg  # noqa: E402
+from jalen.ui.orb import (  # noqa: E402
     STATES,
     TRANSCRIPT_MAX_CHARS,
     TRANSCRIPT_TTL_S,
@@ -309,7 +309,7 @@ def test_click_through_toggles_the_transparent_bit_on_a_real_window():
 
 
 def test_click_through_is_a_noop_off_windows(monkeypatch):
-    import jarvis.ui.orb as orb_mod
+    import jalen.ui.orb as orb_mod
 
     monkeypatch.setattr(orb_mod, "IS_WINDOWS", False)
     assert set_click_through(12345, True) is False

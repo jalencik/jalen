@@ -26,10 +26,10 @@ def check_env(monkeypatch, tmp_path):
     # the session (test_check_leaves_a_live_telegram_session_alone.py), so
     # these tests must not see the real lock in data/: a gate run while
     # Jalen is up would otherwise change their answer.
-    from jarvis import runtime
+    from jalen import runtime
 
-    for name, leaf in (("RUNTIME_DIR", ""), ("LOCK_PATH", "jarvis.lock"),
-                       ("STOP_PATH", "jarvis.stop"), ("SIGNAL_PATH", "jalen.signal")):
+    for name, leaf in (("RUNTIME_DIR", ""), ("LOCK_PATH", "jalen.lock"),
+                       ("STOP_PATH", "jalen.stop"), ("SIGNAL_PATH", "jalen.signal")):
         monkeypatch.setattr(runtime, name, tmp_path / leaf if leaf else tmp_path)
     spec = importlib.util.spec_from_file_location("check_env_under_test", ROOT / "scripts" / "check_env.py")
     module = importlib.util.module_from_spec(spec)
@@ -40,15 +40,15 @@ def check_env(monkeypatch, tmp_path):
 
 @pytest.fixture
 def telegram_ok(monkeypatch):
-    from jarvis.config import CONFIG
-    from jarvis.tools import messaging
+    from jalen.config import CONFIG
+    from jalen.tools import messaging
 
     monkeypatch.setitem(CONFIG.setdefault("telegram", {}).setdefault("personal", {}), "enabled", True)
     monkeypatch.setattr(messaging, "telegram_status", lambda: "Personal Telegram signed in as Jalen (@x).")
 
 
 def test_a_google_login_that_refuses_to_refresh_is_a_problem(check_env, monkeypatch, capsys, telegram_ok):
-    from jarvis.integrations import google_auth
+    from jalen.integrations import google_auth
 
     def refuses(**_):
         raise google_auth.GoogleNotConnected("Google refused to refresh the login (RefreshError).")
@@ -63,7 +63,7 @@ def test_a_google_login_that_refuses_to_refresh_is_a_problem(check_env, monkeypa
 
 
 def test_no_google_login_at_all_is_a_problem(check_env, monkeypatch, capsys, telegram_ok):
-    from jarvis.integrations import google_auth
+    from jalen.integrations import google_auth
 
     monkeypatch.setattr(google_auth, "have_token", lambda: False)
     assert check_env._check_accounts() == 1
@@ -71,7 +71,7 @@ def test_no_google_login_at_all_is_a_problem(check_env, monkeypatch, capsys, tel
 
 
 def test_working_accounts_are_named_and_cost_nothing(check_env, monkeypatch, capsys, telegram_ok):
-    from jarvis.integrations import google_auth
+    from jalen.integrations import google_auth
 
     monkeypatch.setattr(google_auth, "have_token", lambda: True)
     monkeypatch.setattr(google_auth, "load_credentials", lambda **_: object())
@@ -83,9 +83,9 @@ def test_working_accounts_are_named_and_cost_nothing(check_env, monkeypatch, cap
 
 
 def test_a_signed_out_telegram_is_a_problem(check_env, monkeypatch, capsys):
-    from jarvis.config import CONFIG
-    from jarvis.integrations import google_auth
-    from jarvis.tools import messaging
+    from jalen.config import CONFIG
+    from jalen.integrations import google_auth
+    from jalen.tools import messaging
 
     monkeypatch.setattr(google_auth, "have_token", lambda: True)
     monkeypatch.setattr(google_auth, "load_credentials", lambda **_: object())

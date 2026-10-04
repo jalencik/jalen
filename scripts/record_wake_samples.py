@@ -75,7 +75,7 @@ PHRASES = ["Hey Jalen", "Hi Jalen", "OK Jalen"]
 # STRESS. The thing he reported: "many people give udareniya not to a in
 # jalen, but they give it to e".
 #
-# The ROUTER handles this at the text layer — jarvis/brain/router.py matches
+# The ROUTER handles this at the text layer — jalen/brain/router.py matches
 # the name by shape, and every stress spelling is covered there. The WAKE
 # WORD cannot be fixed that way: it is an acoustic model, it never sees text,
 # and "JA-len" and "ja-LEN" are genuinely different sounds. A model trained
@@ -280,8 +280,8 @@ def main() -> int:
 
     vad = None
     try:
-        from jarvis.audio.vad import VAD
-        from jarvis.config import CONFIG
+        from jalen.audio.vad import VAD
+        from jalen.config import CONFIG
 
         vad = VAD(CONFIG)
         vad.load()
@@ -335,7 +335,7 @@ def main() -> int:
     print("    .venv\\Scripts\\python.exe scripts\\train_wake_word.py train --augment 2")
     print("\nThe evaluation at the end prints false accepts and misses per")
     print("threshold. If misses on your voice are still high, lower")
-    print("wake.threshold in config/jarvis.yaml toward 0.5 before recording more.")
+    print("wake.threshold in config/jalen.yaml toward 0.5 before recording more.")
     return 0
 
 

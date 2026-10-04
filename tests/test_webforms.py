@@ -33,8 +33,8 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.tools import webagent as wa
-from jarvis.tools import webforms as wf
+from jalen.tools import webagent as wa
+from jalen.tools import webforms as wf
 
 playwright = pytest.importorskip("playwright.sync_api")
 
@@ -238,7 +238,7 @@ def test_errors_can_be_read_without_submitting_again(form):
 # THE SECRET PATH — every one of these is a refusal
 # ---------------------------------------------------------------------------
 def test_a_password_needs_an_explicit_approval_for_that_exact_host(form, tmp_path, monkeypatch):
-    from jarvis.tools import vault
+    from jalen.tools import vault
 
     monkeypatch.setattr(vault, "APPROVALS_PATH", tmp_path / "approvals.json")
     out = wf.fill_login_field()
@@ -252,7 +252,7 @@ def test_a_signup_form_with_two_password_boxes_is_refused(form, tmp_path, monkey
     Two password boxes means "password" and "confirm password", and guessing
     which is which is exactly the guess this module refuses to make.
     """
-    from jarvis.tools import vault
+    from jalen.tools import vault
 
     monkeypatch.setattr(vault, "APPROVALS_PATH", tmp_path / "approvals.json")
     form(_url(passwords=2))
@@ -275,7 +275,7 @@ def test_the_password_is_never_returned_to_the_caller():
     """
     import inspect
 
-    from jarvis import tools
+    from jalen import tools
 
     assert "get_secret" not in tools.REGISTRY
     source = inspect.getsource(wf.fill_login_field)
@@ -287,7 +287,7 @@ def test_the_password_is_never_returned_to_the_caller():
 
 
 def test_a_locked_vault_says_so_rather_than_failing_oddly(form, tmp_path, monkeypatch):
-    from jarvis.tools import vault
+    from jalen.tools import vault
 
     monkeypatch.setattr(vault, "APPROVALS_PATH", tmp_path / "approvals.json")
     vault.remember_site_decision(

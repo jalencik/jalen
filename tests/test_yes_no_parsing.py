@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.app import Jalen
+from jalen.app import Jalen
 
 parse = Jalen._parse_yes_no
 

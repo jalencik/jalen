@@ -1,6 +1,6 @@
 # Project context
 
-Anything you drop in this folder gets indexed, and Jarvis will know it well
+Anything you drop in this folder gets indexed, and Jalen will know it well
 enough to answer questions without you re-explaining.
 
 Worth adding, based on your spec (Q57):

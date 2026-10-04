@@ -30,10 +30,10 @@ import asyncio
 
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine
-from jarvis.tools import messaging, stickers
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine
+from jalen.tools import messaging, stickers
 from tests._telegram_fakes import (
     FakeAccount, FakeChannel, FakeSent, emoji_doc, set_info, sticker_doc,
 )
@@ -84,7 +84,7 @@ def wire(monkeypatch):
 
 @pytest.fixture(scope="module")
 def prompt() -> str:
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     async def noop(*a, **k):
         return True
@@ -260,7 +260,7 @@ def test_the_prompt_no_longer_says_he_asked_for_stickers_in_his_posts(prompt):
 
 
 def test_the_post_guide_sends_a_sticker_only_on_request():
-    from jarvis.tools.voice import community_post_guide
+    from jalen.tools.voice import community_post_guide
 
     guide = community_post_guide()
     section = guide[guide.index("Premium emoji and stickers"):
@@ -272,7 +272,7 @@ def test_the_post_guide_sends_a_sticker_only_on_request():
 
 
 def test_the_tool_specs_do_not_promise_a_sticker_after_every_post():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     guide_spec = _flat(TOOL_SPECS["community_post_guide"][0])
     assert "a sticker after it" not in guide_spec

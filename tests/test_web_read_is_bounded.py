@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import research
+from jalen.tools import research
 
 
 class _Resp:

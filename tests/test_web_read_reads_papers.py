@@ -19,8 +19,8 @@ import io
 
 import pytest
 
-from jarvis import taint
-from jarvis.tools import research
+from jalen import taint
+from jalen.tools import research
 
 from test_web_read_is_bounded import _Resp, net  # noqa: F401 - the fixture
 

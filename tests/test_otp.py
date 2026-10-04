@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from jarvis.tools import otp
+from jalen.tools import otp
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ def _install(monkeypatch, messages):
     object, so swapping sys.modules misses it and only patching the module's
     own attributes takes.
     """
-    import jarvis.tools.gmail as g
+    import jalen.tools.gmail as g
     service = _FakeService(messages)
     monkeypatch.setattr(g, "_enabled", lambda: None)
     monkeypatch.setattr(g, "gmail_service", lambda: service)

@@ -52,10 +52,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.app import Jalen  # noqa: E402
-from jarvis.brain import router  # noqa: E402
-from jarvis.brain.router import addressed_to_jalen  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
+from jalen.app import Jalen  # noqa: E402
+from jalen.brain import router  # noqa: E402
+from jalen.brain.router import addressed_to_jalen  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
 
 
 class _Gate:

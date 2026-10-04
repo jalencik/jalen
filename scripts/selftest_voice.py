@@ -29,12 +29,12 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis.audio.mic import Microphone  # noqa: E402
-from jarvis.audio.stt import Transcriber  # noqa: E402
-from jarvis.audio.tts import Speaker  # noqa: E402
-from jarvis.audio.vad import VAD, UtteranceCollector  # noqa: E402
-from jarvis.audio.wake import WakeWord  # noqa: E402
-from jarvis.config import CONFIG, SECRETS, Secrets  # noqa: E402
+from jalen.audio.mic import Microphone  # noqa: E402
+from jalen.audio.stt import Transcriber  # noqa: E402
+from jalen.audio.tts import Speaker  # noqa: E402
+from jalen.audio.vad import VAD, UtteranceCollector  # noqa: E402
+from jalen.audio.wake import WakeWord  # noqa: E402
+from jalen.config import CONFIG, SECRETS, Secrets  # noqa: E402
 
 SAMPLE_RATE = 16000
 FRAME = 512  # samples @16kHz = 32ms, matches config audio.frame_ms
@@ -363,7 +363,7 @@ def check_stt_fallback() -> dict:
 def check_barge_in_latency() -> dict:
     """Measured, not claimed: start a long utterance speaking, inject
     synthesised speech frames the way real barge-in detection sees them
-    (same VAD threshold check jarvis/app.py's run() loop uses), and time
+    (same VAD threshold check jalen/app.py's run() loop uses), and time
     from the start of injection to playback actually stopping."""
     speaker = Speaker(CONFIG)
     long_text = " ".join(

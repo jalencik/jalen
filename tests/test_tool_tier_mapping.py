@@ -6,7 +6,7 @@ tool exists and is callable but nobody actually decided its tier. This is
 the tier column of the handoff's "full tool inventory table" as a test
 rather than only prose.
 
-paranoid_first_week is on by default (config/jarvis.yaml), which promotes
+paranoid_first_week is on by default (config/jalen.yaml), which promotes
 AMBER to RED — real and correct behaviour, but it would make every AMBER
 assertion here look like a RED one unless turned off first.
 """
@@ -19,8 +19,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.safety import SafetyEngine, Tier  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.safety import SafetyEngine, Tier  # noqa: E402
 
 # Reflects the policy after real use: only DESTROYS-or-SENDS gates. Announcing
 # an action and waiting 2s is a cost paid on every single use, and it was being
@@ -70,7 +70,7 @@ def test_tool_resolves_to_its_documented_tier(engine, tool, expected_tier):
 
 
 def test_every_desktop_and_filesystem_tool_is_covered_by_this_table():
-    from jarvis.tools import desktop, filesystem
+    from jalen.tools import desktop, filesystem
 
     all_tools = set(desktop.REGISTRY) | set(filesystem.REGISTRY)
     assert all_tools == set(EXPECTED_TIERS), (

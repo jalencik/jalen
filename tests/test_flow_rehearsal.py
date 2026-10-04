@@ -17,7 +17,7 @@ WHAT THIS FILE DOES
 
     * the REAL Brain._make_hook() PreToolUse gate, with the real
       SafetyEngine and the real config/safety.yaml tiers
-    * the REAL jarvis.tools.REGISTRY dispatch
+    * the REAL jalen.tools.REGISTRY dispatch
     * only the OUTERMOST sink faked — the Gmail service object, the Telegram
       client, the clipboard, os.remove
 
@@ -42,11 +42,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis import tools  # noqa: E402
-from jarvis.audit import AuditLog  # noqa: E402
-from jarvis.brain.agent import Brain  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.safety import SafetyEngine  # noqa: E402
+from jalen import tools  # noqa: E402
+from jalen.audit import AuditLog  # noqa: E402
+from jalen.brain.agent import Brain  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.safety import SafetyEngine  # noqa: E402
 
 
 class Denied(Exception):
@@ -95,7 +95,7 @@ class Rehearsal:
         right. Neither proves that the gate is in the PATH, which is the
         property that a flow can be walked around if it is missing.
         """
-        payload = {"tool_name": f"mcp__jarvis__{tool}", "tool_input": args or {}}
+        payload = {"tool_name": f"mcp__jalen__{tool}", "tool_input": args or {}}
         if origin == "content":
             payload["_from_content"] = True
         result = asyncio.run(self.hook(payload, "id", None))
@@ -141,7 +141,7 @@ def gmail_stub(monkeypatch):
 def telegram_stub(monkeypatch):
     """Capture what would have been sent, instead of sending it."""
     sent: list[dict] = []
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     def fake_draft(to: str, text: str) -> str:
         sent.append({"to": to, "text": text, "kind": "draft"})
@@ -249,7 +249,7 @@ def test_the_credential_flow_never_exposes_the_secret(monkeypatch):
     the way — not in list_secrets, not in the permission check, and not in the
     report fill_credential gives back.
     """
-    from jarvis.tools import autofill, vault as vault_tools
+    from jalen.tools import autofill, vault as vault_tools
 
     secret_value = "correct-horse-battery-staple"
     typed: list[str] = []
@@ -339,7 +339,7 @@ def test_a_batch_of_posts_reports_every_failure(monkeypatch):
     # function, so the module it actually resolves against is messaging —
     # patching drafting would leave the real sender in place and the test
     # would pass while sending nothing anywhere.
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
     monkeypatch.setattr(messaging, "send_telegram_message", flaky_send, raising=False)
 
     r = Rehearsal()
@@ -413,7 +413,7 @@ def test_the_handoff_loads_the_clipboard_before_launching(monkeypatch):
     delivers whatever was on the clipboard before.
     """
     events: list[str] = []
-    from jarvis.tools import handoff
+    from jalen.tools import handoff
 
     monkeypatch.setattr(handoff, "_copy", lambda text: events.append("copy") or True,
                         raising=False)
@@ -476,7 +476,7 @@ def test_a_pending_question_holds_the_listening_window_open():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.run)
     assert "_awaiting_reply" in source, (
@@ -503,7 +503,7 @@ def test_asking_with_no_voice_session_says_so_rather_than_hanging():
     In text or Telegram mode there is no mic loop to answer. It must say that,
     not block for the full three-minute timeout.
     """
-    from jarvis.tools import interaction
+    from jalen.tools import interaction
 
     interaction.install(None)
     out = tools.call("ask_user", {"question": "which folder?"})

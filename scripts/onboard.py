@@ -24,10 +24,10 @@ It writes exactly two files:
     .env                credentials, appended to rather than overwritten
     config/user.yaml    this person's name, folders and channels
 
-It never writes config/jarvis.yaml. That file is the defaults AND the design
+It never writes config/jalen.yaml. That file is the defaults AND the design
 record — every value in it is commented with why it is that value — and
 overwriting it per-machine would destroy the most useful documentation this
-project has. user.yaml overlays it instead. See jarvis/config.py.
+project has. user.yaml overlays it instead. See jalen/config.py.
 
 WHAT IT DELIBERATELY DOES NOT DO
 --------------------------------
@@ -177,7 +177,7 @@ def step_identity() -> None:
     rule("2 of 8   Who you are")
     say("  This is what it calls you, and what you call it.\n")
 
-    from jarvis.config import CONFIG
+    from jalen.config import CONFIG
 
     current_user = CONFIG.get_path("identity.user_name", "")
     name = ask("Your name", "" if current_user == "O'ktam" else current_user)
@@ -186,7 +186,7 @@ def step_identity() -> None:
     wake = ask("Wake phrase", f"hey {assistant.lower()}")
 
     lines = [
-        "# Your settings. Overlays config/jarvis.yaml, which stays as the",
+        "# Your settings. Overlays config/jalen.yaml, which stays as the",
         "# defaults and the design record. Only the keys you set here change.",
         "# Written by scripts/onboard.py; safe to edit by hand.",
         "",
@@ -315,7 +315,7 @@ def step_telegram(env: dict) -> None:
 
 def step_vault() -> None:
     rule("7 of 8   Credentials vault (optional)")
-    from jarvis.tools import vault
+    from jalen.tools import vault
 
     if vault.VAULT_PATH.exists():
         say(f"{TICK}vault already created")

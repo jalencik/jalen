@@ -69,11 +69,11 @@ from pathlib import Path
 
 import pytest
 
-from jarvis import app as app_module
-from jarvis.app import ECHO_TAIL_S, Expectation, Jalen
-from jarvis.audio.tts import Speaker, clean_for_speech, split_sentences
-from jarvis.brain import router
-from jarvis.config import CONFIG
+from jalen import app as app_module
+from jalen.app import ECHO_TAIL_S, Expectation, Jalen
+from jalen.audio.tts import Speaker, clean_for_speech, split_sentences
+from jalen.brain import router
+from jalen.config import CONFIG
 
 from test_listening_does_not_obey_other_people_or_itself import (
     Heard,
@@ -579,7 +579,7 @@ def test_every_way_the_speaker_plays_a_sentence_is_recorded():
     The behaviour is driven above for say(), a stream and an urgent line; this
     pins that no `_play(` call was left outside the recording wrapper.
     """
-    source = (ROOT / "jarvis" / "audio" / "tts.py").read_text(encoding="utf-8")
+    source = (ROOT / "jalen" / "audio" / "tts.py").read_text(encoding="utf-8")
     plays = [m.start() for m in re.finditer(r"\._play\(", source)]
     assert len(plays) == 1, "every sentence must go through Speaker._play_sentence"
     assert "def _play_sentence" in source
@@ -965,13 +965,13 @@ def test_the_polite_regex_has_the_two_forms_the_comments_say_it_has():
 
 
 def test_the_config_comment_says_what_the_replay_says_about_the_polite_door():
-    config = (ROOT / "config" / "jarvis.yaml").read_text(encoding="utf-8")
+    config = (ROOT / "config" / "jalen.yaml").read_text(encoding="utf-8")
     assert "12 of the 78 sentences the gate" not in config
     assert "11 of them" in config and "barge-in" in config
 
 
 def test_the_comments_no_longer_say_the_answer_path_is_not_fixed():
-    for path in ("jarvis/app.py", "scripts/measure_address_gate.py"):
+    for path in ("jalen/app.py", "scripts/measure_address_gate.py"):
         text = (ROOT / path).read_text(encoding="utf-8")
         assert "NOT FIXED, found while measuring" not in text, path
         assert "answer path (NOT FIXED)" not in text, path

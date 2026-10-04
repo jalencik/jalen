@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.tools import webagent as wa
+from jalen.tools import webagent as wa
 
 playwright = pytest.importorskip("playwright.sync_api")
 

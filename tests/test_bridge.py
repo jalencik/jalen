@@ -17,8 +17,8 @@ import time
 
 import pytest
 
-from jarvis.bridge import framing, protocol
-from jarvis.bridge.server import BridgeServer, BridgeError
+from jalen.bridge import framing, protocol
+from jalen.bridge.server import BridgeServer, BridgeError
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +277,7 @@ class TestNativeHostConnectsForReal:
     """
 
     def test_the_host_connects_and_authenticates(self):
-        from jarvis.bridge import native_host, framing, protocol
+        from jalen.bridge import native_host, framing, protocol
         # The real bridge file here ON PURPOSE: native_host reads that exact
         # path, so this proves the two halves meet. Restored after.
         srv = BridgeServer()
@@ -310,7 +310,7 @@ class TestNativeHostConnectsForReal:
             srv.stop()
 
     def test_the_host_gives_up_cleanly_when_the_app_is_absent(self, monkeypatch, tmp_path):
-        from jarvis.bridge import native_host
+        from jalen.bridge import native_host
         # Point it at a bridge.json that does not exist.
         monkeypatch.setattr(native_host, "BRIDGE_FILE", tmp_path / "absent.json")
         assert native_host._connect_to_app() is None

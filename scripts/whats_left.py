@@ -74,7 +74,7 @@ def main() -> int:
         except (AttributeError, ValueError):
             pass
 
-    from jarvis.tools import vault
+    from jalen.tools import vault
 
     line()
     line("  What still needs you")

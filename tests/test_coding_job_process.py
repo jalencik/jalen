@@ -58,7 +58,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis.tools import coding, devwork
+from jalen.tools import coding, devwork
 
 PAYLOAD = (
     "Objective \u2014 ship it. \"Quoted\", \u00fcn\u00efc\u00f6d\u00e9,\n"
@@ -245,7 +245,7 @@ def table(tmp_path, monkeypatch):
     monkeypatch.setattr(devwork, "_CANCELLED", set(), raising=False)
     monkeypatch.setattr(devwork, "_STOPS", {}, raising=False)
     # The brief-quality gate is tested elsewhere; here every brief passes.
-    from jarvis.tools import handoff
+    from jalen.tools import handoff
     monkeypatch.setattr(handoff, "brief_or_problem", lambda brief, dest: None)
     yield t
     # Nothing a test started may outlive it.
@@ -263,7 +263,7 @@ def project(tmp_path):
 
 @pytest.fixture
 def no_conversation_tasks(monkeypatch):
-    from jarvis import conversation
+    from jalen import conversation
     monkeypatch.setattr(conversation, "_tasks", {})
     return conversation
 
@@ -481,7 +481,7 @@ def test_a_timeout_whose_kill_fails_stays_stoppable(
     the handle and recorded "timeout" while claude.exe went on editing the
     repository - untracked, and unreachable by cancel_task.
     """
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     a_shim_and_the_bundled_exe(monkeypatch, tmp_path)
     table.exit_code = None
@@ -549,7 +549,7 @@ def test_exit_zero_is_still_finished(table, project, monkeypatch, tmp_path):
 @WINDOWS_ONLY
 def test_cancelling_a_running_coding_job_really_stops_it(
         table, project, monkeypatch, tmp_path, no_conversation_tasks):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     a_shim_and_the_bundled_exe(monkeypatch, tmp_path)
     table.exit_code = None
@@ -578,7 +578,7 @@ def test_cancelling_a_turn_does_not_claim_it_stopped(table, no_conversation_task
     CANCELLED changes nothing that reads it, so the reply must not say
     "Stopped".
     """
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     no_conversation_tasks.start_task("sorting your machine learning emails",
                                      no_conversation_tasks.EXECUTING)
@@ -595,7 +595,7 @@ def test_a_coding_job_from_before_a_restart_is_not_claimed_stopped(
     recorded as running that this process never started cannot be stopped
     from here, and the reply has to say so.
     """
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     devwork._save_jobs({"old1": {
         "id": "old1", "prompt": "x", "folder": str(tmp_path / "legacy"),
@@ -609,7 +609,7 @@ def test_a_coding_job_from_before_a_restart_is_not_claimed_stopped(
 
 
 def test_nothing_running_is_said_plainly(table, no_conversation_tasks):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     reply = tasks.cancel_task("")
     assert "not working on anything" in reply.lower()
@@ -619,7 +619,7 @@ def test_nothing_running_is_said_plainly(table, no_conversation_tasks):
 @WINDOWS_ONLY
 def test_two_live_coding_jobs_are_not_guessed_between(
         table, tmp_path, no_conversation_tasks):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     alpha = hold(table, tmp_path, "aaaa1111", "alpha")
     beta = hold(table, tmp_path, "bbbb2222", "beta")
@@ -639,7 +639,7 @@ def test_two_live_coding_jobs_are_not_guessed_between(
 def test_a_folder_named_like_a_job_word_does_not_decide_between_two_jobs(
         table, tmp_path, no_conversation_tasks):
     """'stop the coding job' must not pick the job whose folder is 'coding'."""
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     coding_folder = hold(table, tmp_path, "aaaa1111", "coding")
     beta = hold(table, tmp_path, "bbbb2222", "beta")
@@ -673,7 +673,7 @@ def test_an_ordinary_sentence_never_ends_a_job(
     with one job live, "cancel the job application email" ended it. Killing
     loses up to an hour of an agent's work and cannot be undone.
     """
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     proc = hold(table, tmp_path, "c0ffee11", folder)
     reply = tasks.cancel_task(said)
@@ -690,7 +690,7 @@ VAGUE = ["stop the job", "stop the agent", "stop claude code", "cancel the jobs"
 @pytest.mark.parametrize("said", VAGUE)
 def test_a_vague_job_word_asks_rather_than_kills(
         table, tmp_path, no_conversation_tasks, said):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     proc = hold(table, tmp_path, "c0ffee11", "proj")
     reply = tasks.cancel_task(said)
@@ -705,7 +705,7 @@ def test_a_vague_job_word_asks_rather_than_kills(
                                   "do not cancel the background job"])
 def test_being_told_not_to_stop_it_does_not_stop_it(
         table, tmp_path, no_conversation_tasks, said):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     proc = hold(table, tmp_path, "c0ffee11", "proj")
     reply = tasks.cancel_task(said)
@@ -727,7 +727,7 @@ EXPLICIT = [
 @WINDOWS_ONLY
 @pytest.mark.parametrize("folder,said", EXPLICIT)
 def test_saying_which_job_ends_it(table, tmp_path, no_conversation_tasks, folder, said):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     proc = hold(table, tmp_path, "c0ffee11", folder)
     reply = tasks.cancel_task(said)
@@ -738,7 +738,7 @@ def test_saying_which_job_ends_it(table, tmp_path, no_conversation_tasks, folder
 @WINDOWS_ONLY
 def test_a_turn_named_with_a_job_word_is_the_one_marked(
         table, tmp_path, no_conversation_tasks):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     proc = hold(table, tmp_path, "c0ffee11", "proj")
     conv = no_conversation_tasks
@@ -922,7 +922,7 @@ def test_a_job_that_finishes_on_its_own_as_he_says_stop_is_not_claimed_stopped(
 @WINDOWS_ONLY
 def test_a_background_command_is_named_as_itself_when_asking_which(
         table, tmp_path, no_conversation_tasks):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     hold(table, tmp_path, "aaaa1111", "alpha")
     hold(table, tmp_path, "bbbb2222", "jarvis", kind="command", prompt="my own test suite")
@@ -935,7 +935,7 @@ def test_a_background_command_is_named_as_itself_when_asking_which(
 @WINDOWS_ONLY
 def test_the_hint_for_a_running_command_does_not_call_it_a_coding_job(
         table, tmp_path, no_conversation_tasks):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     proc = hold(table, tmp_path, "bbbb2222", "jarvis", kind="command",
                 prompt="my own test suite")
@@ -955,7 +955,7 @@ def test_stopping_a_command_does_not_say_claude_code(table, tmp_path):
 
 def test_the_announcer_names_a_command_as_itself_and_says_what_is_still_alive(
         monkeypatch):
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     said: list[str] = []
     app = Jalen.__new__(Jalen)

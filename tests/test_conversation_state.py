@@ -14,7 +14,7 @@ running it.
 
 WHY THERE IS NO GRAPH DATABASE HERE
 -----------------------------------
-He offered Obsidian and Graphiti. `jarvis/tools/memory.py` already holds real
+He offered Obsidian and Graphiti. `jalen/tools/memory.py` already holds real
 semantic long-term memory — local, embedded, with a filter that refuses
 credential-shaped text before it reaches the database. That layer works and
 was never the gap.
@@ -29,8 +29,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis import conversation as c
-from jarvis import plan as planning
+from jalen import conversation as c
+from jalen import plan as planning
 
 
 @pytest.fixture(autouse=True)
@@ -81,7 +81,7 @@ def test_every_forbidden_name_is_a_real_tool():
     bug happens. This caught one: the first version said
     "draft_telegram_post", which exists, and is not what ran.
     """
-    from jarvis import tools
+    from jalen import tools
 
     named = {t for names in planning.ACTIONS.values() for t in names}
     assert not named - set(tools.REGISTRY), (
@@ -262,7 +262,7 @@ def test_references_are_expanded_before_anything_routes():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.process)
     expand = source.index("expand_references")
@@ -273,7 +273,7 @@ def test_references_are_expanded_before_anything_routes():
 def test_the_plan_is_checked_after_the_turn():
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     assert "_check_the_plan" in inspect.getsource(Jalen.run)
 
@@ -286,7 +286,7 @@ def test_a_mismatch_is_reported_and_not_silently_re_run():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen._check_the_plan)
     assert "self.say(" in source

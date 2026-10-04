@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.brain.router import IntentRouter
-from jarvis.config import CONFIG
+from jalen.brain.router import IntentRouter
+from jalen.config import CONFIG
 
 
 @pytest.fixture(scope="module")
@@ -130,7 +130,7 @@ def test_the_old_name_is_understood_but_never_said(router):
     ]
     assert not stale, f"a reply still says the old name out loud: {stale}"
 
-    from jarvis.config import CONFIG as cfg
+    from jalen.config import CONFIG as cfg
 
     assert "jarvis" not in str(cfg.get_path("identity.name", "")).lower()
     assert "jarvis" not in str(cfg.get_path("persona.style", "")).lower()
@@ -321,7 +321,7 @@ def test_the_wider_shape_did_not_swallow_a_real_person(word):
     """
     import re
 
-    from jarvis.brain.router import _NAME
+    from jalen.brain.router import _NAME
 
     assert not re.match("^(?:" + _NAME + ")$", word, re.I), (
         f"{word!r} is now being treated as the assistant's name"

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 
 # ===========================================================================
@@ -88,7 +88,7 @@ def test_every_result_is_found_not_just_the_first(monkeypatch):
     snippet landed in different pieces and the parser returned ONE result
     out of ten while looking like it had worked.
     """
-    from jarvis.tools import research
+    from jalen.tools import research
 
     monkeypatch.setattr(research, "_get", lambda url: (200, _DDG_PAGE))
     out = research.web_search("anything", max_results=5)
@@ -104,7 +104,7 @@ def test_each_snippet_stays_with_its_own_title(monkeypatch):
     lacks a snippet — and the third result here has none, which is exactly
     what ads and "did you mean" rows look like.
     """
-    from jarvis.tools import research
+    from jalen.tools import research
 
     monkeypatch.setattr(research, "_get", lambda url: (200, _DDG_PAGE))
     out = research.web_search("anything", max_results=5)
@@ -119,7 +119,7 @@ def test_each_snippet_stays_with_its_own_title(monkeypatch):
 def test_the_real_url_is_returned_not_the_redirect(monkeypatch):
     """A duckduckgo.com/l/?uddg= wrapper is not something web_read can open
     or the model can cite."""
-    from jarvis.tools import research
+    from jalen.tools import research
 
     monkeypatch.setattr(research, "_get", lambda url: (200, _DDG_PAGE))
     out = research.web_search("anything")
@@ -134,7 +134,7 @@ def test_a_changed_layout_says_so_instead_of_inventing(monkeypatch):
     is "I couldn't read the results" — not silence, and never a confident
     summary of nothing.
     """
-    from jarvis.tools import research
+    from jalen.tools import research
 
     monkeypatch.setattr(research, "_get", lambda url: (200, "<html>nothing here</html>"))
     out = research.web_search("anything")
@@ -142,7 +142,7 @@ def test_a_changed_layout_says_so_instead_of_inventing(monkeypatch):
 
 
 def test_an_unreachable_search_engine_is_reported(monkeypatch):
-    from jarvis.tools import research
+    from jalen.tools import research
 
     def _boom(url):
         raise ConnectionError("no network")
@@ -156,7 +156,7 @@ def test_an_unreachable_search_engine_is_reported(monkeypatch):
 # ===========================================================================
 
 def test_a_page_is_fenced_and_a_hostile_one_is_flagged(monkeypatch):
-    from jarvis.tools import research
+    from jalen.tools import research
 
     hostile = (
         "<html><title>Recipes</title><body>"
@@ -172,7 +172,7 @@ def test_a_page_is_fenced_and_a_hostile_one_is_flagged(monkeypatch):
 
 
 def test_scripts_and_styles_never_reach_the_model(monkeypatch):
-    from jarvis.tools import research
+    from jalen.tools import research
 
     page = (
         "<html><title>T</title><body><style>p{color:red}</style>"
@@ -192,7 +192,7 @@ def test_a_protected_domain_is_refused_before_any_request(monkeypatch):
     That must be checked BEFORE the fetch, or the request has already
     happened by the time anything objects.
     """
-    from jarvis.tools import research
+    from jalen.tools import research
 
     def _should_not_run(url):
         raise AssertionError("fetched a protected domain")
@@ -203,7 +203,7 @@ def test_a_protected_domain_is_refused_before_any_request(monkeypatch):
 
 
 def test_a_bare_domain_gets_a_scheme(monkeypatch):
-    from jarvis.tools import research
+    from jalen.tools import research
 
     seen = {}
 
@@ -223,7 +223,7 @@ def test_a_bare_domain_gets_a_scheme(monkeypatch):
 # ===========================================================================
 
 def test_the_voice_guide_is_found_and_carries_instructions(tmp_path, monkeypatch):
-    from jarvis.tools import voice
+    from jalen.tools import voice
 
     skill = tmp_path / "SKILL.md"
     skill.write_text("He writes plainly and repeats himself.", encoding="utf-8")
@@ -240,9 +240,9 @@ def test_a_missing_voice_skill_says_so_rather_than_guessing(tmp_path, monkeypatc
     Silently writing in the model's own register and calling it his voice is
     the failure worth preventing — an email goes out under his name.
     """
-    from jarvis.tools import voice
+    from jalen.tools import voice
 
-    from jarvis.config import CONFIG
+    from jalen.config import CONFIG
 
     monkeypatch.setattr(voice, "_SEARCH_PATHS", [tmp_path / "absent.md"])
     monkeypatch.delenv("JARVIS_VOICE_SKILL", raising=False)
@@ -264,7 +264,7 @@ def test_a_missing_voice_skill_says_so_rather_than_guessing(tmp_path, monkeypatc
 
 def test_the_guide_is_read_once_not_per_draft(tmp_path, monkeypatch):
     """35 KB off disk for every draft in a conversation is pure waste."""
-    from jarvis.tools import voice
+    from jalen.tools import voice
 
     skill = tmp_path / "SKILL.md"
     skill.write_text("original", encoding="utf-8")
@@ -281,7 +281,7 @@ def test_the_guide_is_read_once_not_per_draft(tmp_path, monkeypatch):
 # ===========================================================================
 
 def test_an_empty_prompt_asks_rather_than_launching(monkeypatch):
-    from jarvis.tools import coding
+    from jalen.tools import coding
 
     monkeypatch.setattr(
         coding.subprocess, "Popen",
@@ -291,7 +291,7 @@ def test_an_empty_prompt_asks_rather_than_launching(monkeypatch):
 
 
 def test_a_missing_cli_is_named_not_swallowed(monkeypatch):
-    from jarvis.tools import coding
+    from jalen.tools import coding
 
     monkeypatch.setattr(coding, "_claude_cli", lambda: None)
     out = coding.ask_claude_code("fix the tests")
@@ -300,7 +300,7 @@ def test_a_missing_cli_is_named_not_swallowed(monkeypatch):
 
 
 def _capture_launch(monkeypatch, cli):
-    from jarvis.tools import coding
+    from jalen.tools import coding
 
     captured = {}
 
@@ -371,7 +371,7 @@ def test_even_the_shim_route_is_argv_and_never_a_shell_string(monkeypatch):
 
 
 def test_an_agent_becomes_a_slash_command(monkeypatch):
-    from jarvis.tools import coding
+    from jalen.tools import coding
 
     captured = {}
     monkeypatch.setattr(coding, "_claude_cli", lambda: "claude")
@@ -390,7 +390,7 @@ def test_an_agent_becomes_a_slash_command(monkeypatch):
 
 
 def test_an_unfindable_folder_stops_before_launching(monkeypatch):
-    from jarvis.tools import coding
+    from jalen.tools import coding
 
     monkeypatch.setattr(coding, "_claude_cli", lambda: "claude")
     monkeypatch.setattr(coding, "find_files", lambda q, **k: [])
@@ -407,7 +407,7 @@ def test_two_folders_with_the_same_name_are_not_guessed_between(monkeypatch, tmp
     Starting an autonomous coding agent in the wrong repository is far more
     expensive than one clarifying question.
     """
-    from jarvis.tools import coding
+    from jalen.tools import coding
 
     a = tmp_path / "one" / "ecopulse"
     b = tmp_path / "two" / "ecopulse"
@@ -431,7 +431,7 @@ def test_a_relative_folder_name_becomes_an_absolute_path(tmp_path, monkeypatch):
     autostart entry, is not the project folder. The agent would start in the
     wrong place while reporting the right one.
     """
-    from jarvis.tools import coding
+    from jalen.tools import coding
 
     (tmp_path / "proj").mkdir()
     monkeypatch.chdir(tmp_path)

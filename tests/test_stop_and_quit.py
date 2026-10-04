@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.app import Jalen
-from jarvis.brain.router import IntentRouter
-from jarvis.config import CONFIG
+from jalen.app import Jalen
+from jalen.brain.router import IntentRouter
+from jalen.config import CONFIG
 
 KILL_PHRASES = set(CONFIG.get_path("safety.kill_phrases"))
 
@@ -126,7 +126,7 @@ def test_the_exemption_is_read_from_config_not_hardcoded():
     for literal in ('"stop"', "'stop'", '"abort"', '"cancel"'):
         assert literal not in body, (
             "kill phrases are hardcoded in should_act_on - they will drift "
-            "from config/jarvis.yaml"
+            "from config/jalen.yaml"
         )
 
 

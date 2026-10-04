@@ -1,7 +1,7 @@
 """
 Do premium emoji, stickers and voice messages work on HIS real Telegram?
 
-Everything built for them (jarvis/tools/stickers.py, jarvis/tools/messaging.py)
+Everything built for them (jalen/tools/stickers.py, jalen/tools/messaging.py)
 was tested against fakes made from Telethon's own types. His real account was
 never touched, and the limits in stickers.py are labelled [NOT MEASURED] for
 that reason. This script is the one real run, done by HIM, from the main Jalen
@@ -20,7 +20,7 @@ folder, with Jalen stopped:
 
 THE RULES IT KEEPS
 * One Telegram client at a time. It takes the same single-instance lock as
-  run.py (jarvis/runtime.py), so it refuses to start while Jalen runs, and
+  run.py (jalen/runtime.py), so it refuses to start while Jalen runs, and
   Jalen refuses to start while it runs. Two clients on one session file can
   get the session thrown out. The lock does NOT cover `jalen.ps1 check`, and
   Jalen's stop/restart (hotkey, run.py --stop, jalen.ps1 restart) ends whatever
@@ -141,7 +141,7 @@ def _in_a_worktree() -> bool:
 
 
 def _check_stop() -> None:
-    from jarvis import runtime
+    from jalen import runtime
 
     if runtime.stop_requested():
         raise _StopAsked
@@ -195,7 +195,7 @@ class Report:
 # --------------------------------------------------------------------- steps
 def check_account(report: Report) -> bool:
     """Signed in, and is the account Premium? Neither his name nor his handle is printed."""
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     started = time.perf_counter()
     status = messaging.telegram_status()
@@ -219,7 +219,7 @@ def look_up_emoji(report: Report) -> str:
     Step 1. Returns a premium-emoji tag to post with, or "". The tag is never
     printed: it carries the emoji's id.
     """
-    from jarvis.tools import stickers
+    from jalen.tools import stickers
 
     tag = ""
     found = {"character": 0, "name": 0}
@@ -273,7 +273,7 @@ def look_up_emoji(report: Report) -> str:
 
 def list_packs(report: Report) -> None:
     """Step 2. His emoji sets and sticker packs: titles and counts only."""
-    from jarvis.tools import stickers
+    from jalen.tools import stickers
 
     _check_stop()
     started = time.perf_counter()
@@ -318,7 +318,7 @@ def _only_saved_messages(to: str) -> None:
     changed, the name would be searched among his chats, and a group someone
     titled "Saved Messages" would be a real destination. That is refused here.
     """
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     if to != DESTINATION:
         raise _WrongChat(f"refusing to send to {to!r}: this script sends to {DESTINATION} only")
@@ -354,7 +354,7 @@ def _not_sent(report: Report, step: str, out: str, took: float) -> None:
 
 def send_test_post(report: Report, tag: str, ask) -> None:
     """Step 3. One post with a premium emoji, to Saved Messages, read back."""
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     step = "test post with a premium emoji"
     if not tag:
@@ -394,7 +394,7 @@ def send_test_post(report: Report, tag: str, ask) -> None:
 
 def send_test_voice(report: Report, ask) -> None:
     """Step 4. One short voice message, to Saved Messages, read back."""
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     step = "test voice message"
     if not ask(f"Send ONE short voice message to your {DESTINATION} now?"):
@@ -463,9 +463,9 @@ def main(argv=None, ask=_ask) -> int:
     code = 0
     held = False
     try:
-        from jarvis import runtime
-        from jarvis.integrations import telegram_user
-        from jarvis.tools import messaging
+        from jalen import runtime
+        from jalen.integrations import telegram_user
+        from jalen.tools import messaging
 
         already = runtime.acquire(LOCK_MODE)
         if already is not None:

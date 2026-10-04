@@ -12,7 +12,7 @@ The single rule: **nobody but the Integrator writes to `main`, and nobody edits 
 
 Two modes, depending on what you can reach:
 
-- **Mode 1 — same machine, repo access (expected).** You can run commands in `C:\Users\user\Desktop\Jarvis-setup\jarvis`. Follow section 8 exactly.
+- **Mode 1 — same machine, repo access (expected).** You can run commands in `C:\path\to\jalen`. Follow section 8 exactly.
 - **Mode 2 — no repo access** (for example a chat-only session). You cannot run anything. Then your job is design, review and writing **new files only** (never edit existing ones): deliver each as a complete file in your reply, with its intended path, so the owner can drop it in. Do not guess at the contents of existing files; ask for them.
 
 ---
@@ -32,7 +32,7 @@ Two modes, depending on what you can reach:
 
 ## 2. The product
 
-**Jalen** (the Python package is still called `jarvis`; the folder is `Jarvis-setup\jarvis`; he renamed it from "Jarvis" to "Jalen") is a **voice assistant that drives one Windows laptop**. Python (venv is 3.13.x; the project says 3.12+), single process, about 350 MB resident.
+**Jalen** (the Python package is `jalen`; shared settings are in `config/jalen.yaml`) is a **voice assistant that drives one Windows laptop**. Python (venv is 3.13.x; the project says 3.12+), single process, about 350 MB resident.
 
 The constraint that decided the architecture: the laptop has **8 GB RAM with about 1 GB free**, so there is no local LLM and no PyTorch. Heavy thinking happens on someone else's computer.
 
@@ -41,9 +41,9 @@ How it hears and speaks:
 - Modes: `start` (voice), `text` (typed, same brain and same safety rules), a Telegram **bot** mode (`--telegram`, restricted to the owner's user id).
 
 How it thinks:
-- Most spoken commands never reach a model: `jarvis/brain/router.py` has ~140 regex rules, **first match wins**, free and instant ("scroll down", "open spotify", "what time is it").
+- Most spoken commands never reach a model: `jalen/brain/router.py` has ~140 regex rules, **first match wins**, free and instant ("scroll down", "open spotify", "what time is it").
 - Everything else goes to **one brain: Claude**, through `ClaudeSDKClient`, which spawns a bundled Claude Code CLI child (`claude.exe` inside the `claude-agent-sdk` wheel). There is **no second brain**: Gemini and OpenRouter ("Hermes") are used only when the owner asks Jalen to *delegate* something. `brain.provider` and `use_gemini_for_chitchat` in the YAML are **not read by any code** (labelled `[NOT READ]`).
-- The model calls Jalen's tools (about 155, in `jarvis/tools/*.py`, described in `TOOL_SPECS` in `jarvis/brain/tools.py`). Every tool call passes through a **PreToolUse hook** that classifies it with `SafetyEngine` (green / amber / red / black) before anything runs.
+- The model calls Jalen's tools (about 155, in `jalen/tools/*.py`, described in `TOOL_SPECS` in `jalen/brain/tools.py`). Every tool call passes through a **PreToolUse hook** that classifies it with `SafetyEngine` (green / amber / red / black) before anything runs.
 
 What it can do today (high level): time, battery, system status, disk/cleanup reports, open/close apps and windows, type and click into windows, files (read/list/search/copy/move/rename, content search), documents (PDF, docx, pptx, xlsx), Gmail and Calendar (read, search, draft), Telegram (read, search, draft, send), community posts in his format, a Chrome-based "browser worker" (Jalen's own Chrome profile; ChatGPT/Gemini hand-off; forms), a Chrome extension path (his real tab), coding-agent jobs (Claude Code in the background), a credentials vault (never exposed to the model), web research (`web_search`, `web_read` incl. PDFs).
 
@@ -55,7 +55,7 @@ What it can do today (high level): time, battery, system status, disk/cleanup re
 - **RAM: 7.5 GB total, about 0.5-1.7 GB free** depending on what is running. Several parallel agents each running the full test suite is about the limit. If free RAM drops under ~500 MB, stop launching things.
 - **Disk: C: has about 8 GB free of 157 GB (95% full); D: has about 280-300 GB free.** Do not install big things on C:. Install with `pip install --target <folder on D:>` or a scratch folder if you must add a package. Do **not** add dependencies to the project venv or `requirements.txt` without telling the Integrator.
 - 12 logical CPUs.
-- The repo: `C:\Users\user\Desktop\Jarvis-setup\jarvis`. The interpreter is **always** `C:\Users\user\Desktop\Jarvis-setup\jarvis\.venv\Scripts\python.exe` (bare `python` is a different install with none of the packages). Worktrees (`.claude\worktrees\...`) have **no `.venv`, no `.env`, no `data\`, no `models\`**: always call the main venv by absolute path.
+- The repo: `C:\path\to\jalen`. The interpreter is **always** `C:\path\to\jalen\.venv\Scripts\python.exe` (bare `python` is a different install with none of the packages). Worktrees (`.claude\worktrees\...`) have **no `.venv`, no `.env`, no `data\`, no `models\`**: always call the main venv by absolute path.
 - Git: local only. **No remote, no CI, no linter, no type checker.** Line endings: files are CRLF in the working tree on this machine and git warns about LF→CRLF on every add; that is noise.
 - `.env` (gitignored) holds credentials. Never read it into output. `ANTHROPIC_API_KEY` must stay **empty** (a value there silently switches the brain to per-token billing).
 
@@ -64,7 +64,7 @@ What it can do today (high level): time, battery, system status, disk/cleanup re
 ## 4. Running and testing (exact commands)
 
 ```powershell
-cd C:\Users\user\Desktop\Jarvis-setup\jarvis
+cd C:\path\to\jalen
 .\jalen.ps1 check      # environment + credentials + accounts diagnostic. Run first. Exit 0 = all good.
 .\jalen.ps1 start      # voice
 .\jalen.ps1 text       # typed, same brain, same safety rules
@@ -82,7 +82,7 @@ cd C:\Users\user\Desktop\Jarvis-setup\jarvis
 - Always `python -m pytest`, never the bare `pytest.exe` (about three quarters of the test files rely on `-m` putting the CWD on the path). `pytest-timeout` is not installed; do not pass `--timeout`.
 - **Current count at `e34e790`: 5,226 tests collected; 5,225 pass, 1 fails.** The one failure is `test_overhaul_fixes.py::test_real_typos_and_abbreviations_still_resolve[capcut-True]`: it expects CapCut to be installed and it is not. It is not a code problem. Every other failure is real.
 - A full run takes **5-8 minutes** and uses a few hundred MB. Run it **once** per batch of changes, in the background if your tool allows, and poll the output file.
-- Three voice tests call live Groq / edge-tts and are intermittent (`test_stt_roundtrips_through_groq`, `test_barge_in_latency_is_measured`, `test_failure_paths_keep_jarvis_alive`). The trap: the fallback *working* trips the assertion. Re-run two or three times **in isolation** before touching `stt.py`.
+- Three voice tests call live Groq / edge-tts and are intermittent (`test_stt_roundtrips_through_groq`, `test_barge_in_latency_is_measured`, `test_failure_paths_keep_jalen_alive`). The trap: the fallback *working* trips the assertion. Re-run two or three times **in isolation** before touching `stt.py`.
 - **In a worktree** these fail identically with and without your change, because the files they need are gitignored: `test_attachments::test_the_refusal_is_not_overridable` (needs `.env`), `test_voice_pipeline` ×5 and `test_wake_both_names` ×2 (need `models/`), `test_native_host_process` ×2 (needs `.venv`), `test_conversation_requests` M1 ×2 (needs `data/`), plus the CapCut one. That is **13 expected failures in a worktree** and 1 in main. Confirm any *other* failure is yours.
 - Tests that read the real audit log skip in a worktree; copy `data\audit.jsonl` (read-only copy) somewhere and set `JALEN_AUDIT_LOG` to run them.
 - **Tests must never write the real `data\` directory.** `tests/conftest.py` redirects audit, memory, router-miss log, web chats, browser profile and more. After a full run, nothing under `data\` should have changed (the Integrator checks this with a before/after file listing). If your tests write there, that is a bug.
@@ -104,14 +104,14 @@ No credential lives in the repo. State on 2026-10-01:
 | **Gemini / OpenRouter** | Keys exist in `.env` for delegation only; OpenRouter had 0 credit when last checked. |
 | **Telegram bot, GitHub, Notion** | Tokens exist in `.env`. |
 
-**Two browsers exist, and the owner has now decided between them** (see section 10): his **everyday Chrome** (his real profile, via the Jalen **Chrome extension** in `browser_extension\` talking to the app through a native-messaging bridge) versus **Jalen's own Chrome** (separate profile at `data\browser_profile`, driven over the DevTools protocol by `jarvis/tools/webagent.py`). **Decision: everyday Chrome by default.** Only one process may own `data\browser_profile` at a time — launching a second Chrome on that profile kills the first.
+**Two browsers exist, and the owner has now decided between them** (see section 10): his **everyday Chrome** (his real profile, via the Jalen **Chrome extension** in `browser_extension\` talking to the app through a native-messaging bridge) versus **Jalen's own Chrome** (separate profile at `data\browser_profile`, driven over the DevTools protocol by `jalen/tools/webagent.py`). **Decision: everyday Chrome by default.** Only one process may own `data\browser_profile` at a time — launching a second Chrome on that profile kills the first.
 
 ---
 
 ## 6. Architecture map
 
 ```
-jarvis/
+jalen/
   app.py            3,000 lines. The Jalen class: the mic loop (run), the address gate (should_act_on),
                     process(text) (kill switch -> answers -> routing -> brain), confirm()/announce(),
                     handle_local() (router hits), brain-down latch, timers.
@@ -143,7 +143,7 @@ jarvis/
   audio/            stt.py, tts.py, vad, wake word, speaker
   ui/               the orb
 config/
-  jarvis.yaml       782 lines. THE DESIGN RECORD: the comments explain why every number is what it is.
+  jalen.yaml       782 lines. THE DESIGN RECORD: the comments explain why every number is what it is.
   safety.yaml       617 lines. Tiers, never_touch (paths, patterns, apps, domains, harmless_names),
                     injection_guard (markers, refuse_from_content, allow_unseen_urls_on_hosts).
 scripts/            check_env.py (jalen check), connect_google.py, connect_telegram.py, vault_setup.py,
@@ -211,8 +211,8 @@ GREEN runs. AMBER announces ("..., say stop if you don't want that") and runs un
 
 ### 8.2 Setup (do this first, exactly)
 ```powershell
-cd C:\Users\user\Desktop\Jarvis-setup\jarvis
-git worktree add -b collab/<topic> C:\Users\user\Desktop\Jarvis-setup\jarvis\.claude\worktrees\collab-<topic> main
+cd C:\path\to\jalen
+git worktree add -b collab/<topic> C:\path\to\jalen\.claude\worktrees\collab-<topic> main
 ```
 Work only inside that worktree. The main checkout's `.claude/` folder is untracked; **never `git add -A` or `git add .`** — stage explicit paths. Never `git reset --hard`, `git clean`, `git checkout -- .` on anything but your own worktree, no force, no push, no bare `git stash` (the stash stack is **shared** across worktrees). If you must set work aside, make a WIP commit on your branch.
 
@@ -220,22 +220,22 @@ Work only inside that worktree. The main checkout's `.claude/` folder is untrack
 - **One writer per file, always.** Shared files with two writers are how work vanishes. Rule of thumb: you may edit a file only if it is in your lane (section 9) **and** not in the in-flight list (8.4). For the files that every feature touches (`agent.py`, `tools.py`, `safety.yaml`, `router.py`, `safety.py`), make a **separate, tiny final commit** for those edits and tell the Integrator in your outbox; he will merge them last.
 - **Do not run a second Jalen or a second Telethon client**; do not start Chrome on `data\browser_profile` unless your lane owns the browser and the Integrator's log says it is free. Do not touch `data\` at all.
 - **Scratch space:** use your own folder (for example `...\scratchpad\collab\`) and **unique file names** — a shared scratch file was overwritten by another agent today.
-- Do not edit `CLAUDE.md`, `ABILITIES.md`, `WHAT_JALEN_CAN_DO.md`, `config/jarvis.yaml` except in your own clearly separated hunk, and say so.
+- Do not edit `CLAUDE.md`, `ABILITIES.md`, `WHAT_JALEN_CAN_DO.md`, `config/jalen.yaml` except in your own clearly separated hunk, and say so.
 
 ### 8.4 In-flight files right now (the Integrator's **Wave 4** — seven worker branches — touches these; **do not edit them until STATUS.md says "WAVE 4 MERGED"**)
 The first wave (premium emoji + stickers, DMs + voice, folder moves, listening) is **already merged** into main. Wave 4 is the follow-up to the independent reviews of that wave plus the live-QA fixes. Its lanes and the files they touch:
 
 | Wave 4 lane | Files it touches |
 |---|---|
-| files-fixes (folder-move data safety) | `jarvis/tools/foldermove.py`, `launcher.py`, `sysinfo.py`, `jarvis/safety.py` (`_describe`), `jarvis/brain/router.py` (the "move it" rule) |
-| telegram-fixes | `jarvis/tools/messaging.py`, `stickers.py`, `jarvis/brain/router.py` (voice phrasing), `jarvis/brain/tools.py` (specs), `ABILITIES.md` |
-| listening-echo | `jarvis/app.py`, `jarvis/audio/tts.py`, `jarvis/audio/speaker*`, `config/jarvis.yaml` |
-| browser-everyday | `jarvis/tools/browser_ext.py`, `browsertabs.py`, `webagent.py`, `jarvis/bridge/`, `browser_extension/`, a new `browserdoor.py` |
-| research-fallback | `jarvis/tools/research.py` (and one seam call into `webagent.py`) |
-| machine-facts | `jarvis/tools/system.py`, `desktop.py`, `sysinfo.py`, `jarvis/brain/agent.py` (sentence joining), `jarvis/brain/tools.py`, `config/safety.yaml` |
-| conversation-quality | `jarvis/brain/router.py`, `jarvis/brain/agent.py` (system prompt), `config/safety.yaml` (`suspicious_markers`) |
+| files-fixes (folder-move data safety) | `jalen/tools/foldermove.py`, `launcher.py`, `sysinfo.py`, `jalen/safety.py` (`_describe`), `jalen/brain/router.py` (the "move it" rule) |
+| telegram-fixes | `jalen/tools/messaging.py`, `stickers.py`, `jalen/brain/router.py` (voice phrasing), `jalen/brain/tools.py` (specs), `ABILITIES.md` |
+| listening-echo | `jalen/app.py`, `jalen/audio/tts.py`, `jalen/audio/speaker*`, `config/jalen.yaml` |
+| browser-everyday | `jalen/tools/browser_ext.py`, `browsertabs.py`, `webagent.py`, `jalen/bridge/`, `browser_extension/`, a new `browserdoor.py` |
+| research-fallback | `jalen/tools/research.py` (and one seam call into `webagent.py`) |
+| machine-facts | `jalen/tools/system.py`, `desktop.py`, `sysinfo.py`, `jalen/brain/agent.py` (sentence joining), `jalen/brain/tools.py`, `config/safety.yaml` |
+| conversation-quality | `jalen/brain/router.py`, `jalen/brain/agent.py` (system prompt), `config/safety.yaml` (`suspicious_markers`) |
 
-Files that **no** Wave 4 lane touches, and that are therefore safe for a collaborator: `jarvis/tools/gmail.py`, `gcalendar.py`, `documents.py`, `vault.py`, `otp.py`, `profile.py`, `autofill.py`, `bulkmail.py`, `agents.py`, `coding.py`, `handoff.py`, `selfcontrol.py`, `technician.py`, `scripts/` (except `abilities.py`), `docs/` (except `collab/STATUS.md`), `README.md`, `SETUP.md`, and any **new** file you create.
+Files that **no** Wave 4 lane touches, and that are therefore safe for a collaborator: `jalen/tools/gmail.py`, `gcalendar.py`, `documents.py`, `vault.py`, `otp.py`, `profile.py`, `autofill.py`, `bulkmail.py`, `agents.py`, `coding.py`, `handoff.py`, `selfcontrol.py`, `technician.py`, `scripts/` (except `abilities.py`), `docs/` (except `collab/STATUS.md`), `README.md`, `SETUP.md`, and any **new** file you create.
 
 Merge order: the Integrator merges Wave 4 branch by branch and resolves cross-branch conflicts; they are never yours to resolve. Expect line-ending noise: a whole-file conflict usually means CRLF versus LF, not a real disagreement.
 
@@ -255,7 +255,7 @@ Merge order: the Integrator merges Wave 4 branch by branch and resolves cross-br
 7. **COMMIT + OUTBOX.**
 
 ### 8.7 Three-edit rule for tools
-A new tool needs three edits that nothing hard-fails on if you miss one: (1) the module's `REGISTRY`, (2) its `TOOL_SPECS` entry in `jarvis/brain/tools.py`, (3) a tier in `config/safety.yaml`. (1) and (2) hard-fail at startup when they drift; (3) fails `tests/test_every_tool_has_a_tier.py`. If the tool is GREEN **and acts on the world**, also add it to `injection_guard.refuse_from_content`. Edits (2) and (3) are in in-flight files: put them in your "needs from main" until the wave is merged, or in your separate tiny final commit.
+A new tool needs three edits that nothing hard-fails on if you miss one: (1) the module's `REGISTRY`, (2) its `TOOL_SPECS` entry in `jalen/brain/tools.py`, (3) a tier in `config/safety.yaml`. (1) and (2) hard-fail at startup when they drift; (3) fails `tests/test_every_tool_has_a_tier.py`. If the tool is GREEN **and acts on the world**, also add it to `injection_guard.refuse_from_content`. Edits (2) and (3) are in in-flight files: put them in your "needs from main" until the wave is merged, or in your separate tiny final commit.
 
 ---
 
@@ -271,7 +271,7 @@ Runs **Wave 4** (seven worker agents, each followed by an independent re-check) 
 ### Lane C — **you** (start here; every item has an acceptance test; none overlaps Wave 4)
 
 **C1. A real-account verification script for the owner to run** *(new file: `scripts/live_telegram_check.py`; fakes-only tests)*
-Nothing built for premium emoji, stickers, voice messages or voice-note transcription has ever run against his real Telegram account; several constants in `jarvis/tools/stickers.py` are labelled `[NOT MEASURED]` for that reason. Write an **owner-run, step-by-step checklist script** that, with Jalen **stopped** (one Telethon client at a time!), (1) looks up three premium emoji by character and name, (2) lists his sticker packs (names and counts only), (3) sends ONE test post with a premium emoji to **Saved Messages** and reads it back, (4) sends ONE short voice message to **Saved Messages**, (5) times each step and prints a table he can paste back. It must **ask before each send**, refuse any destination other than Saved Messages, never print message contents or ids, and exit cleanly on Ctrl+C. Reuse the tool functions in `jarvis/tools/messaging.py` and `stickers.py` (read them; do not edit them). Tests use the fake client in `tests/_telegram_fakes.py`.
+Nothing built for premium emoji, stickers, voice messages or voice-note transcription has ever run against his real Telegram account; several constants in `jalen/tools/stickers.py` are labelled `[NOT MEASURED]` for that reason. Write an **owner-run, step-by-step checklist script** that, with Jalen **stopped** (one Telethon client at a time!), (1) looks up three premium emoji by character and name, (2) lists his sticker packs (names and counts only), (3) sends ONE test post with a premium emoji to **Saved Messages** and reads it back, (4) sends ONE short voice message to **Saved Messages**, (5) times each step and prints a table he can paste back. It must **ask before each send**, refuse any destination other than Saved Messages, never print message contents or ids, and exit cleanly on Ctrl+C. Reuse the tool functions in `jalen/tools/messaging.py` and `stickers.py` (read them; do not edit them). Tests use the fake client in `tests/_telegram_fakes.py`.
 
 **C2. Adversarial review of everything merged since `a371945`** *(review only; a written report, no code changes)*
 Use `git log a371945..main` and `git diff a371945..main`. Look for: tests that cannot fail, claims in commit messages the code does not deliver, over-refusing of ordinary requests, any of the ten invariants in section 7.3 weakened by a merge (the merges had real conflicts in `safety.py`, `messaging.py`, `tools.py`, `safety.yaml`; the Integrator resolved them by hand: check the resolutions), anything under `data/` written by tests, any secret in any file. Prove findings with a failing test or a short reproduction; mark each CONFIRMED or PLAUSIBLE; describe protections in one plain line. Write the report as `docs\collab\outbox\collab-review-1.md`.
@@ -386,7 +386,7 @@ POLL FOR THE OWNER (only if truly his decision): <question> | options with one-l
 - **`sleep` as a standalone or leading command is blocked** in some Claude Code sessions; wait on a condition (an `until` loop on an output file) or run the long command in the background and read its output file.
 - **The harness rewrites paths:** use absolute paths; a relative `.venv/...` fails when passed to `subprocess` on Windows with forward slashes — build it with `os.path.join`/`abspath`.
 - **Windows file locking:** `os.replace` fails with `PermissionError` while any reader has the file open; save code must not swallow that silently.
-- **Shared test pollution:** `jarvis/taint.py` is process-wide; conftest resets it per test. A new global needs the same treatment or tests will pass or fail depending on file order.
+- **Shared test pollution:** `jalen/taint.py` is process-wide; conftest resets it per test. A new global needs the same treatment or tests will pass or fail depending on file order.
 - **A test that supplies the input a bug would have withheld cannot find that bug.** The injection guard was unreachable code for months because a test set the flag by hand. Drive the real path (taint → hook → classify).
 - **Do not trust a reviewer or a subagent summary blindly**, including this document: if it names a file, function or number, **VERIFY** it before acting.
 - **pytest's `tmp_path` is named after the test**; a test called `..._secret_...` puts the word "secret" in the folder name and trips the `*secret*` protected-name pattern.
@@ -398,10 +398,10 @@ POLL FOR THE OWNER (only if truly his decision): <question> | options with one-l
 
 ## 15. FIRST 10 MINUTES CHECKLIST
 
-1. `git -C C:\Users\user\Desktop\Jarvis-setup\jarvis log -5 --format='%h %s'` — confirm main is at (or after) `e34e790`; read `docs\collab\STATUS.md` if it exists.
+1. `git -C C:\path\to\jalen log -5 --format='%h %s'` — confirm main is at (or after) `e34e790`; read `docs\collab\STATUS.md` if it exists.
 2. `.\jalen.ps1 check` — expect: Claude signed in, Google (may say "refusing" after 2026-10-08), Telegram signed in, "All good".
 3. Create your worktree (8.2). Create `docs\collab\outbox\collab-live-check.md` on your branch with a one-line plan.
-4. Start C1: read `jarvis/tools/messaging.py`, `jarvis/tools/stickers.py`, `tests/_telegram_fakes.py`, `tests/test_sticker_tools.py`, `tests/test_telegram_voice.py`; run those tests alone; write down which functions the script will call and what each needs from the Telegram client.
+4. Start C1: read `jalen/tools/messaging.py`, `jalen/tools/stickers.py`, `tests/_telegram_fakes.py`, `tests/test_sticker_tools.py`, `tests/test_telegram_voice.py`; run those tests alone; write down which functions the script will call and what each needs from the Telegram client.
 5. Then work the loop in 8.6 on Lane C, starting with C1. Report at the first meaningful commit, not at the end.
 
 **Tone of every message you send the owner:** short, warm, concrete, honest about what is and is not verified. Never pretend something works that you have not run.

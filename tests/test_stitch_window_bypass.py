@@ -59,8 +59,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.app import Jalen, is_continuation  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
+from jalen.app import Jalen, is_continuation  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
 
 
 class _Gate:

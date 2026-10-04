@@ -1,6 +1,6 @@
 # Setting up Jalen
 
-The assistant is called Jalen. The Python package and a few file names still say `jarvis`, and "Hey Jarvis" wakes him too.
+The assistant and Python package are called Jalen. Shared settings live in `config/jalen.yaml`; your personal settings belong in `config/user.yaml`.
 
 Written for someone who hasn't done this before. Do the steps in order. After Step 9 Jalen will talk to you. Everything after that adds accounts and abilities.
 
@@ -53,10 +53,10 @@ That zip holds exactly the files git tracks, and none of the private ones above.
 Any folder works, as long as you always run Jalen from the same one. The other docs assume this one:
 
 ```powershell
-cd C:\Users\<you>\Desktop\Jarvis-setup\jarvis
+cd C:\path\to\jalen
 ```
 
-If your Desktop is synced by OneDrive (the path shows `OneDrive\Desktop`), put the project in a folder OneDrive does not sync instead, for example `C:\Jalen\jarvis`, and run everything from there. OneDrive would otherwise upload the 1.2 GB `.venv` and lock files while Jalen uses them.
+If your Desktop is synced by OneDrive (the path shows `OneDrive\Desktop`), put the project in a folder OneDrive does not sync instead, for example `C:\Projects\jalen`, and run everything from there. OneDrive would otherwise upload the 1.2 GB `.venv` and lock files while Jalen uses them.
 
 Run Jalen only from this folder (see "Three rules for one laptop" above).
 
@@ -187,7 +187,7 @@ Jalen thinks with your Claude subscription (Pro or Max), not with paid API credi
 
 ## Step 8 — Make it yours
 
-`config\jarvis.yaml` holds the defaults, and it ships with the original owner's personal values. Do not edit it. Put your own values in **`config\user.yaml`**, which overlays it key by key and is never committed. Lists in `user.yaml` replace the list in `jarvis.yaml`; they are not added to it.
+`config\jalen.yaml` holds the defaults, and it ships with the original owner's personal values. Do not edit it. Put your own values in **`config\user.yaml`**, which overlays it key by key and is never committed. Lists in `user.yaml` replace the list in `jalen.yaml`; they are not added to it.
 
 These five keys carry the original owner's values and should be yours:
 
@@ -287,7 +287,7 @@ The fiddliest step. Read it carefully; there's one trap that wastes people's wee
 
    If it is the wrong account, run `connect_google.py --logout`, then connect again.
 
-Gmail and Calendar already ship switched on in `config\jarvis.yaml`, so there is nothing to edit. Jalen never opens a sign-in browser by himself. When the login stops working he tells you, and you run `connect_google.py` again.
+Gmail and Calendar already ship switched on in `config\jalen.yaml`, so there is nothing to edit. Jalen never opens a sign-in browser by himself. When the login stops working he tells you, and you run `connect_google.py` again.
 
 > **Changing your Google password ends the login.** If Gmail suddenly stops working, run `connect_google.py` again.
 
@@ -341,7 +341,7 @@ This lets Jalen read your real chats and send messages as you.
    .venv\Scripts\python.exe scripts\connect_telegram.py --status
    ```
 
-Personal Telegram already ships switched on in `config\jarvis.yaml`, so there is nothing to edit. If you skip this step, add `enabled: false` under the `telegram:` → `personal:` lines that `config\user.yaml` already has (Step 8), so that `check` stops counting it as a problem. Do not add a second `telegram:` block: YAML keeps only the last one, silently. The merged part looks like this:
+Personal Telegram already ships switched on in `config\jalen.yaml`, so there is nothing to edit. If you skip this step, add `enabled: false` under the `telegram:` → `personal:` lines that `config\user.yaml` already has (Step 8), so that `check` stops counting it as a problem. Do not add a second `telegram:` block: YAML keeps only the last one, silently. The merged part looks like this:
 
 ```yaml
 telegram:
@@ -377,7 +377,7 @@ If it says not connected, run `.\jalen.ps1 browser`. It checks each link in the 
 
 ## Step 14 — File search (optional)
 
-Install **Everything** from <https://www.voidtools.com> and let it index. Jalen does not talk to Everything directly. He runs its command-line tool **`es.exe`**, which is a separate download on the same site ("Command-line Interface"). Put `es.exe` in `C:\Program Files\Everything\`, the path set as `index.everything_cli` in `config\jarvis.yaml`. Everything itself must be running. Without them, "find that file" falls back to a slower search of Documents, Downloads and Desktop.
+Install **Everything** from <https://www.voidtools.com> and let it index. Jalen does not talk to Everything directly. He runs its command-line tool **`es.exe`**, which is a separate download on the same site ("Command-line Interface"). Put `es.exe` in `C:\Program Files\Everything\`, the path set as `index.everything_cli` in `config\jalen.yaml`. Everything itself must be running. Without them, "find that file" falls back to a slower search of Documents, Downloads and Desktop.
 
 ---
 
@@ -511,7 +511,7 @@ Only one Jalen can run at a time, in any mode: voice, text and Telegram share on
 |---|---|
 | `ModuleNotFoundError: No module named 'numpy'` (or any package) even though setup succeeded | The command used a bare `python`, which is your system Python, not the project's one (this guide never activates the `.venv`, so bare `python` is always the wrong one). Use `.\jalen.ps1`, or call `.venv\Scripts\python.exe ...` with the full path. |
 | Doesn't hear "Hey Jalen" | Run `.\jalen.ps1 check`: it lists your microphones, and you can pin one with `audio.input_device` in `config\user.yaml`. If the mic is right, the model has only ever heard synthetic voices, so teach it yours with `.\jalen.ps1 voice` (about 15 minutes). `wake.threshold` already ships lowered to 0.5 for this reason. |
-| Wakes when nobody said his name | Raise `wake.threshold` back toward 0.7. The measured table is in the comment above it in `config\jarvis.yaml`. |
+| Wakes when nobody said his name | Raise `wake.threshold` back toward 0.7. The measured table is in the comment above it in `config\jalen.yaml`. |
 | Voice mode stops at start with "Could not find pretrained model for model name 'hey_jalen'" | `models\hey_jalen.onnx` is missing. See Step 5. |
 | `tflite-runtime` error | You have openwakeword 0.4.0: `.venv\Scripts\python.exe -m pip install openwakeword==0.6.0` |
 | edge-tts gives 403 | `.venv\Scripts\python.exe -m pip install --upgrade edge-tts`. Microsoft rotated a token |
@@ -537,6 +537,6 @@ On the working machine one failure is expected: `test_overhaul_fixes.py::test_re
 
 - tests that need files only a used install has: the password vault (`data\vault.json`, made by `.\jalen.ps1 vault`) and `data\weaknesses.md`;
 - the wake-word tests, if `models\hey_jalen.onnx` is missing (Step 5);
-- three voice tests that call the internet (`test_stt_roundtrips_through_groq`, `test_barge_in_latency_is_measured`, `test_failure_paths_keep_jarvis_alive`). Run them two or three times on their own before believing a failure.
+- three voice tests that call the internet (`test_stt_roundtrips_through_groq`, `test_barge_in_latency_is_measured`, `test_failure_paths_keep_jalen_alive`). Run them two or three times on their own before believing a failure.
 
 Any other failure is real.

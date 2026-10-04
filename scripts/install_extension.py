@@ -39,7 +39,7 @@ def _write_launcher() -> None:
     .py is not one.
 
     IT MUST cd TO THE PROJECT ROOT FIRST. Chrome launches the host from its
-    OWN working directory, not the project's, so `python -m jarvis.bridge.
+    OWN working directory, not the project's, so `python -m jalen.bridge.
     native_host` from there fails with "No module named jarvis" - the host
     dies on the first byte, the port disconnects, and the extension shows
     "not connected" forever. Measured: this was exactly that bug. `cd /d`
@@ -51,7 +51,7 @@ def _write_launcher() -> None:
     LAUNCHER.write_text(
         "@echo off\r\n"
         f'cd /d "{ROOT}"\r\n'
-        f'"{VENV_PY}" -m jarvis.bridge.native_host\r\n',
+        f'"{VENV_PY}" -m jalen.bridge.native_host\r\n',
         encoding="utf-8",
     )
 

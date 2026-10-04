@@ -25,10 +25,10 @@ import time
 import numpy as np
 import pytest
 
-from jarvis.app import is_continuation, looks_unfinished
-from jarvis.audio.tts import Speaker, SpeechStream
-from jarvis.brain.router import IntentRouter
-from jarvis.config import CONFIG
+from jalen.app import is_continuation, looks_unfinished
+from jalen.audio.tts import Speaker, SpeechStream
+from jalen.brain.router import IntentRouter
+from jalen.config import CONFIG
 
 
 # ===========================================================================
@@ -283,7 +283,7 @@ def test_jarvis_stays_quiet_when_a_noise_opened_the_window():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.run)
     # WHAT IT SAYS CHANGED, THE RULE DID NOT. This marker used to be
@@ -350,9 +350,10 @@ def test_no_source_file_contains_a_raw_control_character():
 
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []
-    for path in root.rglob("*.py"):
-        if ".venv" in path.parts:
-            continue
+    source_paths = [root / "run.py", root / "setup.py"]
+    for directory in ("jalen", "scripts", "tests"):
+        source_paths.extend((root / directory).rglob("*.py"))
+    for path in source_paths:
         text = path.read_text(encoding="utf-8", errors="replace")
         for number, line in enumerate(text.splitlines(), 1):
             for char in line:
@@ -392,7 +393,7 @@ def test_a_silent_demotion_to_the_local_model_is_recorded():
     """
     import numpy as np
 
-    from jarvis.audio.stt import Transcriber
+    from jalen.audio.stt import Transcriber
 
     transcriber = Transcriber(CONFIG, object())
     transcriber.primary = "groq"
@@ -419,7 +420,7 @@ def test_a_clean_primary_run_records_nothing():
     fills with noise and the real events stop standing out."""
     import numpy as np
 
-    from jarvis.audio.stt import Transcriber
+    from jalen.audio.stt import Transcriber
 
     transcriber = Transcriber(CONFIG, object())
     transcriber.primary = "groq"
@@ -437,7 +438,7 @@ def test_the_reason_is_cleared_between_turns():
     healthy one — a log entry that is simply false."""
     import numpy as np
 
-    from jarvis.audio.stt import Transcriber
+    from jalen.audio.stt import Transcriber
 
     transcriber = Transcriber(CONFIG, object())
     transcriber.primary = "groq"

@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis import tools
-from jarvis.brain.router import IntentRouter
-from jarvis.brain.tools import TOOL_SPECS
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine
+from jalen import tools
+from jalen.brain.router import IntentRouter
+from jalen.brain.tools import TOOL_SPECS
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine
 
 
 @pytest.fixture(scope="module")
@@ -205,7 +205,7 @@ def test_the_handoff_jargon_is_in_the_prompt():
     Neither phrase is routed — "this task" is the conversation, which only
     the brain has. So the prompt is the only place it can live.
     """
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     async def noop(*a, **k):
         return True

@@ -21,7 +21,7 @@ import os
 
 import pytest
 
-from jarvis.tools import webagent as wa
+from jalen.tools import webagent as wa
 
 
 @pytest.fixture

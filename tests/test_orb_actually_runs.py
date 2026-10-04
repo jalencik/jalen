@@ -31,8 +31,8 @@ import time
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.ui.orb import Orb, TranscriptWindow
+from jalen.config import CONFIG
+from jalen.ui.orb import Orb, TranscriptWindow
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32", reason="opens a real Tk window"

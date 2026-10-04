@@ -18,7 +18,7 @@ tabs he's actually looking at. Setup: `../docs/CHROME_EXTENSION_SETUP.md`.
 
 ## The contract
 
-Messages match `jarvis/bridge/protocol.py` exactly — version 1, four shapes
+Messages match `jalen/bridge/protocol.py` exactly — version 1, four shapes
 (command, response, error, event). The command allowlist is fixed; there is
 deliberately **no** "run arbitrary JS" command, because a brain that could
 run any script in a logged-in Chrome is one prompt-injection away from being

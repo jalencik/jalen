@@ -135,7 +135,7 @@ def test_the_overlay_actually_loads(never_touch_the_real_files, monkeypatch):
     answers(monkeypatch, "Sam", "Chief", "Ada", "hey ada")
     onboard.step_identity()
 
-    from jarvis import config as config_module
+    from jalen import config as config_module
 
     monkeypatch.setattr(config_module, "USER_CONFIG", never_touch_the_real_files / "user.yaml")
     cfg = config_module.load_config()
@@ -154,13 +154,13 @@ def test_a_new_user_inherits_no_pre_approved_destinations(
     answers(monkeypatch, "Sam", "Chief", "Ada", "hey ada")
     onboard.step_identity()
 
-    from jarvis import config as config_module
+    from jalen import config as config_module
 
     monkeypatch.setattr(config_module, "USER_CONFIG", never_touch_the_real_files / "user.yaml")
     cfg = config_module.load_config()
     assert cfg.get_path("telegram.personal.send_without_asking_to") == []
 
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(cfg)
     verdict = engine.classify(
@@ -178,7 +178,7 @@ def test_a_new_user_does_not_inherit_his_folders(never_touch_the_real_files, mon
 
     from pathlib import Path
 
-    from jarvis import config as config_module
+    from jalen import config as config_module
 
     monkeypatch.setattr(config_module, "USER_CONFIG", never_touch_the_real_files / "user.yaml")
     paths = config_module.load_config().get_path("index.content_index_paths")
@@ -198,15 +198,15 @@ def test_empty_answers_fall_back_to_defaults(never_touch_the_real_files, monkeyp
 
 def test_it_never_writes_the_design_record():
     """
-    config/jarvis.yaml is the defaults AND the reasoning behind every value.
+    config/jalen.yaml is the defaults AND the reasoning behind every value.
     Overwriting it per-machine destroys the most useful documentation this
     project has, and would make every pull a merge conflict.
     """
     import inspect
 
     source = inspect.getsource(onboard)
-    assert "jarvis.yaml" not in source.replace(
-        "# It never writes config/jarvis.yaml.", ""
+    assert "jalen.yaml" not in source.replace(
+        "# It never writes config/jalen.yaml.", ""
     ) or "USER_CONFIG.write_text" in source
     assert "USER_CONFIG" in source
     # The only write targets are the two intended files.

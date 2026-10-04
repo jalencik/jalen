@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import drafting
+from jalen.tools import drafting
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +80,7 @@ def test_several_posts_go_out_in_one_call(monkeypatch):
     One tool call per post would exhaust a 30-turn budget around the eighth.
     """
     send, calls = _fake_sender(["Sent to X"] * 3)
-    monkeypatch.setattr("jarvis.tools.messaging.send_telegram_message", send)
+    monkeypatch.setattr("jalen.tools.messaging.send_telegram_message", send)
 
     reply = drafting.send_posts("Saved Messages", ["one", "two", "three"])
     assert len(calls) == 3
@@ -96,7 +96,7 @@ def test_failures_are_listed_never_rounded_away(monkeypatch):
     send, _calls = _fake_sender(
         ["Sent to X", "I couldn't find a Telegram chat called 'X'", "Sent to X"]
     )
-    monkeypatch.setattr("jarvis.tools.messaging.send_telegram_message", send)
+    monkeypatch.setattr("jalen.tools.messaging.send_telegram_message", send)
 
     reply = drafting.send_posts("X", ["a", "b", "c"])
     assert "2 of 3 sent" in reply
@@ -110,7 +110,7 @@ def test_an_exception_on_one_post_does_not_lose_the_rest(monkeypatch):
             raise RuntimeError("network died")
         return "Sent to X"
 
-    monkeypatch.setattr("jarvis.tools.messaging.send_telegram_message", send)
+    monkeypatch.setattr("jalen.tools.messaging.send_telegram_message", send)
     reply = drafting.send_posts("X", ["a", "b", "c"])
     assert "2 of 3 sent" in reply
     assert "RuntimeError" in reply
@@ -136,7 +136,7 @@ def test_batching_drafts_is_refused_because_telegram_keeps_one(monkeypatch):
 def test_a_single_draft_is_fine(monkeypatch):
     saved = []
     monkeypatch.setattr(
-        "jarvis.tools.messaging.save_telegram_draft",
+        "jalen.tools.messaging.save_telegram_draft",
         lambda to, text: saved.append(text) or "Saved as a draft in X",
     )
     reply = drafting.send_posts("X", ["only one"], as_draft=True)
@@ -146,7 +146,7 @@ def test_a_single_draft_is_fine(monkeypatch):
 
 def test_empty_and_blank_posts_are_dropped(monkeypatch):
     send, calls = _fake_sender(["Sent to X"])
-    monkeypatch.setattr("jarvis.tools.messaging.send_telegram_message", send)
+    monkeypatch.setattr("jalen.tools.messaging.send_telegram_message", send)
     drafting.send_posts("X", ["real post", "", "   "])
     assert len(calls) == 1
 
@@ -162,10 +162,10 @@ def test_tiers():
     keeps the same tier a single message has — batching the WORK, not the
     permission.
     """
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     for name, tier in (

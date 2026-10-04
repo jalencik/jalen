@@ -11,7 +11,7 @@ native-messaging framing. A command sent from the app must come out of the
 host's stdout; a response written to its stdin must come back to the app.
 
 This test exists because it would have caught the bug it now guards: the
-launcher ran `python -m jarvis.bridge.native_host` without cd-ing to the
+launcher ran `python -m jalen.bridge.native_host` without cd-ing to the
 project first, so from Chrome's working directory the host died with "No
 module named jarvis" and the extension showed "not connected" forever.
 """
@@ -27,8 +27,8 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.bridge import framing, protocol
-from jarvis.bridge.server import BridgeServer
+from jalen.bridge import framing, protocol
+from jalen.bridge.server import BridgeServer
 
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "jalen_bridge_host.bat"
@@ -140,19 +140,19 @@ class TestStaleBridgeFileIsRefused:
     """
 
     def test_a_dead_pid_is_refused(self, tmp_path, monkeypatch):
-        from jarvis.bridge import native_host
+        from jalen.bridge import native_host
         # A pid that cannot be running: max pid + 1 is never live.
         stale = {"port": 65000, "token": "secret", "pid": 4294967294, "at": 0}
         assert native_host._app_is_alive(stale) is False
 
     def test_a_live_pid_is_accepted(self):
         import os
-        from jarvis.bridge import native_host
+        from jalen.bridge import native_host
         live = {"port": 1, "token": "t", "pid": os.getpid(), "at": 0}
         assert native_host._app_is_alive(live) is True
 
     def test_a_missing_pid_is_refused(self):
-        from jarvis.bridge import native_host
+        from jalen.bridge import native_host
         assert native_host._app_is_alive({"port": 1, "token": "t"}) is False
 
     def test_no_token_is_sent_to_a_stale_port(self, tmp_path, monkeypatch):
@@ -162,7 +162,7 @@ class TestStaleBridgeFileIsRefused:
         """
         import json as _json
         import socket as _socket
-        from jarvis.bridge import native_host
+        from jalen.bridge import native_host
 
         listener = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))
@@ -193,7 +193,7 @@ class TestStaleBridgeFileIsRefused:
         _ensure_launcher()
         # Point at a non-existent bridge file by running with the real
         # launcher but no server up (BRIDGE_FILE won't exist / is stale).
-        from jarvis.bridge.server import BRIDGE_FILE
+        from jalen.bridge.server import BRIDGE_FILE
         if BRIDGE_FILE.exists():
             BRIDGE_FILE.unlink()
         foreign = tempfile.mkdtemp(prefix="no-app-")

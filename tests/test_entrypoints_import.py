@@ -2,9 +2,9 @@
 Every entry point must actually start.
 
 A blanket rename of "jarvis" to "jalen" rewrote the IMPORT statements in
-run.py alongside the prose, so `from jarvis import runtime` became
+run.py alongside the prose, so `from jalen import runtime` became
 `from jalen import runtime`. Twelve hundred tests passed, because they
-import jarvis.* directly and never go through run.py — and run.py is the
+import jalen.* directly and never go through run.py — and run.py is the
 only way a person starts this.
 
 That is the failure this file exists for: a green suite over an application

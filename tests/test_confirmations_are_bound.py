@@ -48,8 +48,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis.app import ECHO_TAIL_S, ConfirmAnswer, Jalen
-from jarvis.config import CONFIG
+from jalen.app import ECHO_TAIL_S, ConfirmAnswer, Jalen
+from jalen.config import CONFIG
 
 parse = Jalen._parse_yes_no
 
@@ -179,7 +179,7 @@ def test_the_same_word_from_him_later_is_a_real_yes():
     approved a voice message (tests/test_confirmation_echo_round_two.py).
     Past the whole window it is a real yes.
     """
-    from jarvis.app import ECHO_REACHES_THE_GATE_S
+    from jalen.app import ECHO_REACHES_THE_GATE_S
 
     j = _jalen()
     _pending(j, asked_ago=ECHO_REACHES_THE_GATE_S + 1)
@@ -268,7 +268,7 @@ def test_the_model_is_told_the_truth_about_why():
     'He said no. Don't retry' for a timeout made the model tell him he had
     refused something he never heard (2026-08-24T05:10, the recycle bin).
     """
-    from jarvis.brain.agent import _deny_reason
+    from jalen.brain.agent import _deny_reason
 
     assert "no" in _deny_reason(ConfirmAnswer("no")).lower()
     assert "answer" in _deny_reason(ConfirmAnswer("timeout")).lower()

@@ -42,9 +42,9 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.brain.router import IntentRouter
-from jarvis.tools import webagent as wa
+from jalen.config import CONFIG
+from jalen.brain.router import IntentRouter
+from jalen.tools import webagent as wa
 
 playwright = pytest.importorskip("playwright.sync_api")
 
@@ -177,7 +177,7 @@ class TestSignInIsAnAction:
 
     def test_the_tool_is_actually_dispatchable(self):
         """A registry entry is the difference between a tool and a plan."""
-        from jarvis.tools import REGISTRY
+        from jalen.tools import REGISTRY
         assert "web_sign_in" in REGISTRY
         assert "web_sign_in" in wa.REGISTRY
 

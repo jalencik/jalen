@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import profile as P
+from jalen.tools import profile as P
 
 
 # ---------------------------------------------------------------------------

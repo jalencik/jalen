@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.tools import attachments
+from jalen.tools import attachments
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -125,7 +125,7 @@ def test_an_ambiguous_name_refuses_rather_than_picking(monkeypatch):
     not recoverable.
     """
     monkeypatch.setattr(
-        "jarvis.tools.launcher.find_files",
+        "jalen.tools.launcher.find_files",
         lambda q: [str(ROOT / "README.md"), str(ROOT / "SETUP.md")],
     )
     path, problem = attachments._resolve("md")
@@ -173,10 +173,10 @@ def test_tiers_match_what_each_tool_does():
     A Telegram file reaches a person and cannot be recalled — RED. A Gmail
     draft reaches nobody until he presses send — GREEN.
     """
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     assert engine.classify("send_telegram_file", {}).tier is Tier.RED

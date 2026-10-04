@@ -1,5 +1,5 @@
 """
-Regression tests for the router-coverage pass: widen jarvis/brain/router.py
+Regression tests for the router-coverage pass: widen jalen/brain/router.py
 so everyday commands stop paying a multi-second Claude round trip.
 
 Every phrase tested here comes straight from the task's real-session miss
@@ -14,7 +14,7 @@ Two things this file is careful to prove alongside the new hits:
      local file search; "close notepad" must still mean close_app, not the
      new "close window" shortcut; bare "close"/"back" must still mean
      jalen_quit/media_previous.
-  2. Every tool a new rule points at is real: present in jarvis.tools.
+  2. Every tool a new rule points at is real: present in jalen.tools.
      REGISTRY, present in brain/tools.py's TOOL_SPECS (so build_sdk_tools()
      doesn't blow up at startup), and given an EXPLICIT tier in
      safety.yaml — never the unclassified-AMBER default.
@@ -32,9 +32,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.brain.router import IntentRouter  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.safety import SafetyEngine, Tier  # noqa: E402
+from jalen.brain.router import IntentRouter  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.safety import SafetyEngine, Tier  # noqa: E402
 
 
 @pytest.fixture
@@ -334,16 +334,16 @@ NEW_TOOLS_AND_EXPECTED_TIERS = {
 @pytest.mark.parametrize("tool,expected_tier", list(NEW_TOOLS_AND_EXPECTED_TIERS.items()))
 def test_new_tools_are_registered_and_explicitly_tiered(tool, expected_tier):
     """
-    Every tool a new router rule points at must exist in jarvis.tools.
+    Every tool a new router rule points at must exist in jalen.tools.
     REGISTRY, have a brain/tools.py TOOL_SPECS entry, and resolve to an
     EXPLICIT tier in safety.yaml — never the unclassified-AMBER default.
     (The function itself is never called: empty_recycle_bin and sign_out
     are real, irreversible actions on the machine running this test.)
     """
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
 
-    assert tool in tools.REGISTRY, f"{tool} has no implementation in jarvis.tools.REGISTRY"
+    assert tool in tools.REGISTRY, f"{tool} has no implementation in jalen.tools.REGISTRY"
     assert tool in TOOL_SPECS, f"{tool} has no brain/tools.py TOOL_SPECS entry"
 
     engine = SafetyEngine(CONFIG)
@@ -356,12 +356,12 @@ def test_new_tools_are_registered_and_explicitly_tiered(tool, expected_tier):
 
 def test_every_new_rule_targets_a_real_registered_tool(router):
     """Blanket sweep: every tool name any router rule can produce must be
-    dispatchable — either through jarvis.tools.REGISTRY, or one of the
+    dispatchable — either through jalen.tools.REGISTRY, or one of the
     jarvis_*/app-level intents app.handle_local() special-cases directly.
     Guards against the exact bug this task called out: a rule referencing
     close_app/morning_brief with no implementation behind it, producing
     silence."""
-    from jarvis import tools
+    from jalen import tools
 
     app_level_intents = {
         "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_quit", "jalen_pause", "jalen_ack", "jalen_timing",  "jalen_read_all",
@@ -383,7 +383,7 @@ def test_build_sdk_tools_does_not_raise():
     """The real startup-time consistency check (brain/tools.py's own
     assertion) — run directly rather than only trusted by inspection, so a
     drift between REGISTRY and TOOL_SPECS fails this test, not a live run."""
-    from jarvis.brain.tools import build_sdk_tools
+    from jalen.brain.tools import build_sdk_tools
 
     sdk_tools = build_sdk_tools()
     names = {t.name for t in sdk_tools}

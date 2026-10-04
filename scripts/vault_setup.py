@@ -12,7 +12,7 @@ Everything is typed with getpass, so nothing appears on screen and nothing
 lands in the shell history.
 
 It is also where he says WHICH SITE each secret is for. Jalen types a secret
-only on the site(s) it is tied to (jarvis/tools/vault.py, "which site a
+only on the site(s) it is tied to (jalen/tools/vault.py, "which site a
 secret is for"), and this is the one place a tie is added or changed on
 purpose - no tool can do it, because a tool the model could call would let a
 page he was reading move his Google password to itself. The sites are typed
@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis.tools.vault import (  # noqa: E402
+from jalen.tools.vault import (  # noqa: E402
     VAULT_PATH,
     _load_blob,
     _open,

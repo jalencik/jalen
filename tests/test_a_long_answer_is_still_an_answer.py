@@ -42,10 +42,10 @@ import time
 
 import pytest
 
-from jarvis import app as app_module
-from jarvis.app import ECHO_TAIL_S, Expectation, Jalen
-from jarvis.brain import router
-from jarvis.config import CONFIG
+from jalen import app as app_module
+from jalen.app import ECHO_TAIL_S, Expectation, Jalen
+from jalen.brain import router
+from jalen.config import CONFIG
 
 QUESTION = "Which one did you mean, the first draft or the one you saved last night?"
 LONG_ANSWER = (

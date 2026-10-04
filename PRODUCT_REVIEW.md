@@ -125,7 +125,7 @@ Worth as much as the list above, because the tempting features here are traps:
 - **More AI backends.** There are four. A fifth adds an opinion, not a
   capability. The bottleneck is not which model — it is the 1.9s before any
   model is consulted.
-- **A settings UI.** `config/jarvis.yaml` is heavily commented and honest. A
+- **A settings UI.** `config/jalen.yaml` is heavily commented and honest. A
   settings panel would be a second place for the truth to live, and the two
   would disagree within a month.
 - **Speaker identification.** Already tried and deleted this session: on 45

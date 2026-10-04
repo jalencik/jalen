@@ -29,8 +29,8 @@ import time
 
 import pytest
 
-from jarvis.audio.tts import Speaker
-from jarvis.config import CONFIG
+from jalen.audio.tts import Speaker
+from jalen.config import CONFIG
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ def test_the_clock_is_stamped_wherever_speaking_is_set():
     """
     import inspect
 
-    from jarvis.audio import tts
+    from jalen.audio import tts
 
     # Code lines only. Counting raw substrings also matches the comment that
     # explains the rule, which is how this test first failed against correct
@@ -227,7 +227,7 @@ def test_the_loop_uses_all_three_defences():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.run)
     assert "speaking_for() < barge_grace_s" in source
@@ -243,7 +243,7 @@ def test_an_interruption_is_written_down():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     assert "barge-in stopped playback after" in inspect.getsource(Jalen.run)
 
@@ -305,7 +305,7 @@ def test_it_re_arms_when_playback_actually_ends():
 def test_the_loop_has_the_latch():
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.run)
     assert "barge_fired" in source
@@ -332,7 +332,7 @@ def test_stop_wakes_a_stream_that_is_waiting_for_the_next_sentence():
     """
     import numpy as np
 
-    from jarvis.audio import tts
+    from jalen.audio import tts
 
     speaker = tts.Speaker(CONFIG)
     # Instant silent audio: this is about control flow, not sound.
@@ -371,7 +371,7 @@ def test_stop_nudges_the_queue_not_just_the_flag():
     """
     import inspect
 
-    from jarvis.audio import tts
+    from jalen.audio import tts
 
     source = inspect.getsource(tts.Speaker.stop)
     assert "_interrupt.set()" in source
@@ -386,7 +386,7 @@ def test_a_turn_slot_is_not_held_for_three_minutes():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen._await_playback)
     assert "limit_s" in source

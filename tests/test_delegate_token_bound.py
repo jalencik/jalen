@@ -23,9 +23,9 @@ far past anything summarise_if_long would let through, and generous for the
 written drafts delegate_task is also used for, while sitting comfortably inside
 the 13,333 this account could afford.
 
-The knob lives in config/jarvis.yaml AND is read here, and the fourth test below
+The knob lives in config/jalen.yaml AND is read here, and the fourth test below
 pins both halves. agents.py:74-79 is the post-mortem of getting that wrong the
-other way round: jarvis.yaml carried brain.gemini_model, no code read it, and
+other way round: jalen.yaml carried brain.gemini_model, no code read it, and
 editing the documented setting did nothing -- "worse than having no setting",
 because the file's own header promises no code changes are needed.
 
@@ -44,7 +44,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.tools import agents  # noqa: E402
+from jalen.tools import agents  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -119,7 +119,7 @@ def test_chatgpt_bounds_its_answer_too(monkeypatch, recording_openai):
 def test_the_bound_is_read_from_config_not_frozen_in_code(
     monkeypatch, recording_openai
 ):
-    """Per this repo's rule that everything changeable lives in jarvis.yaml.
+    """Per this repo's rule that everything changeable lives in jalen.yaml.
     Setting the documented key must actually change the request."""
     monkeypatch.setenv("HERMES_API_KEY", "sk-or-v1-test")
     monkeypatch.setattr(agents, "_delegate_max_tokens", lambda: 777)
@@ -131,12 +131,12 @@ def test_the_bound_is_read_from_config_not_frozen_in_code(
 
 def test_the_knob_is_both_documented_and_read(monkeypatch, recording_openai):
     """Both halves, because this repo has a post-mortem of each failure mode:
-    a key in jarvis.yaml that no code reads (agents.py:74-79), and a constant in
-    code that jarvis.yaml never mentions. Neither is acceptable."""
-    yaml_text = (ROOT / "config" / "jarvis.yaml").read_text(encoding="utf-8")
+    a key in jalen.yaml that no code reads (agents.py:74-79), and a constant in
+    code that jalen.yaml never mentions. Neither is acceptable."""
+    yaml_text = (ROOT / "config" / "jalen.yaml").read_text(encoding="utf-8")
 
     assert "delegate_max_tokens" in yaml_text, (
-        "the knob is not in jarvis.yaml, whose header promises every changeable "
+        "the knob is not in jalen.yaml, whose header promises every changeable "
         "value lives there"
     )
 
@@ -151,12 +151,12 @@ def test_an_unreadable_config_still_yields_a_bound(monkeypatch):
     """Config problems must never leave the request unbounded -- that is the
     failure being fixed. Same rule _gemini_model() follows with its own
     try/except: degrade to a working default, never to None."""
-    import jarvis.config
+    import jalen.config
 
     def explode(*_a, **_k):
         raise RuntimeError("config unreadable")
 
-    monkeypatch.setattr(jarvis.config.CONFIG, "get_path", explode)
+    monkeypatch.setattr(jalen.config.CONFIG, "get_path", explode)
 
     assert agents._delegate_max_tokens() == 4000
 
@@ -165,13 +165,13 @@ def test_an_unreadable_config_still_yields_a_bound(monkeypatch):
 def test_a_nonsense_configured_value_falls_back_rather_than_unbounding(
     monkeypatch, bad
 ):
-    """A zero or empty value in jarvis.yaml must not become "no limit". max_tokens=0
+    """A zero or empty value in jalen.yaml must not become "no limit". max_tokens=0
     is rejected by the API and None reinstates the whole-context-window default,
     so both have to floor to the working bound."""
-    import jarvis.config
+    import jalen.config
 
     monkeypatch.setattr(
-        jarvis.config.CONFIG, "get_path", lambda key, default=None: bad
+        jalen.config.CONFIG, "get_path", lambda key, default=None: bad
     )
 
     assert agents._delegate_max_tokens() == 4000

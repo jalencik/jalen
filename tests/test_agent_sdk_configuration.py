@@ -46,10 +46,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.audit import AuditLog  # noqa: E402
-from jarvis.brain.agent import Brain  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.safety import SafetyEngine  # noqa: E402
+from jalen.audit import AuditLog  # noqa: E402
+from jalen.brain.agent import Brain  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.safety import SafetyEngine  # noqa: E402
 
 
 class _FakeSdkClient:

@@ -37,10 +37,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
 
-# Kept in step with requirements.txt by tests/test_packaging.py rather than
-# by hope. Two dependency lists that drift produce an install that imports
-# and then fails at the first real call, which is the hardest kind of
-# breakage to attribute.
+# setup.py reads requirements.txt, excluding pip-only flags from package
+# metadata. This keeps one dependency list and preserves wheel-only installs
+# when requirements.txt is used directly.
 dynamic = ["dependencies"]
 
 [project.optional-dependencies]
@@ -57,16 +56,13 @@ jalen = "run:main"
 jalen-setup = "scripts.onboard:main"
 jalen-check = "scripts.check_env:main"
 
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
-
 [tool.setuptools]
 # Modules rather than packages: run.py sits at the root and is the entry
 # point, and py-modules is how a root-level module gets included.
 py-modules = ["run"]
 
 [tool.setuptools.packages.find]
-include = ["jarvis*", "scripts*"]
+include = ["jalen*", "scripts*"]
 exclude = ["tests*", "data*", "models*", "docs*"]
 
 [tool.pytest.ini_options]

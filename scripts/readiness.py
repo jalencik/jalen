@@ -42,7 +42,7 @@ MARK = {AVAILABLE: "[ok]  ", PARTIAL: "[~~]  ",
 
 
 def probe_speech() -> list[tuple[str, str, str]]:
-    from jarvis.config import CONFIG, SECRETS
+    from jalen.config import CONFIG, SECRETS
 
     out = []
     out.append((
@@ -96,7 +96,7 @@ def probe_brain() -> list[tuple[str, str, str]]:
     # readiness. This entry used to report AVAILABLE from shutil.which() alone
     # — no spawn, no auth check — and so read AVAILABLE through a twenty-minute
     # outage on 20 Sept 2026 while the brain could not start at all.
-    from jarvis.brain.agent import resolved_cli_path
+    from jalen.brain.agent import resolved_cli_path
 
     brain_cli, where, spawnable = resolved_cli_path()
     if not (brain_cli and spawnable):
@@ -119,7 +119,7 @@ def probe_brain() -> list[tuple[str, str, str]]:
     # The handoff resolver is coding._claude_cli, not PATH. It used to prefer
     # npm's claude.CMD, and cmd.exe cut every multi-line brief at its first
     # line - so it now prefers a real executable and reaches the shim last.
-    from jarvis.tools import coding
+    from jalen.tools import coding
 
     handoff = coding._claude_cli()
     out.append((
@@ -138,7 +138,7 @@ def probe_brain() -> list[tuple[str, str, str]]:
 
 def probe_other_ai() -> list[tuple[str, str, str]]:
     """The one section that genuinely calls out to a network."""
-    from jarvis.tools import agents
+    from jalen.tools import agents
 
     out = []
     answer, error = agents._ask_gemini([{"role": "user", "content": "Reply with: ok"}])
@@ -226,7 +226,7 @@ def probe_browser() -> list[tuple[str, str, str]]:
         note,
     ))
 
-    from jarvis.tools import webagent
+    from jalen.tools import webagent
 
     chats = webagent._load()
     out.append((
@@ -240,7 +240,7 @@ def probe_browser() -> list[tuple[str, str, str]]:
 
 
 def probe_learning() -> list[tuple[str, str, str]]:
-    from jarvis import habits
+    from jalen import habits
 
     data = habits._load()
     learned = [v for v in data.values() if v.get("count", 0) >= habits.LEARN_AFTER]
@@ -276,7 +276,7 @@ def probe_accounts() -> list[tuple[str, str, str]]:
         "Telegram (your account)", AVAILABLE if session else BLOCKED,
         "signed in" if session else "run scripts/connect_telegram.py",
     ))
-    from jarvis.config import SECRETS
+    from jalen.config import SECRETS
 
     out.append((
         "Telegram (the bot)",
@@ -294,7 +294,7 @@ def probe_accounts() -> list[tuple[str, str, str]]:
 
 
 def probe_ui() -> list[tuple[str, str, str]]:
-    from jarvis.config import CONFIG
+    from jalen.config import CONFIG
     out = [("Floating orb", AVAILABLE,
             "visible when idle, one authority decides the state")]
     out.append(("Orb stays out of the way", AVAILABLE,
@@ -308,7 +308,7 @@ def probe_ui() -> list[tuple[str, str, str]]:
 
 def probe_understanding() -> list[tuple[str, str, str]]:
     """The parts that decide whether it understood him, not whether it can."""
-    from jarvis import conversation, plan, taint
+    from jalen import conversation, plan, taint
 
     out = []
     contract = plan.read_plan("send it to my saved messages")
@@ -419,7 +419,7 @@ def _importable(name: str) -> bool:
 
 def _mic_ok() -> bool:
     try:
-        from jarvis.audio.mic import Microphone
+        from jalen.audio.mic import Microphone
 
         return bool(Microphone.list_devices())
     except Exception:
@@ -428,7 +428,7 @@ def _mic_ok() -> bool:
 
 def _aumid_present() -> bool:
     try:
-        from jarvis.tools.handoff import CLAUDE_DESKTOP_AUMID
+        from jalen.tools.handoff import CLAUDE_DESKTOP_AUMID
 
         return bool(CLAUDE_DESKTOP_AUMID)
     except Exception:

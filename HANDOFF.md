@@ -12,12 +12,12 @@ design reasoning and `README.md` for what it does.
 
 ## Orientation in sixty seconds
 
-Jalen is a voice assistant on O'ktam's Windows 10 laptop. Wake word → VAD →
+Jalen is a voice assistant on the user's Windows 10 laptop. Wake word → VAD →
 Groq Whisper → **intent router** (~88% of turns locally in an August sample, for zero
 tokens) → **safety gate** → Claude Agent SDK with 165 tools (at 833adbb) → edge-tts.
 
 ```
-jarvis/
+jalen/
   app.py            the orchestrator and the mic loop. Big; read run() first.
   runtime.py        single-instance lock, stop/signal files
   crashlog.py       why a process stopped. Read this before diagnosing an exit.
@@ -32,11 +32,11 @@ jarvis/
   ui/orb.py         the floating orb
   taint.py          has Jalen read someone else's text since he last spoke? (injection guard)
 config/
-  jarvis.yaml       the DEFAULTS and the design record. Heavily commented;
+  jalen.yaml       the DEFAULTS and the design record. Heavily commented;
                     the comments are the reasoning — read them before
                     changing values. Do not put personal settings here.
   user.yaml         per-user overlay, gitignored, optional. Overrides
-                    jarvis.yaml key by key. Absent = today's behaviour.
+                    jalen.yaml key by key. Absent = today's behaviour.
   safety.yaml       which tool sits in which tier, and why
 ```
 
@@ -83,7 +83,7 @@ list is in `CLAUDE.md` under "Invariants"; these three came first.
 
 ### 1. The injection guard runs BEFORE destination pre-approval
 
-In `SafetyEngine.classify()` (jarvis/safety.py) the `origin == "content"`
+In `SafetyEngine.classify()` (jalen/safety.py) the `origin == "content"`
 checks sit above the pre-approval check. After Jalen has read someone
 else's text, RED and AMBER tools and the GREEN tools on `refuse_from_content`
 are refused; the one exception is his own Saved Messages when HIS words named it.
@@ -243,8 +243,8 @@ deleted rather than shipped. A real version needs a neural speaker model
 His ask: *"Jarvis should be able to control itself, its vs code and test it
 instead of me."*
 
-`jarvis/tools/selfcontrol.py`, plus the coding-agent tools in
-`jarvis/tools/devwork.py`:
+`jalen/tools/selfcontrol.py`, plus the coding-agent tools in
+`jalen/tools/devwork.py`:
 
 | say | it does |
 |---|---|
@@ -330,8 +330,8 @@ Every item is testable and tested. Numbers are from the suite, not estimates.
 
 | Was | Now |
 |---|---|
-| Silent exits were undiagnosable | `jarvis/crashlog.py`; `python run.py --why` |
-| Hand-gesture resize not started | `jarvis/ui/gestures.py`, 55 tests, camera path unrun |
+| Silent exits were undiagnosable | `jalen/crashlog.py`; `python run.py --why` |
+| Hand-gesture resize not started | `jalen/ui/gestures.py`, 55 tests, camera path unrun |
 | No way to record real wake samples | `scripts/record_wake_samples.py` |
 | Six flows never driven end to end | `tests/test_flow_rehearsal.py` + `scripts/rehearse.py` |
 | `vault_setup.py` itself untested | 12 tests, including "a typo must not destroy the vault" |
@@ -639,7 +639,7 @@ having two bars would just mean the lower one gets used.
 *"It should be able to chat with chatgpt like a real human... compare it
 against my expectations, and give it another prompt that will fix it."*
 
-`jarvis/tools/agents.py`. The loop:
+`jalen/tools/agents.py`. The loop:
 
 | | |
 |---|---|
@@ -868,7 +868,7 @@ it is the actual shape of what is left.
 2. ~~`scripts\calibrate_hands.py`~~ — removed with the hand-gesture feature
    on 23 August (a731da6), at his request. The orb no longer resizes at all:
    its size and place are `ui.orb_size` and `ui.orb_position` in
-   `config/jarvis.yaml`. `.\jalen.ps1 hands` now prints "Unknown command".
+   `config/jalen.yaml`. `.\jalen.ps1 hands` now prints "Unknown command".
    Nothing here needs him any more.
 3. **`scripts\rehearse.py`** — one sitting. Six flows that have never been
    driven end to end by a person. Cheapest place a real bug is still hiding.
@@ -928,7 +928,7 @@ it is the actual shape of what is left.
   to its own code, asserted by test.
 - **Hand gestures were removed on 23 August** (a731da6), and orb resizing
   after them: the orb's size and place are `ui.orb_size` / `ui.orb_position`
-  in `config/jarvis.yaml`. Nothing opens the camera.
+  in `config/jalen.yaml`. Nothing opens the camera.
 - **Coding agents**: "start a coding job" runs Claude Code headless for up
   to an hour, announces when it finishes, and "review the coding job"
   compares the git diff against what was asked.

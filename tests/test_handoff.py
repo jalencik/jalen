@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import handoff
+from jalen.tools import handoff
 
 
 def test_the_prompt_survives_the_clipboard_exactly():
@@ -143,7 +143,7 @@ def test_code_goes_through_the_argv_path_not_a_paste(monkeypatch):
     seen = {}
     monkeypatch.setattr(handoff, "set_clipboard", lambda t: True)
 
-    import jarvis.tools.coding as coding
+    import jalen.tools.coding as coding
 
     monkeypatch.setattr(
         coding, "ask_claude_code",
@@ -157,10 +157,10 @@ def test_code_goes_through_the_argv_path_not_a_paste(monkeypatch):
 
 # ------------------------------------------------------------- reachability
 def test_both_tools_are_dispatchable_and_gated():
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     for name in ("hand_off_to_cowork", "hand_off_to_code"):
@@ -186,8 +186,8 @@ def test_the_jargon_reaches_the_brain_not_a_router_rule(phrase):
     Deliberately NOT routed. "This task" is the conversation, which only the
     brain has — a router rule would launch an agent on a placeholder.
     """
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is None or hit.tool not in ("open_target", "focus_window", "open_app"), (
@@ -201,9 +201,9 @@ def test_the_brief_standard_is_in_the_prompt():
     years of experience". That is a real requirement, not flourish: the
     receiving agent has none of the conversation.
     """
-    from jarvis.brain.agent import Brain
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.brain.agent import Brain
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     async def noop(*a, **k):
         return True

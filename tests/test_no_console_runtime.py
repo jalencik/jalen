@@ -37,7 +37,7 @@ import sys
 
 import pytest
 
-from jarvis import crashlog
+from jalen import crashlog
 
 
 @pytest.fixture()
@@ -117,7 +117,7 @@ def test_the_browser_launches_with_no_console(no_console):
         OSError: crash-log stderr has no file descriptor
     """
     pytest.importorskip("playwright.sync_api")
-    from jarvis.tools import webagent as wa
+    from jalen.tools import webagent as wa
 
     session = wa._Session.get()
     try:

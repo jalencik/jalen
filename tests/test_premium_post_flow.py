@@ -19,10 +19,10 @@ import re
 
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
-from jarvis.tools import messaging, stickers
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
+from jalen.tools import messaging, stickers
 from tests._telegram_fakes import (
     FakeAccount, FakeChannel, FakeSent, emoji_doc, set_info, sticker_doc,
 )

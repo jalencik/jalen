@@ -2,7 +2,7 @@
 Router rules for the Gmail / Calendar / Telegram / Claude Code tools.
 
 Every phrase matched here is a Claude round-trip that never happens — the
-whole reason jarvis/brain/router.py exists. But a rule belongs here only
+whole reason jalen/brain/router.py exists. But a rule belongs here only
 when the tool's own output is ALREADY the spoken answer, and two of the
 tests below exist to keep that line from being crossed.
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.brain.router import IntentRouter
-from jarvis.config import CONFIG
+from jalen.brain.router import IntentRouter
+from jalen.config import CONFIG
 
 
 @pytest.fixture(scope="module")
@@ -140,7 +140,7 @@ def test_the_folder_guard_is_a_real_word_boundary():
     """
     import inspect
 
-    from jarvis.brain import router as router_module
+    from jalen.brain import router as router_module
 
     source = inspect.getsource(router_module._rules)
     control = [hex(ord(c)) for c in source if ord(c) < 9 or 11 <= ord(c) < 32]

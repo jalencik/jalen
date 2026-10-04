@@ -33,7 +33,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.brain.agent import chosen_cli_path  # noqa: E402
+from jalen.brain.agent import chosen_cli_path  # noqa: E402
 
 
 def test_an_unset_override_leaves_the_sdk_to_pick_its_own_binary(monkeypatch):
@@ -127,7 +127,7 @@ def test_a_refused_override_is_recorded_where_why_can_find_it(monkeypatch, tmp_p
     """Silently ignoring the override would leave someone editing .env with
     no way to tell the setting never took. It goes to data/crash.log, which
     is what `python run.py --why` prints."""
-    from jarvis import crashlog
+    from jalen import crashlog
 
     written: list[str] = []
     monkeypatch.setattr(crashlog, "write", lambda message: written.append(message))
@@ -144,7 +144,7 @@ def test_a_broken_log_sink_does_not_take_the_brain_down(monkeypatch, tmp_path):
     """Diagnostics may never raise (the rule stated at crashlog.py:46-48).
     A full disk breaking the log must not turn a harmless bad override into
     a brain that will not start."""
-    from jarvis import crashlog
+    from jalen import crashlog
 
     def explode(_message):
         raise OSError("disk full")
@@ -175,10 +175,10 @@ def _start_brain_capturing_options(monkeypatch):
 
     import claude_agent_sdk
 
-    from jarvis.audit import AuditLog
-    from jarvis.brain.agent import Brain
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.audit import AuditLog
+    from jalen.brain.agent import Brain
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     monkeypatch.setattr(claude_agent_sdk, "ClaudeSDKClient", _FakeSdkClient)
     _FakeSdkClient.captured.clear()
@@ -204,7 +204,7 @@ def test_brain_start_forwards_the_chosen_binary_to_the_sdk(monkeypatch):
     """The function existing is not the same as it being wired in. Returning
     a sentinel proves Brain.start() actually consults it, which asserting
     None could not — cli_path defaults to None whether it is passed or not."""
-    from jarvis.brain import agent
+    from jalen.brain import agent
 
     monkeypatch.setattr(agent, "chosen_cli_path", lambda: "C:/somewhere/claude.exe")
 

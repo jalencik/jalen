@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import browser_ext
-from jarvis.bridge.server import BridgeError
+from jalen.tools import browser_ext
+from jalen.bridge.server import BridgeError
 
 
 class _FakeServer:
@@ -41,7 +41,7 @@ class _FakeServer:
 
 def _install(monkeypatch, server):
     monkeypatch.setattr(browser_ext, "_server", lambda: server)
-    import jarvis.bridge.server as s
+    import jalen.bridge.server as s
     monkeypatch.setattr(s, "get_server", lambda: server)
     return server
 
@@ -85,7 +85,7 @@ class TestFillFromProfile:
 
     def test_it_fills_ordinary_fields_only(self, monkeypatch):
         server = _install(monkeypatch, _FakeServer(fields=self._fields()))
-        monkeypatch.setattr("jarvis.tools.profile.load_profile",
+        monkeypatch.setattr("jalen.tools.profile.load_profile",
                             lambda: self.PROFILE)
         out = browser_ext.ext_fill_form_from_profile()
         # First name and age filled; card, password, email not.
@@ -94,7 +94,7 @@ class TestFillFromProfile:
 
     def test_it_leaves_payment_and_password_alone(self, monkeypatch):
         server = _install(monkeypatch, _FakeServer(fields=self._fields()))
-        monkeypatch.setattr("jarvis.tools.profile.load_profile",
+        monkeypatch.setattr("jalen.tools.profile.load_profile",
                             lambda: self.PROFILE)
         out = browser_ext.ext_fill_form_from_profile()
         assert 2 not in server.filled, "a payment field was filled"
@@ -103,7 +103,7 @@ class TestFillFromProfile:
 
     def test_it_reports_a_required_field_it_lacks(self, monkeypatch):
         _install(monkeypatch, _FakeServer(fields=self._fields()))
-        monkeypatch.setattr("jarvis.tools.profile.load_profile",
+        monkeypatch.setattr("jalen.tools.profile.load_profile",
                             lambda: self.PROFILE)
         out = browser_ext.ext_fill_form_from_profile()
         assert "Email" in out and "need" in out.lower()
@@ -123,7 +123,7 @@ class TestNoSilentFallback:
 
     def test_fill_fails_loudly(self, monkeypatch):
         _install(monkeypatch, _FakeServer(connected=False))
-        monkeypatch.setattr("jarvis.tools.profile.load_profile",
+        monkeypatch.setattr("jalen.tools.profile.load_profile",
                             lambda: {"first name": "J"})
         out = browser_ext.ext_fill_form_from_profile()
         assert "extension" in out.lower()

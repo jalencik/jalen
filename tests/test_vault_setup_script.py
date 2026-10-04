@@ -23,7 +23,7 @@ import json
 
 import pytest
 
-from jarvis.tools import vault
+from jalen.tools import vault
 from scripts import vault_setup
 
 
@@ -242,7 +242,7 @@ def test_he_says_which_site_each_secret_is_for_here(isolated, monkeypatch,
 
 def test_the_setup_script_reads_and_writes_through_the_vault_module():
     """
-    Everything the script does to disk must go through jarvis.tools.vault.
+    Everything the script does to disk must go through jalen.tools.vault.
 
     Two reasons. First, a second implementation of the file format is a
     second thing to keep in step, and the failure would be a vault the
@@ -259,7 +259,7 @@ def test_the_setup_script_reads_and_writes_through_the_vault_module():
     import re
 
     source = inspect.getsource(vault_setup)
-    assert "from jarvis.tools.vault import" in source
+    assert "from jalen.tools.vault import" in source
     for helper in ("_load_blob", "_save_blob", "_seal", "_open"):
         assert helper in source, f"the script no longer uses vault.{helper}"
 

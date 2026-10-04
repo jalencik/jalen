@@ -29,8 +29,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def engine():
 # ------------------------------------------------------ 1. run_own_tests
 @pytest.fixture
 def spawned(monkeypatch):
-    from jarvis.tools import selfcontrol
+    from jalen.tools import selfcontrol
 
     calls = []
 
@@ -56,13 +56,13 @@ def spawned(monkeypatch):
 @pytest.mark.parametrize("subset", [
     "tests/../../Downloads/planted.py",
     "../outside.py",
-    "tests/../jarvis/app.py",
+    "tests/../jalen/app.py",
     "tests\\..\\..\\x.py",
     "C:/Users/someone/Downloads/planted.py",
     "tests/nonexistent_file_for_this_test.py",
 ])
 def test_a_subset_outside_the_tests_folder_runs_nothing(spawned, subset):
-    from jarvis.tools import selfcontrol
+    from jalen.tools import selfcontrol
 
     reply = selfcontrol.run_own_tests(subset)
     assert spawned == [], f"{subset!r} reached pytest: {spawned}"
@@ -71,7 +71,7 @@ def test_a_subset_outside_the_tests_folder_runs_nothing(spawned, subset):
 
 @pytest.mark.parametrize("subset", ["test_orb.py", "tests/test_orb.py", "tests/test_orb.py::test_x"])
 def test_a_real_subset_still_runs(spawned, subset):
-    from jarvis.tools import selfcontrol
+    from jalen.tools import selfcontrol
 
     selfcontrol.run_own_tests(subset)
     assert spawned and spawned[0][-1].replace("\\", "/").startswith("tests/test_orb.py")

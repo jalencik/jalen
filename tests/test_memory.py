@@ -1,10 +1,10 @@
 """
-Tests for jarvis/tools/memory.py (Phase E). Real fastembed model, real
+Tests for jalen/tools/memory.py (Phase E). Real fastembed model, real
 sqlite-vec storage — no mocks standing in for the embedding/retrieval
 mechanism itself, since that mechanism is exactly what's under test.
 Uses a real, isolated on-disk database per test (not :memory:, since
 persistence-across-restart is one of the things being verified) rather
-than the real data/jarvis.db.
+than the real data/jalen.db.
 
 Slower than the rest of the suite by nature: the embedding model loads
 once (cached after the first run anywhere on this machine) and each
@@ -19,8 +19,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.config import CONFIG, Cfg  # noqa: E402
-from jarvis.tools.memory import MemoryStore, looks_like_a_secret  # noqa: E402
+from jalen.config import CONFIG, Cfg  # noqa: E402
+from jalen.tools.memory import MemoryStore, looks_like_a_secret  # noqa: E402
 
 
 @pytest.fixture
@@ -33,6 +33,23 @@ def store(tmp_path):
 
 
 # ------------------------------------------------------------ secret guard
+def test_renaming_the_package_preserves_existing_memories(tmp_path, monkeypatch):
+    from jalen.tools import memory
+
+    monkeypatch.setattr(memory, "ROOT", tmp_path)
+    (tmp_path / "data").mkdir()
+    legacy = tmp_path / "data" / "jarvis.db"
+    legacy.touch()
+    assert MemoryStore(Cfg()).db_path == legacy
+
+    current = tmp_path / "data" / "jalen.db"
+    current.touch()
+    assert MemoryStore(Cfg()).db_path == current
+
+    custom = tmp_path / "chosen.db"
+    assert MemoryStore(Cfg(memory={"db_path": str(custom)})).db_path == custom
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -118,14 +135,14 @@ def test_disabled_memory_refuses_politely(tmp_path):
 
 # -------------------------------------------------------------------- dispatch
 def test_registered_in_unified_tool_registry():
-    from jarvis import tools
+    from jalen import tools
 
     assert "remember" in tools.REGISTRY
     assert "recall_memory" in tools.REGISTRY
 
 
 def test_memory_tools_are_green_tier():
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False

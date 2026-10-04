@@ -28,8 +28,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.brain.router import IntentRouter
-from jarvis.config import CONFIG
+from jalen.brain.router import IntentRouter
+from jalen.config import CONFIG
 
 
 @pytest.fixture(scope="module")

@@ -59,7 +59,7 @@ def _no_browser_window_on_his_screen():
 @pytest.fixture(autouse=True)
 def _every_test_starts_and_ends_untainted():
     """
-    Taint is process-wide (jarvis/taint.py), which is right for Jalen - one
+    Taint is process-wide (jalen/taint.py), which is right for Jalen - one
     turn, one origin - and wrong for a test run, where it leaked from one
     FILE into the next. tests/test_web_sign_in.py resumes a delegation that
     reads a web answer, and left the whole process at origin_now() ==
@@ -70,7 +70,7 @@ def _every_test_starts_and_ends_untainted():
     asserts a refusal could pass because of taint some earlier file left,
     not because of the rule it is testing.
     """
-    from jarvis import taint
+    from jalen import taint
 
     taint.he_asked_again()
     yield
@@ -85,7 +85,7 @@ def _every_test_starts_with_no_form_read():
     later test's fill act on a form that test never read - and a test that
     asserts "nothing read, nothing filled" pass or fail by file order.
     """
-    from jarvis.tools import webforms
+    from jalen.tools import webforms
 
     webforms._forget_the_form()
     yield
@@ -102,7 +102,7 @@ def _no_test_walks_a_real_drive(tmp_path_factory):
     seam, sysinfo._scan_target, points every scan at a small scratch folder.
     Tests of the walk itself build their own trees and call DriveScan directly.
     """
-    from jarvis.tools import sysinfo
+    from jalen.tools import sysinfo
 
     fake = tmp_path_factory.mktemp("jarvis-fake-drive")
     (fake / "Users" / "pretend" / "Documents").mkdir(parents=True)
@@ -127,7 +127,7 @@ def _every_test_starts_and_ends_with_no_drive_scan():
     cleanup report's own cache (sysinfo._cache) is the same shape: a test that
     stubbed the report left its stub as the "recent answer" for the next one.
     """
-    from jarvis.tools import sysinfo
+    from jalen.tools import sysinfo
 
     def forget() -> None:
         sysinfo._forget_scans()
@@ -143,10 +143,10 @@ def _every_test_starts_and_ends_with_no_drive_scan():
 def _keep_tests_out_of_real_data(tmp_path_factory):
     scratch = tmp_path_factory.mktemp("jarvis-test-data")
 
-    from jarvis import audit as audit_module
-    from jarvis import crashlog as crashlog_module
-    from jarvis.brain import router as router_module
-    from jarvis.config import CONFIG
+    from jalen import audit as audit_module
+    from jalen import crashlog as crashlog_module
+    from jalen.brain import router as router_module
+    from jalen.config import CONFIG
 
     # --- audit sinks -------------------------------------------------------
     # Absolute paths on purpose: AuditLog does `root / cfg_value`, and
@@ -160,7 +160,7 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     # --- memory database ---------------------------------------------------
     memory_cfg = CONFIG.setdefault("memory", {})
     saved_memory = dict(memory_cfg)
-    memory_cfg["db_path"] = str(scratch / "jarvis.db")
+    memory_cfg["db_path"] = str(scratch / "jalen.db")
 
     # --- router miss log ---------------------------------------------------
     # router.py writes unmatched phrases to DATA_DIR/router_misses.log, and
@@ -204,7 +204,7 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     # real-Chrome tests (test_webforms, test_cdp_browser, ...) also ran on
     # PROFILE_DIR - his signed-in data/browser_profile - and _launch first
     # ends any chrome.exe holding that profile, which is his live one.
-    from jarvis.tools import webagent as webagent_module
+    from jalen.tools import webagent as webagent_module
 
     saved_webagent = (webagent_module.CHATS_PATH, webagent_module.PROFILE_DIR)
     webagent_module.CHATS_PATH = scratch / "web_chats.json"
@@ -215,7 +215,7 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     # ones that do not. A test that ties "gmail" to a site, or approves one,
     # must never write that into his real data/, and a secret typed by a
     # fixture must never come out of his real vault.
-    from jarvis.tools import vault as vault_module
+    from jalen.tools import vault as vault_module
 
     saved_vault = (vault_module.VAULT_PATH, vault_module.APPROVALS_PATH,
                    vault_module.SECRET_SITES_PATH)
@@ -232,8 +232,8 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     # test that unlinks it, and every test that builds a real Jalen() (its
     # __init__ starts the server). A host the suite SPAWNS reads
     # JALEN_BRIDGE_FILE, else the real file, so the variable is set too.
-    from jarvis.bridge import native_host as native_host_module
-    from jarvis.bridge import server as bridge_server_module
+    from jalen.bridge import native_host as native_host_module
+    from jalen.bridge import server as bridge_server_module
     import os as _os
 
     saved_bridge = (bridge_server_module.BRIDGE_FILE, native_host_module.BRIDGE_FILE,
@@ -249,7 +249,7 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     # deletes its 40 oldest, so test junk could evict his real phrases, and
     # warmup() counts files to decide it is warm. Tests that set their own
     # CACHE_DIR still do; this is for the ones that did not.
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     saved_speech_cache = Speaker.CACHE_DIR
     Speaker.CACHE_DIR = scratch / "tts_cache"

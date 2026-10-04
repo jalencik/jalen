@@ -563,7 +563,7 @@ Needs: `app`, `target`
 
 Open exactly ONE thing by name: an application, a file, or a folder. Handles approximate names, nicknames and misspellings, and resolves the app actually installed on this machine (e.g. 'Telegram' opens AyuGram here). Prefer this over open_app/open_folder for any 'open X' request. IMPORTANT: it takes a single target and cannot launch an app already pointed at a file or folder — there is no tool anywhere in this set that opens an app with a startup argument or working directory (e.g. 'open VS Code in the eco pulse folder', 'open Photoshop with image.png'). For that phrasing, say plainly that you can't launch the app already pointed at that location, then offer the closest real options (open the app, or open the file/folder, as two separate actions) — never silently call this with only the folder/file name and drop the app half of the request as if the whole thing was done.
 
-Say: "open chrome" · "hey can you like open chrome" · "jarvis please open my cv" · "umm open capcut" · "can you open chrome" · "so open chrome"
+Say: "open chrome" · "hey can you like open chrome" · "jalen please open my cv" · "umm open capcut" · "can you open chrome" · "so open chrome"
 
 Needs: `name`
 

@@ -28,8 +28,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 
 @pytest.fixture

@@ -61,9 +61,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis import taint
-from jarvis.app import Jalen
-from jarvis.config import CONFIG
+from jalen import taint
+from jalen.app import Jalen
+from jalen.config import CONFIG
 
 
 class _StopAtTheRouter(Exception):
@@ -253,10 +253,10 @@ def test_there_is_still_exactly_one_caller():
     caller outside taint.py has to use. A bare-name search also matches
     taint.py's own docstring, which mentions the function by name.
     """
-    import jarvis
+    import jalen
 
     calls = []
-    for path in __import__("pathlib").Path(jarvis.__file__).parent.rglob("*.py"):
+    for path in __import__("pathlib").Path(jalen.__file__).parent.rglob("*.py"):
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             code = line.split("#", 1)[0]
             if "taint.he_asked_again()" in code:

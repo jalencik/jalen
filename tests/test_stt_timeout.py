@@ -27,7 +27,7 @@ import time
 import numpy as np
 import pytest
 
-from jarvis.audio.stt import Transcriber
+from jalen.audio.stt import Transcriber
 
 
 class _Cfg(dict):

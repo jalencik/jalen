@@ -209,8 +209,8 @@ class _Clock:
 
 
 def _make_gate_class():
-    from jarvis.app import Jalen
-    from jarvis.config import CONFIG
+    from jalen.app import Jalen
+    from jalen.config import CONFIG
 
     class ReplayGate:
         """Just enough Jalen to ask 'would you act on this?' - the real methods."""
@@ -245,8 +245,8 @@ def _make_gate_class():
 
 
 def _overrun_s() -> float:
-    from jarvis import app
-    from jarvis.config import CONFIG
+    from jalen import app
+    from jalen.config import CONFIG
     return float(CONFIG.get_path("vad.max_utterance_s", 30)) + getattr(app, "ANSWER_STT_SLACK_S", 0.0)
 
 
@@ -307,9 +307,9 @@ def replay(rows: list[dict], force_opened_by: str | None = None,
     "follow_up" is the worst case for the one exemption that depends on it,
     since it asks "what if every one of these had arrived in that window?".
     """
-    from jarvis.app import Expectation
-    from jarvis.brain.router import solicits_an_answer
-    from jarvis.config import CONFIG
+    from jalen.app import Expectation
+    from jalen.brain.router import solicits_an_answer
+    from jalen.config import CONFIG
 
     Gate = _make_gate_class()
     follow_up_s = float(CONFIG.get_path("conversation.follow_up_timeout_s", 12))
@@ -418,9 +418,9 @@ def replay(rows: list[dict], force_opened_by: str | None = None,
 
 def echo_corpus(rows: list[dict]) -> tuple[int, int, int]:
     """(replies, forms tried, forms the gate would act on)."""
-    from jarvis.app import Expectation
-    from jarvis.brain.router import solicits_an_answer
-    from jarvis.config import CONFIG
+    from jalen.app import Expectation
+    from jalen.brain.router import solicits_an_answer
+    from jalen.config import CONFIG
 
     Gate = _make_gate_class()
     answer_s = float(CONFIG.get_path("conversation.answer_window_s", 30))
@@ -486,8 +486,8 @@ def echo_while_speaking(rows: list[dict]) -> dict:
     reply was still being spoken, and `admitted` is what the gate would act on:
     the number that must be 0.
     """
-    from jarvis.app import SPOKEN_CHARS_PER_SECOND
-    from jarvis.brain import router
+    from jalen.app import SPOKEN_CHARS_PER_SECOND
+    from jalen.brain import router
 
     Gate = _make_gate_class()
     replies = [r["summary"] for r in rows
@@ -537,9 +537,9 @@ def answer_path_echo(rows: list[dict], began_s: float, gate_s: float) -> tuple[i
     3.7s and had left the 3s tail behind: 718 of 718 acted on. It is now told
     when the sound began (should_act_on's `began_at`).
     """
-    from jarvis.app import Expectation
-    from jarvis.brain.router import solicits_an_answer
-    from jarvis.config import CONFIG
+    from jalen.app import Expectation
+    from jalen.brain.router import solicits_an_answer
+    from jalen.config import CONFIG
 
     Gate = _make_gate_class()
     answer_s = float(CONFIG.get_path("conversation.answer_window_s", 30))
@@ -588,8 +588,8 @@ class _Timeline:
     """A reply being spoken from `began`, sentence by sentence, as the speaker plays it."""
 
     def __init__(self, reply: str, began: float) -> None:
-        from jarvis.app import SPOKEN_CHARS_PER_SECOND
-        from jarvis.audio.tts import clean_for_speech, split_sentences
+        from jalen.app import SPOKEN_CHARS_PER_SECOND
+        from jalen.audio.tts import clean_for_speech, split_sentences
 
         self.began = began
         self.sentences: list[tuple[str, float, float]] = []
@@ -645,7 +645,7 @@ def paired_door_requests(rows: list[dict]) -> list[tuple[str, str]]:
     sentences the doors exist for, and so the ones an echo test must not
     refuse. All of them were acted on (they are rows of `utterance`, who=user).
     """
-    from jarvis.brain import router
+    from jalen.brain import router
 
     last_reply: dict[str, str] = {}
     out = []
@@ -756,10 +756,10 @@ def echoes_of_what_is_on_air(rows: list[dict]) -> dict:
     {"doors": [asked, taken], "answer": [asked, taken], "named": n, "leaked": [...]}
     `named` counts door forms left out because they start with his name.
     """
-    from jarvis.app import Expectation
-    from jarvis.brain import router
-    from jarvis.brain.router import solicits_an_answer
-    from jarvis.config import CONFIG
+    from jalen.app import Expectation
+    from jalen.brain import router
+    from jalen.brain.router import solicits_an_answer
+    from jalen.config import CONFIG
 
     answer_s = float(CONFIG.get_path("conversation.answer_window_s", 30))
     replies = [r["summary"] for r in rows
@@ -842,9 +842,9 @@ def how_soon_real_answers_began(rows: list[dict]) -> dict:
 
     {"answers": n, "within_tail": n, "refused": n, "gaps": sorted list}
     """
-    from jarvis.app import ECHO_TAIL_S, Expectation
-    from jarvis.brain.router import solicits_an_answer
-    from jarvis.config import CONFIG
+    from jalen.app import ECHO_TAIL_S, Expectation
+    from jalen.brain.router import solicits_an_answer
+    from jalen.config import CONFIG
 
     Gate = _make_gate_class()
     answer_s = float(CONFIG.get_path("conversation.answer_window_s", 30))
@@ -921,8 +921,8 @@ def door_counts(rows: list[dict], results: list[dict]) -> dict:
     {door: {"matches": Counter, "alone": [row numbers], "false": Counter}, ...,
      "no door at all": Counter of what the windows alone admit}
     """
-    from jarvis import app
-    from jarvis.brain import router
+    from jalen import app
+    from jalen.brain import router
 
     if not hasattr(router, "all_doors"):
         return {}
@@ -982,7 +982,7 @@ def door_report(rows: list[dict], results: list[dict]) -> list[str]:
     said - written English, which is what a television sounds like to a
     transcript - fed in as if they had come back after the echo window.
     """
-    from jarvis.brain import router
+    from jalen.brain import router
 
     users = [r["summary"] for r in rows
              if r["kind"] == "utterance" and _details(r).get("who") == "user"]
@@ -1097,7 +1097,7 @@ def main() -> int:
     replies, tried, accepted = echo_corpus(rows)
     print(f"echo: {replies} Jalen replies, {tried} forms fed back at once, "
           f"{accepted} acted on as if he had said them")
-    from jarvis.brain import router
+    from jalen.brain import router
 
     # The doors arrived with this report. Checked out at an older commit - to
     # reproduce the "before" figures in the commit message - the gate has no

@@ -2,7 +2,7 @@
 
 Every credential goes in one of two places, and never into a chat:
 
-- `.env` at the root of the main checkout (`C:\Users\user\Desktop\Jarvis-setup\jarvis\.env`). Start from the template: `copy .env.example .env`. Jalen reads it once at startup, so restart Jalen after changing it.
+- `.env` at the root of the main checkout (`C:\path\to\jalen\.env`). Start from the template: `copy .env.example .env`. Jalen reads it once at startup, so restart Jalen after changing it.
 - a file that one of the sign-in scripts below writes under `data\`. Those files are full logins. `data\` is git-ignored.
 
 `.\jalen.ps1 check` says which credentials are present and whether Claude, Google and Telegram actually accept them. It never prints a value. This page names credentials only. Never paste a value anywhere except `.env` or the script that asks for it.
@@ -22,7 +22,7 @@ Groq turns your speech into text and transcribes Telegram voice notes. Without i
 
 Use the bundled `claude.exe`, not the `claude` on PATH, because the brain runs the bundled one. `.\jalen.ps1 check` shows which binary that is and prints the exact command. Leave `ANTHROPIC_API_KEY` empty: any value there moves the brain off your subscription and onto per-token billing. Leave `CLAUDE_CLI_PATH` empty unless you deliberately want a different native `claude.exe`; a `.cmd` or `.bat` there is refused.
 
-Those two are enough for Jalen to listen and answer. `.\jalen.ps1 check` will still list Google and personal Telegram as blocking until you connect them, because both ship switched on in `config/jarvis.yaml` (`integrations.gmail`, `integrations.calendar`, `telegram.personal.enabled`).
+Those two are enough for Jalen to listen and answer. `.\jalen.ps1 check` will still list Google and personal Telegram as blocking until you connect them, because both ship switched on in `config/jalen.yaml` (`integrations.gmail`, `integrations.calendar`, `telegram.personal.enabled`).
 
 ---
 
@@ -45,7 +45,7 @@ The script stores a refresh token at `data\google_token.json` with four permissi
 2. **Stop Jalen first** (`.\jalen.ps1 stop`), then run `.venv\Scripts\python.exe scripts\connect_telegram.py`. In the terminal it asks for your phone number in international form, the login code Telegram sends to your other devices, and your two-step password if you have one. None of those is stored.
 3. The script writes `data\telegram_user.session`. That file **is** a full login to your account, so never copy, share or commit it. `--status` checks it; `--logout` signs out and deletes it.
 
-With this set up, Jalen reads your chats and sends as you: DMs, posts to your channel and voice messages. The chats listed in `telegram.personal.send_without_asking_to` (in `config/jarvis.yaml`, or your own list in `config/user.yaml`) may be sent to without asking; everything else asks first. Read the warning in SETUP.md Step 12 before relying on it.
+With this set up, Jalen reads your chats and sends as you: DMs, posts to your channel and voice messages. The chats listed in `telegram.personal.send_without_asking_to` (in `config/jalen.yaml`, or your own list in `config/user.yaml`) may be sent to without asking; everything else asks first. Read the warning in SETUP.md Step 12 before relying on it.
 
 **One Telegram client at a time.** Only one process may use the session file. Never start a second Jalen. Stop Jalen before running `connect_telegram.py` (even `--status`) or `.\jalen.ps1 check`, because the check also opens the session to test it.
 
@@ -58,7 +58,7 @@ With this set up, Jalen reads your chats and sends as you: DMs, posts to your ch
 | Bot token | Telegram → @BotFather → `/newbot` (any name) | `TELEGRAM_BOT_TOKEN` |
 | Your numeric Telegram user id | Telegram → @userinfobot | `TELEGRAM_ALLOWED_USER_IDS` (several ids: comma-separated) |
 
-Start it with `.\jalen.ps1 telegram`. The bot is a mode of its own, and only one Jalen runs at a time, so it runs instead of voice or text mode, not alongside them. The id list is a security control: the bot can drive the desktop, and it obeys only ids listed in `.env`. If the list is empty, the bot will not start. (`telegram.bot.allowed_user_ids` in `config/jarvis.yaml` is not used.)
+Start it with `.\jalen.ps1 telegram`. The bot is a mode of its own, and only one Jalen runs at a time, so it runs instead of voice or text mode, not alongside them. The id list is a security control: the bot can drive the desktop, and it obeys only ids listed in `.env`. If the list is empty, the bot will not start. (`telegram.bot.allowed_user_ids` in `config/jalen.yaml` is not used.)
 
 ---
 
@@ -102,7 +102,7 @@ Delegation is announced before it runs (AMBER). `.\jalen.ps1 ready` reports whic
 ## Not a credential
 
 - **Everything** (file search) is software, not a key. See SETUP.md Step 14: Jalen calls its command-line `es.exe` at `C:\Program Files\Everything\es.exe` (`index.everything_cli`), and uses a slower search without it.
-- What Jalen must never touch is `never_touch` in `config/safety.yaml`. (A list of email senders to alert on exists at `proactive.alerts.email_from` in `config/jarvis.yaml`, but nothing reads it yet.)
+- What Jalen must never touch is `never_touch` in `config/safety.yaml`. (A list of email senders to alert on exists at `proactive.alerts.email_from` in `config/jalen.yaml`, but nothing reads it yet.)
 
 ---
 

@@ -16,9 +16,9 @@ can escape the redirect.
 """
 from __future__ import annotations
 
-from jarvis.brain import router as router_module
-from jarvis.brain.router import IntentRouter
-from jarvis.config import CONFIG
+from jalen.brain import router as router_module
+from jalen.brain.router import IntentRouter
+from jalen.config import CONFIG
 
 
 def test_a_router_built_before_the_redirect_still_writes_where_data_dir_points(monkeypatch, tmp_path):

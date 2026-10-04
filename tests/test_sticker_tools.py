@@ -26,8 +26,8 @@ import asyncio
 
 import pytest
 
-from jarvis import taint
-from jarvis.tools import messaging, stickers
+from jalen import taint
+from jalen.tools import messaging, stickers
 from tests._telegram_fakes import (
     FakeAccount, FakeChannel, emoji_doc, set_info, sticker_doc,
 )
@@ -336,7 +336,7 @@ def test_a_refusal_from_telegram_is_nothing_sent(wire, monkeypatch):
 
 def test_the_reply_opens_the_way_send_posts_reads_it(wire):
     """drafting._outcome reads the opening words: Sent / Nothing sent."""
-    from jarvis.tools import drafting
+    from jalen.tools import drafting
 
     acct = wire(_account())
     sent = stickers.send_sticker(to=CHANNEL, pack="Tech Memes", emoji=ROCKET_C)
@@ -347,11 +347,11 @@ def test_the_reply_opens_the_way_send_posts_reads_it(wire):
 
 # ===================================================== registry and wiring
 def test_the_three_tools_are_in_the_registry_and_the_spec_table():
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.tools import REGISTRY
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.tools import REGISTRY
 
     for name in ("list_sticker_packs", "find_premium_emoji", "send_sticker"):
-        assert name in REGISTRY, f"{name} missing from jarvis.tools.REGISTRY"
+        assert name in REGISTRY, f"{name} missing from jalen.tools.REGISTRY"
         assert name in TOOL_SPECS, f"{name} missing from TOOL_SPECS"
     send = TOOL_SPECS["send_sticker"][1]
     assert "to" in send and send["to"][2] is True
@@ -360,7 +360,7 @@ def test_the_three_tools_are_in_the_registry_and_the_spec_table():
 
 
 def test_the_specs_tell_the_brain_what_it_needs_to_know():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     find = TOOL_SPECS["find_premium_emoji"][0].lower()
     assert "tg-emoji" in find and "never" in find and "invent" in find

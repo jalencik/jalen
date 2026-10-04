@@ -31,7 +31,7 @@ green:
     - master_prompt_guide
     # Jalen looking at Jalen. Read-only with respect to its own code: it
     # runs tests and reads diagnostics, and there is a test asserting it
-    # never edits jarvis/**.py. Free, for the same reason the technician's
+    # never edits jalen/**.py. Free, for the same reason the technician's
     # diagnosis is free - a self-check that costs a confirmation is one
     # nobody runs.
     - run_own_tests
@@ -230,7 +230,7 @@ green:
     - web_sign_in
     # The technician's eyes. Every one of these READS system state and
     # changes nothing — that is enforced by the module split, not by
-    # convention: jarvis/tools/technician.py contains no write of any kind.
+    # convention: jalen/tools/technician.py contains no write of any kind.
     # Diagnosis has to be free to run, or he stops asking.
     - diagnose
     - diagnose_wifi

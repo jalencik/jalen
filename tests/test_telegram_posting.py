@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.tools import messaging
+from jalen.tools import messaging
 
 
 # ---------------------------------------------------------------- the fakes
@@ -251,7 +251,7 @@ def test_a_plain_draft_keeps_its_literal_characters(wired):
 
 
 def test_a_file_caption_arrives_formatted(wired, monkeypatch, tmp_path):
-    from jarvis.tools import attachments
+    from jalen.tools import attachments
 
     doc = tmp_path / "poster.pdf"
     doc.write_bytes(b"%PDF-1.4 test")
@@ -267,7 +267,7 @@ def test_a_file_caption_arrives_formatted(wired, monkeypatch, tmp_path):
 
 
 def test_a_plain_caption_is_not_markdown_mangled(wired, monkeypatch, tmp_path):
-    from jarvis.tools import attachments
+    from jalen.tools import attachments
 
     doc = tmp_path / "poster.pdf"
     doc.write_bytes(b"%PDF-1.4 test")
@@ -278,7 +278,7 @@ def test_a_plain_caption_is_not_markdown_mangled(wired, monkeypatch, tmp_path):
 
 
 def test_send_posts_inherits_the_html_fix(wired):
-    from jarvis.tools import drafting
+    from jalen.tools import drafting
 
     result = drafting.send_posts(to="ML community", posts=[POST, "plain second post"])
     assert result.startswith("2 of 2 sent")
@@ -313,7 +313,7 @@ def test_another_person_is_still_named_as_themselves(wired):
 
 
 def test_a_file_to_saved_messages_says_saved_messages(wired, monkeypatch, tmp_path):
-    from jarvis.tools import attachments
+    from jalen.tools import attachments
 
     doc = tmp_path / "cv.pdf"
     doc.write_bytes(b"%PDF-1.4 test")
@@ -351,7 +351,7 @@ def _reading_client(monkeypatch, messages_newest_first, entity=None):
 
 
 def test_the_newest_post_is_read_whole(monkeypatch):
-    from jarvis import taint
+    from jalen import taint
 
     taint.he_asked_again()
     oldest = FakeMessage("OLDEST-START " + "o" * 1990 + " OLDEST-END", 1)
@@ -372,7 +372,7 @@ def test_the_newest_post_is_read_whole(monkeypatch):
 
 
 def test_a_short_chat_is_read_complete_and_in_order(monkeypatch):
-    from jarvis import taint
+    from jalen import taint
 
     taint.he_asked_again()
     msgs = [FakeMessage("third", 3), FakeMessage("second", 2), FakeMessage("first", 1)]
@@ -385,7 +385,7 @@ def test_a_short_chat_is_read_complete_and_in_order(monkeypatch):
 
 
 def test_reading_saved_messages_names_it_saved_messages(monkeypatch):
-    from jarvis import taint
+    from jalen import taint
 
     taint.he_asked_again()
     _reading_client(monkeypatch, [FakeMessage("note to self", 1)])
@@ -408,7 +408,7 @@ def _wire_client(monkeypatch, client):
 
 
 def _a_poster(monkeypatch, tmp_path):
-    from jarvis.tools import attachments
+    from jalen.tools import attachments
 
     doc = tmp_path / "poster.pdf"
     doc.write_bytes(b"%PDF-1.4 test")
@@ -632,7 +632,7 @@ def test_a_delivered_post_that_says_couldnt_is_counted_sent(wired):
     The reply quotes the post. A post that says "couldn't" was counted FAILED
     after it had gone out, and a failed post is one he sends again.
     """
-    from jarvis.tools import drafting
+    from jalen.tools import drafting
 
     post = "<b>We couldn't be prouder</b>: nothing sent us this far but you."
     result = drafting.send_posts(to="ML community", posts=[post])
@@ -646,7 +646,7 @@ def test_a_post_whose_fate_is_unknown_is_not_reported_failed(monkeypatch):
     """
     A timeout may have delivered. FAILED tells him to send it again.
     """
-    from jarvis.tools import drafting
+    from jalen.tools import drafting
 
     def send(to, text):
         if text == "b":

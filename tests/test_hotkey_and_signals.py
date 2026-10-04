@@ -21,7 +21,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis import runtime  # noqa: E402
+from jalen import runtime  # noqa: E402
 
 
 # ------------------------------------------------------------------ signals
@@ -117,7 +117,7 @@ class Bare:
 
 
 def apply(state: Bare, signal: str) -> bool:
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     return Jalen._apply_signal(state, signal)
 
@@ -239,15 +239,15 @@ def test_configured_hotkey_is_tried_before_its_fallbacks(hotkeys):
     """
     order = hotkeys._candidates("safety.kill_switch_hotkey", "ctrl+alt+k",
                                 ["ctrl+shift+k", "ctrl+alt+f10"])
-    from jarvis.config import CONFIG
+    from jalen.config import CONFIG
 
     assert order[0] == CONFIG.get_path("safety.kill_switch_hotkey", "ctrl+alt+k")
     assert len(order) == len(set(order)), "a fallback duplicating the choice wastes an attempt"
 
 
 def test_every_shipped_hotkey_default_actually_parses(hotkeys):
-    """The defaults in config/jarvis.yaml must not be typos."""
-    from jarvis.config import CONFIG
+    """The defaults in config/jalen.yaml must not be typos."""
+    from jalen.config import CONFIG
 
     for path, default in [
         ("startup.wake_hotkey", "ctrl+alt+j"),

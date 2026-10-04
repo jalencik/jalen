@@ -4,7 +4,7 @@ tools, and what a slow Telegram does to them.
 
 These are the holes left after tests/test_premium_emoji_lookup.py and
 tests/test_sticker_tools.py, found by reading the first version of
-jarvis/tools/stickers.py as an attacker would.
+jalen/tools/stickers.py as an attacker would.
 
 1. find_premium_emoji skips the untrusted fence on purpose: it prints ids and
    emoji characters only, so it does not mark the turn and the post that
@@ -32,11 +32,11 @@ import asyncio
 
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.integrations.telegram_user import TelegramNotConnected
-from jarvis.safety import SafetyEngine
-from jarvis.tools import messaging, stickers
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.integrations.telegram_user import TelegramNotConnected
+from jalen.safety import SafetyEngine
+from jalen.tools import messaging, stickers
 from tests._telegram_fakes import (
     FakeAccount, FakeChannel, FakeSent, emoji_doc, set_info, sticker_doc,
 )
@@ -218,7 +218,7 @@ def test_not_being_signed_in_still_carries_its_fix(monkeypatch, tool, args):
 # ------------------------------------------- the prompt, outside the email path
 @pytest.fixture(scope="module")
 def prompt() -> str:
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     async def noop(*a, **k):
         return True

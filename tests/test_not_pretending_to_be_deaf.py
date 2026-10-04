@@ -101,9 +101,9 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.app import Jalen
-from jarvis.brain import router
-from jarvis.config import CONFIG
+from jalen.app import Jalen
+from jalen.brain import router
+from jalen.config import CONFIG
 
 ROOT = Path(__file__).resolve().parent.parent
 

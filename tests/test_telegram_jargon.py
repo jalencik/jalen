@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.brain.router import IntentRouter
-from jarvis.config import CONFIG
+from jalen.brain.router import IntentRouter
+from jalen.config import CONFIG
 
 
 @pytest.fixture(scope="module")
@@ -107,7 +107,7 @@ def test_sending_is_still_gated(router):
     Making the phrasing free must not make the send unconfirmed. This
     reaches a person and cannot be recalled.
     """
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.safety import SafetyEngine, Tier
 
     hit = router.route("telegram Rodion saying hello")
     verdict = SafetyEngine(CONFIG).classify(hit.tool, hit.args)

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 
-from jarvis.timing import TimingLog, TurnTimer
+from jalen.timing import TimingLog, TurnTimer
 
 
 def _turn(**fields) -> TurnTimer:

@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.brain.agent import resolved_cli_path  # noqa: E402
+from jalen.brain.agent import resolved_cli_path  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -112,7 +112,7 @@ def test_readiness_no_longer_calls_the_brain_available_because_a_file_exists():
     and no auth check.
 
     Note it may still use shutil.which for the HANDOFF entry, and should: the
-    handoff path (jarvis/tools/coding.py) deliberately launches the PATH shim
+    handoff path (jalen/tools/coding.py) deliberately launches the PATH shim
     interactively, so PATH is the correct source for that one line. Only the
     BRAIN entry has to come from the resolver."""
     source = (ROOT / "scripts" / "readiness.py").read_text(encoding="utf-8")

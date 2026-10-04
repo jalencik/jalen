@@ -29,8 +29,8 @@ import asyncio
 
 import pytest
 
-from jarvis import taint
-from jarvis.tools import messaging, stickers
+from jalen import taint
+from jalen.tools import messaging, stickers
 from tests._telegram_fakes import (
     FakeAccount, FakeChannel, FakeSent, emoji_doc, set_info,
 )

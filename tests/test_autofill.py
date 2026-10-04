@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import autofill, interaction, vault
+from jalen.tools import autofill, interaction, vault
 
 
 @pytest.fixture(autouse=True)
@@ -238,10 +238,10 @@ def test_tiers():
     inside it, and RED would ask out loud on every field even for a site he
     approved forever — the friction the allowlist exists to remove.
     """
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     expected = {

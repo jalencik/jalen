@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools.bulkmail import HARD_CAP, PAGE_SIZE, _classify
+from jalen.tools.bulkmail import HARD_CAP, PAGE_SIZE, _classify
 
 
 @pytest.mark.parametrize(
@@ -74,10 +74,10 @@ def test_the_page_size_beats_the_cap_it_exists_to_replace():
 
 
 def test_it_is_reachable_and_read_only():
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     assert "scan_inbox" in tools.REGISTRY
     assert "scan_inbox" in TOOL_SPECS
@@ -91,7 +91,7 @@ def test_the_turn_budget_fits_a_real_research_task():
     dozen tool calls before it has done anything wrong — and he watched it
     run out mid-task.
     """
-    from jarvis.config import CONFIG
+    from jalen.config import CONFIG
 
     assert CONFIG.get_path("brain.max_turns_per_request", 12) >= 25
 
@@ -103,7 +103,7 @@ def test_the_sorting_admits_it_is_a_guess():
     """
     import inspect
 
-    from jarvis.tools.bulkmail import scan_inbox
+    from jalen.tools.bulkmail import scan_inbox
 
     source = inspect.getsource(scan_inbox)
     assert "guess" in source.lower()

@@ -24,10 +24,10 @@ import os
 
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
-from jarvis.tools import launcher
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
+from jalen.tools import launcher
 
 PROTECTED = r"C:\Windows\System32\cmd.exe"
 

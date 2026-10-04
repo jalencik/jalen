@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine
 
 
 def _flat(text: str) -> str:
@@ -28,14 +28,14 @@ def _flat(text: str) -> str:
 
 @pytest.fixture(scope="module")
 def guide() -> str:
-    from jarvis.tools.voice import community_post_guide
+    from jalen.tools.voice import community_post_guide
 
     return community_post_guide()
 
 
 @pytest.fixture(scope="module")
 def prompt() -> str:
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     async def noop(*a, **k):
         return True

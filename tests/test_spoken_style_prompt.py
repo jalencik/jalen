@@ -8,7 +8,7 @@ reply.
 
 These tests pin what the PROMPT says. They cannot show what the model does with
 it: that needs the same 55 requests run again with the prompt in place, and
-that has not been done (see SPOKEN_STYLE in jarvis/brain/agent.py).
+that has not been done (see SPOKEN_STYLE in jalen/brain/agent.py).
 """
 from __future__ import annotations
 
@@ -21,10 +21,10 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis.brain.agent import SPOKEN_STYLE, Brain  # noqa: E402
-from jarvis.brain.tools import TOOL_SPECS  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.safety import SafetyEngine  # noqa: E402
+from jalen.brain.agent import SPOKEN_STYLE, Brain  # noqa: E402
+from jalen.brain.tools import TOOL_SPECS  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.safety import SafetyEngine  # noqa: E402
 
 
 async def _noop(*_a, **_k):
@@ -146,7 +146,7 @@ def test_the_four_safety_options_are_still_set_in_the_brain():
     """Not changed by this edit, and pinned in full by
     test_agent_sdk_configuration.py; this only proves the rewrite did not
     touch them."""
-    source = (ROOT / "jarvis" / "brain" / "agent.py").read_text(encoding="utf-8")
+    source = (ROOT / "jalen" / "brain" / "agent.py").read_text(encoding="utf-8")
     for needle in ("tools=[],", "setting_sources=[],", "skills=[],", 'permission_mode="bypassPermissions"'):
         assert needle in source, needle
 
@@ -161,7 +161,7 @@ def test_the_style_rules_never_override_the_do_not_resend_rules():
     reading told the model to resend a post that came back Not confirmed, to a
     channel that has no confirmation. The retry rule is for reading only.
     """
-    from jarvis.brain.agent import SPOKEN_STYLE
+    from jalen.brain.agent import SPOKEN_STYLE
 
     assert "never change what you do" in SPOKEN_STYLE.lower().replace("\n", " ")
     assert "not confirmed" in SPOKEN_STYLE.lower()
@@ -171,6 +171,6 @@ def test_the_style_rules_never_override_the_do_not_resend_rules():
 
 
 def test_a_file_he_asked_about_may_be_named():
-    from jarvis.brain.agent import SPOKEN_STYLE
+    from jalen.brain.agent import SPOKEN_STYLE
 
     assert "a file or folder he asked about by name is fine to name" in SPOKEN_STYLE.lower().replace("\n", " ")

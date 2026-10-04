@@ -58,10 +58,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jarvis import app as app_module
-from jarvis.app import ECHO_TAIL_S, Expectation, Jalen
-from jarvis.brain import router
-from jarvis.config import CONFIG
+from jalen import app as app_module
+from jalen.app import ECHO_TAIL_S, Expectation, Jalen
+from jalen.brain import router
+from jalen.config import CONFIG
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -315,7 +315,7 @@ def test_an_answer_during_playback_is_still_never_his_own_voice():
 
 
 def test_the_speaker_says_when_its_voice_last_left_the_room():
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     speaker = Speaker(CONFIG)
     assert speaker.quiet_for() == float("inf"), "a speaker that never spoke has been quiet forever"
@@ -324,7 +324,7 @@ def test_the_speaker_says_when_its_voice_last_left_the_room():
     speaker._speaking.clear()
     speaker._spoke_until = time.monotonic() - 4.0
     assert speaker.quiet_for() == pytest.approx(4.0, abs=0.2)
-    src = inspect.getsource(__import__("jarvis.audio.tts", fromlist=["x"]))
+    src = inspect.getsource(__import__("jalen.audio.tts", fromlist=["x"]))
     assert src.count("_spoke_until = time.monotonic()") >= 2, (
         "both the sentence-by-sentence and the streamed path must stamp the moment playback ends"
     )
@@ -982,10 +982,10 @@ def test_a_listed_name_over_barge_in_is_not_a_door_in_the_loop_either(monkeypatc
 # FINDING 6. TWO NUMBERS IN COMMENTS
 # ===========================================================================
 def test_the_comments_quote_the_measured_numbers():
-    config = (ROOT / "config" / "jarvis.yaml").read_text(encoding="utf-8")
+    config = (ROOT / "config" / "jalen.yaml").read_text(encoding="utf-8")
     assert "35 words or more" not in config
     assert "33 of the 78" not in inspect.getsource(Jalen.should_act_on)
-    assert "33 of the 78" not in (ROOT / "jarvis" / "brain" / "router.py").read_text(encoding="utf-8")
+    assert "33 of the 78" not in (ROOT / "jalen" / "brain" / "router.py").read_text(encoding="utf-8")
 
 
 # ===========================================================================
@@ -1102,7 +1102,7 @@ def test_the_real_log_a_long_reply_read_back_at_5s_and_10s_is_never_acted_on():
     Whatever a door would admit, the gate must refuse.
     """
     module, rows, _ = _real_log()
-    from jarvis.app import SPOKEN_CHARS_PER_SECOND
+    from jalen.app import SPOKEN_CHARS_PER_SECOND
 
     Gate = module._make_gate_class()
     sentence = re.compile(r"(?<=[.!?])\s+")
@@ -1169,7 +1169,7 @@ def test_the_real_log_the_comment_about_the_five_long_answers_is_right():
     module, rows, results = _real_log()
     words = sorted(len(r["text"].split()) for r in results if r["rescued"])
     assert words and words[0] >= 36, words
-    assert f"{words[0]} words" in (ROOT / "config" / "jarvis.yaml").read_text(encoding="utf-8")
+    assert f"{words[0]} words" in (ROOT / "config" / "jalen.yaml").read_text(encoding="utf-8")
 
 
 def test_the_real_log_every_door_that_is_kept_earns_its_place_and_lets_in_none_of_the_27():

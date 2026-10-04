@@ -1,5 +1,5 @@
 """
-Tests for jarvis/tools/desktop.py (Phase C).
+Tests for jalen/tools/desktop.py (Phase C).
 
 Live window interaction (real Notepad/Chrome/VS Code/File Explorer trees,
 real typing, real clicks) was verified manually this session — reproducible
@@ -23,7 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.tools import desktop  # noqa: E402
+from jalen.tools import desktop  # noqa: E402
 
 NO_SUCH_WINDOW = "Zzz_This_Window_Certainly_Does_Not_Exist_12345"
 

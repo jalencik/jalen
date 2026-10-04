@@ -37,7 +37,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.tools import launcher  # noqa: E402
+from jalen.tools import launcher  # noqa: E402
 
 
 @pytest.fixture
@@ -187,7 +187,7 @@ def test_a_lone_letter_is_not_a_drive(desk):
 #     for existing. "C:\Users\user\Desktop\The Art of Programs - Jaloliddin's
 #     Opportunity Tracker.pdf" is eight words, so it was answered "I'm not sure
 #     what to open from..." however real the file was (2026-08-20 14:59).
-#   * "the folder c:/users/user/desktop/jarvis-setup/jarvis/data" (2026-08-19,
+#   * "the folder c:/users/user/desktop/jarvis-setup/jalen/data" (2026-08-19,
 #     twice): a real folder, searched for as a file called "folder c:/users/..."
 #   * a path to a file that is no longer there fell through to the fuzzy APP
 #     match on whatever word was in it. "C:\Users\user\Desktop\telegram_post_
@@ -256,8 +256,8 @@ def test_a_relative_looking_name_is_still_searched_the_old_way(desk):
 # ------------------------------------------------------------------- 4. router
 @pytest.fixture
 def router():
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     return IntentRouter(CONFIG)
 
@@ -288,7 +288,7 @@ def test_the_router_still_leaves_instructions_to_the_brain(router):
 
 
 def test_open_target_tells_the_brain_about_the_kind_argument():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     _description, params = TOOL_SPECS["open_target"]
     assert "kind" in params and params["kind"][2] is False

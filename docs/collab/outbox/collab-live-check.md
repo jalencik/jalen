@@ -33,7 +33,7 @@ FULL GATE (worktree, once): 13 failed, 5,257 passed, 12 skipped in 8 min 17 s. T
 
 ## How the owner runs it (after this branch is merged — it refuses to run from a worktree)
 ```powershell
-cd C:\Users\user\Desktop\Jarvis-setup\jarvis
+cd C:\path\to\jalen
 .venv\Scripts\python.exe run.py --stop
 .venv\Scripts\python.exe scripts\live_telegram_check.py
 ```

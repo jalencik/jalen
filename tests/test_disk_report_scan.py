@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.tools import sysinfo
+from jalen.tools import sysinfo
 
 G = 1_000_000_000
 WINDOWS_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="junctions are a Windows thing")
@@ -702,5 +702,5 @@ def test_text_and_telegram_modes_warm_the_scan_that_voice_mode_warms_in_prewarm(
 
 
 def test_voice_mode_still_warms_the_scan_in_prewarm():
-    source = (Path(__file__).resolve().parent.parent / "jarvis" / "app.py").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parent.parent / "jalen" / "app.py").read_text(encoding="utf-8")
     assert "prewarm_system_scan" in source

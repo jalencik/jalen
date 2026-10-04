@@ -27,7 +27,7 @@ import json
 
 import pytest
 
-from jarvis import habits
+from jalen import habits
 
 
 @pytest.fixture(autouse=True)
@@ -164,7 +164,7 @@ def test_learning_only_happens_for_a_single_tool_turn():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen._learn_from)
     assert "len(calls) != 1" in source, (
@@ -181,7 +181,7 @@ def test_a_recalled_habit_still_goes_through_the_safety_engine():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.process)
     start = source.index("habits.recall")

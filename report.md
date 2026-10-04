@@ -90,12 +90,12 @@ Every figure below was measured during this audit with the command shown.
 | 145 tools | `ABILITIES.md`, `WHAT_JALEN_CAN_DO.md`, `PROCESS.md` | **153** | stale by 8 |
 | 1,545 tests | `README.md:4` | **3,182** | refuted (2.06×) |
 | 2,982 tests | `scripts/acceptance.py:26` | **3,182** | stale |
-| 2,200 tests | `jarvis/tools/selfcontrol.py:87` | **3,182** | stale |
+| 2,200 tests | `jalen/tools/selfcontrol.py:87` | **3,182** | stale |
 | GREEN 86 / AMBER 6 / RED 10 | `README.md:124-126` | **142 / 23 / 27 / 16 BLACK** names | refuted |
 | ~88% of turns stop at the router | `README.md:13`, `ARCHITECTURE.md:71`, `HANDOFF.md:16` | **20.5%** logged / **27.2%** on replay | refuted (3–4× optimistic) |
 | Wake word tested on 2,084 held-out clips | `README.md:147` | **exactly 2,084** | confirmed |
 | 0.00% false accepts at every threshold | `README.md:147` | reproduced to the decimal — **but see §9** | confirmed, misleading |
-| Router decides in ~50 ms | `jarvis/brain/router.py:11` | **0.30 ms** mean over 835 real utterances | refuted (better than claimed) |
+| Router decides in ~50 ms | `jalen/brain/router.py:11` | **0.30 ms** mean over 835 real utterances | refuted (better than claimed) |
 
 **Verification commands** are logged in Appendix B.
 
@@ -122,8 +122,8 @@ The other 56 names fall into three groups:
     •  9  stale renames (jalen_quit vs quit, etc.)
 ```
 
-`jarvis/tools/REGISTRY` (153) and `jarvis/brain/tools.py TOOL_SPECS` (153) are
-**identical sets**, and a startup assertion at `jarvis/brain/tools.py:1052-1058`
+`jalen/tools/REGISTRY` (153) and `jalen/brain/tools.py TOOL_SPECS` (153) are
+**identical sets**, and a startup assertion at `jalen/brain/tools.py:1052-1058`
 enforces that. That is a genuinely good piece of design: a tool present in one
 but not the other is a startup error, not a mid-conversation surprise.
 
@@ -286,7 +286,7 @@ because Chrome 136+ locks the real one — 150 s timeout vs 0.8 s.
 
 **(2) The Chrome extension.** An unpacked MV3 extension with a pinned ID runs
 inside the everyday Chrome, `connectNative`s to a batch shim, which relays frames
-to `jarvis.bridge.native_host`, which reads a port and token from
+to `jalen.bridge.native_host`, which reads a port and token from
 `data/bridge.json` and opens a localhost socket to the running app,
 authenticating with a constant-time compare. Commands are an **allowlist of 21 —
 there is no arbitrary-JS command** — and only the app may originate a command;
@@ -405,8 +405,8 @@ This is the best-designed part of the system and deserves its own section.
 redacted argument dict. It only decides — *asking* is the caller's job. That
 lets the same verdict drive two independent enforcement points:
 
-- the Agent SDK `PreToolUse` hook (`jarvis/brain/agent.py:410`), and
-- the regex-router path (`jarvis/app.py:834`).
+- the Agent SDK `PreToolUse` hook (`jalen/brain/agent.py:410`), and
+- the regex-router path (`jalen/app.py:834`).
 
 Neither can be bypassed by going through the other.
 
@@ -439,7 +439,7 @@ money is one misheard sentence from a very bad day."*
 
 ### Unclassified fails safe
 
-Exactly one live tool, `web_sign_in`, has no tier. `jarvis/safety.py:160-163`
+Exactly one live tool, `web_sign_in`, has no tier. `jalen/safety.py:160-163`
 treats any unknown tool as **AMBER, never silently GREEN**, and flags it
 `unclassified` in the audit detail. So it fails safe — but nobody made a
 decision about it, and it drives real website logins, which is the wrong tool to
@@ -622,7 +622,7 @@ that it succeeds. It is not a latency optimisation, and the README implies it is
 **2. The real problem is `spoke`, not `thought`.** A median of 14.5 seconds of
 Jalen talking, p90 of 55 seconds, max of six and a half minutes. Every one of
 the owner's "why are you so slow" complaints is at least as likely to be about
-answer *length* as about latency. `jarvis/timing.py` was written specifically to
+answer *length* as about latency. `jalen/timing.py` was written specifically to
 separate these two — and the separation says the length problem is the larger
 one.
 
@@ -641,7 +641,7 @@ a bigger number.
 
 | What | Reality |
 |---|---|
-| **`reload_config`** | Says *"Config reloaded."* and reloads nothing. Advertised in three places (`README.md:118`, `config/jarvis.yaml:4`, `scripts/capabilities.py`) as the way to apply an edit without restarting. `SafetyEngine` caches tiers at construction, so a safety edit needs a full restart. |
+| **`reload_config`** | Says *"Config reloaded."* and reloads nothing. Advertised in three places (`README.md:118`, `config/jalen.yaml:4`, `scripts/capabilities.py`) as the way to apply an edit without restarting. `SafetyEngine` caches tiers at construction, so a safety edit needs a full restart. |
 | **`jalen_restart` (voice)** | Says *"Restarting."*, sets `_restart_requested = True` — which is **read nowhere** — and quits. Saying "restart" leaves the machine with no assistant running. `.\jalen.ps1 restart` and `run.py --restart` do work; only the voice path lies. |
 | **`hand_off_to_cowork`** | Puts the brief on the clipboard correctly, launches the Claude desktop app, then calls `keyboard_shortcut("ctrl+v")` — but `uiautomation`'s SendKeys needs `{Ctrl}v`. It types the six literal characters `c,t,r,l,+,v`. Returns True and reports *"Claude's open with the brief pasted in."* |
 | **`.\jalen.ps1 hands`** | Documented in the launcher header, printed as valid in its own help — and absent from the switch. Running it prints *"Unknown command: hands"* and then lists `hands` as valid. |
@@ -770,7 +770,7 @@ But three things make it misleading:
    with injected noise, not one real recording of the owner's room. Zero of 292
    gives a 95% upper bound near 1.0%, not 0.00%.
 
-`config/jarvis.yaml:142-144` *does* admit the parallel caveat for positives. The
+`config/jalen.yaml:142-144` *does* admit the parallel caveat for positives. The
 README drops it.
 
 **This is also why the wake word feels deaf.** The threshold was lowered to 0.5
@@ -976,7 +976,7 @@ nothing to contradict it.
 
 Coverage check: 151 of 153 registered tools appear in the inventory. The two
 missing are `site_permission` and `remember_site_decision` (both real, both in
-`jarvis/tools/vault.py:508-518`).
+`jalen/tools/vault.py:508-518`).
 
 ---
 
@@ -986,7 +986,7 @@ Commands run during this audit, with their results.
 
 ```
 # Tool count
-python -c "import jarvis.tools as t, jarvis.brain.tools as bt;
+python -c "import jalen.tools as t, jalen.brain.tools as bt;
            print(len(t.REGISTRY), len(bt.TOOL_SPECS),
                  set(t.REGISTRY)==set(bt.TOOL_SPECS))"
 → 153 153 True
@@ -999,7 +999,7 @@ python -m pytest -q --no-header -p no:cacheprovider
 → 3036 passed in 129.56s
 
 # Safety tiers vs live registry
-python -c "import yaml, jarvis.tools as t;
+python -c "import yaml, jalen.tools as t;
            d=yaml.safe_load(open('config/safety.yaml',encoding='utf-8'));
            R=set(t.REGISTRY)
            for k in ('green','amber','red','black'):
@@ -1036,11 +1036,11 @@ taint.mark(...); classify(tool, origin='content')
 → GREEN: draft_email, save_telegram_draft, create_calendar_event
 
 # Google connection
-jarvis.tools.gmail.google_status()
+jalen.tools.gmail.google_status()
 → invalid_grant: Token has been expired or revoked
 
 # Dead config keys
-→ 43 of 136 leaf keys in config/jarvis.yaml referenced by no code
+→ 43 of 136 leaf keys in config/jalen.yaml referenced by no code
 ```
 
 ---

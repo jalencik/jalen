@@ -15,7 +15,7 @@ def _warm_what_the_first_ask_needs(mode: str) -> None:
     underway - and usually finished - by the time anyone asks.
     """
     if mode in ("text", "telegram"):
-        from jarvis.tools import sysinfo
+        from jalen.tools import sysinfo
 
         sysinfo.prewarm_system_scan()
 
@@ -41,11 +41,11 @@ def main() -> int:
     # None and the interpreter throws tracebacks away rather than printing
     # them somewhere nobody looks. Installing the crash log first is what
     # makes the difference between a process that vanishes and one that
-    # leaves a traceback in data/crash.log. See jarvis/crashlog.py.
-    from jarvis import crashlog
+    # leaves a traceback in data/crash.log. See jalen/crashlog.py.
+    from jalen import crashlog
     crashlog.install()
 
-    from jarvis import runtime
+    from jalen import runtime
 
     if args.status:
         print(runtime.status())
@@ -101,7 +101,7 @@ def _why() -> int:
     tail of the crash log. Before this the honest answer to that question was
     "nothing was recorded", which is how the 21 August exit stayed a mystery.
     """
-    from jarvis import crashlog
+    from jalen import crashlog
 
     record = crashlog.previous_exit()
     if record is None:
@@ -134,9 +134,9 @@ def _why() -> int:
 
 
 def _serve(args) -> int:
-    from jarvis.app import Jalen
-    from jarvis.config import CONFIG
-    from jarvis import tools as jalen_tools
+    from jalen.app import Jalen
+    from jalen.config import CONFIG
+    from jalen import tools as jalen_tools
 
     mode = "telegram" if args.telegram else "text" if args.text else "voice"
     jalen = Jalen(mode=mode)
@@ -217,7 +217,7 @@ def _serve(args) -> int:
 
         import asyncio
 
-        from jarvis.integrations.telegram_bot import run_bot
+        from jalen.integrations.telegram_bot import run_bot
 
         print("Jalen — Telegram mode. Ctrl+C to quit.\n")
         jalen.muted = True

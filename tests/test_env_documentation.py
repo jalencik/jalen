@@ -1,7 +1,7 @@
 """
 Every environment variable the code reads must be documented in .env.example.
 
-The bug this prevents, found 20 September 2026: jarvis/tools/agents.py:297 has a
+The bug this prevents, found 20 September 2026: jalen/tools/agents.py:297 has a
 complete, working Hermes delegate -- reading HERMES_API_KEY or
 OPENROUTER_API_KEY, with HERMES_MODEL and HERMES_BASE_URL both overridable --
 and scripts/readiness.py:135 already reports it as BLOCKED with the right
@@ -70,7 +70,7 @@ _READS = re.compile(
 def _vars_the_code_reads() -> dict[str, list[str]]:
     """{VAR_NAME: ["file:line", ...]} across the shipped source."""
     found: dict[str, list[str]] = {}
-    for directory in ("jarvis", "scripts"):
+    for directory in ("jalen", "scripts"):
         for path in sorted((ROOT / directory).rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue

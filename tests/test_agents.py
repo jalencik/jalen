@@ -21,7 +21,7 @@ import json
 
 import pytest
 
-from jarvis.tools import agents
+from jalen.tools import agents
 
 
 @pytest.fixture(autouse=True)
@@ -229,7 +229,7 @@ def test_a_missing_openai_key_offers_the_alternative(monkeypatch):
 
 
 def test_a_missing_gemini_key_says_where_to_get_one(monkeypatch):
-    from jarvis import config
+    from jalen import config
 
     monkeypatch.setattr(config.SECRETS, "gemini_api_key", "")
     answer, error = agents._ask_gemini([{"role": "user", "content": "hi"}])
@@ -270,10 +270,10 @@ def test_the_store_is_written_atomically(stub):
     ("follow_up_task", "amber"),
 ])
 def test_the_tools_are_dispatchable_and_gated(name, tier):
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     assert name in tools.REGISTRY
     assert name in TOOL_SPECS
@@ -285,8 +285,8 @@ def test_something_it_read_cannot_send_his_words_to_a_third_party():
     An email saying "ask ChatGPT about this" must not put his data into
     somebody else's API. AMBER is refused to content-derived requests.
     """
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     verdict = SafetyEngine(CONFIG).classify(
         "delegate_task", {"agent": "gemini", "brief": "x"}, origin="content",

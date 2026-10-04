@@ -31,10 +31,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier, confirmation_question
-from jarvis.tools import messaging
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier, confirmation_question
+from jalen.tools import messaging
 
 from test_telegram_dms import (  # noqa: F401 - _clean_taint is an autouse fixture
     ALI, ALI2, CHANNEL, DEV, Dialog, FakeClient, Group, Msg, NOW, SAM, STRANGER,
@@ -274,7 +274,7 @@ def test_a_failed_send_does_not_use_up_the_notice(monkeypatch, mp3):
 
 
 def test_the_tool_spec_says_the_voice_is_synthetic_and_not_a_clone():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     description, params = TOOL_SPECS["send_voice_message"]
     lowered = description.lower()
@@ -380,7 +380,7 @@ def test_a_person_who_does_not_take_voice_messages_is_a_sentence_and_nothing_was
 
 
 def test_not_being_signed_in_still_raises_the_sign_in_error(monkeypatch, mp3):
-    from jarvis.integrations.telegram_user import TelegramNotConnected
+    from jalen.integrations.telegram_user import TelegramNotConnected
 
     monkeypatch.setattr(messaging, "_enabled", lambda: None)
     _speech_must_not_run(monkeypatch)
@@ -406,7 +406,7 @@ def test_the_voice_is_the_one_jalen_speaks_with_unless_config_names_another(monk
         seen.append((self.voice, self.rate, text))
         return b"mp3"
 
-    monkeypatch.setattr("jarvis.audio.tts.Speaker._synthesise", fake)
+    monkeypatch.setattr("jalen.audio.tts.Speaker._synthesise", fake)
     assert messaging._speech_mp3("hello") == b"mp3"
     assert seen[-1] == (CONFIG.get_path("tts.voice"), "+0%", "hello")
 
@@ -424,7 +424,7 @@ def test_the_config_names_the_voice_message_keys_with_their_reasons():
     import re
     from pathlib import Path
 
-    text = (Path(__file__).resolve().parent.parent / "config" / "jarvis.yaml").read_text(
+    text = (Path(__file__).resolve().parent.parent / "config" / "jalen.yaml").read_text(
         encoding="utf-8")
     at = text.index("voice_message:")
     block = text[max(0, at - 1800): at + 600]
@@ -435,7 +435,7 @@ def test_a_hung_speech_engine_is_cut_off(monkeypatch):
     async def hangs(self, text):
         await asyncio.sleep(30)
 
-    monkeypatch.setattr("jarvis.audio.tts.Speaker._synthesise", hangs)
+    monkeypatch.setattr("jalen.audio.tts.Speaker._synthesise", hangs)
     monkeypatch.setattr(messaging, "_VOICE_SYNTH_TIMEOUT_S", 0.05)
     with pytest.raises(asyncio.TimeoutError):
         messaging._speech_mp3("hello")
@@ -708,7 +708,7 @@ def test_the_voice_note_in_a_group_names_who_in_which_group(monkeypatch, ogg):
 def test_the_transcriber_is_the_projects_own_groq_one_set_up_for_one_voice_note():
     stt = messaging._transcriber(60)
     base = float(CONFIG.get_path("stt.groq_timeout_s", 8))
-    assert type(stt).__name__ == "Transcriber" and type(stt).__module__ == "jarvis.audio.stt"
+    assert type(stt).__name__ == "Transcriber" and type(stt).__module__ == "jalen.audio.stt"
     assert stt.primary == "groq" and stt.fallback == "groq", "no local fallback for somebody else's voice"
     assert stt.language == "", "Groq detects the language; his own stays on stt.language"
     assert stt.groq_timeout_s == pytest.approx(base + 60 * messaging._VOICE_NOTE_EXTRA_S_PER_S)
@@ -716,7 +716,7 @@ def test_the_transcriber_is_the_projects_own_groq_one_set_up_for_one_voice_note(
 
 
 def test_an_empty_language_is_left_out_of_the_groq_request_and_a_set_one_is_sent():
-    from jarvis.audio.stt import Transcriber
+    from jalen.audio.stt import Transcriber
 
     import numpy as np
 
@@ -772,7 +772,7 @@ def test_the_readers_still_say_the_voice_note_is_there_and_how_to_ask(monkeypatc
 
 
 def test_the_catch_up_and_reading_prompts_say_one_at_a_time_on_request():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     assert "transcribe_voice_note" in TOOL_SPECS["telegram_dm_catchup"][0]
     assert "never for all" in TOOL_SPECS["read_telegram"][0]
@@ -807,8 +807,8 @@ def test_it_is_not_on_the_green_refuse_list_because_it_is_not_green():
 
 
 def test_the_new_tools_are_registered_specced_and_tiered(engine):
-    from jarvis import tools as systools
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen import tools as systools
+    from jalen.brain.tools import TOOL_SPECS
 
     for name, tier in (("send_voice_message", Tier.RED), ("transcribe_voice_note", Tier.AMBER)):
         assert name in systools.REGISTRY and name in TOOL_SPECS
@@ -818,7 +818,7 @@ def test_the_new_tools_are_registered_specced_and_tiered(engine):
 
 
 def test_a_voice_message_is_not_something_a_habit_or_a_plan_may_replay():
-    from jarvis import habits, plan
+    from jalen import habits, plan
 
     assert not habits._learnable("send_voice_message", {"to": "Ali", "text": "see you"})
     assert not habits._learnable("transcribe_voice_note", {"chat": "Ali"})

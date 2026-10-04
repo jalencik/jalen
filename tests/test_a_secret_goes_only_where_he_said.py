@@ -27,10 +27,10 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import autofill, interaction, otp, vault
-from jarvis.tools import webagent as wa
-from jarvis.tools import webforms as wf
-from jarvis.tools.system import IS_WINDOWS
+from jalen.tools import autofill, interaction, otp, vault
+from jalen.tools import webagent as wa
+from jalen.tools import webforms as wf
+from jalen.tools.system import IS_WINDOWS
 
 GOOGLE = "accounts.google.com"
 LOOKALIKE = "accounts-google.evil.example"
@@ -238,7 +238,7 @@ class TestAOneTimeApprovalIsHisAnswer:
         import sys
         import types
 
-        from jarvis.tools import browsertabs
+        from jalen.tools import browsertabs
 
         chrome, notepad = 111, 222
         monkeypatch.setattr(browsertabs, "_windows",
@@ -276,7 +276,7 @@ class TestAOneTimeApprovalIsHisAnswer:
         action gets, with its echo defence and its correction handling - and
         a truthy thing that is not a yes (a string, a correction) is a no.
         """
-        from jarvis.app import ConfirmAnswer
+        from jalen.app import ConfirmAnswer
 
         for given, yes in ((ConfirmAnswer("yes", "yes"), True),
                            (True, True),
@@ -292,7 +292,7 @@ class TestAOneTimeApprovalIsHisAnswer:
     def test_jalen_puts_his_own_confirm_behind_the_bridge(self):
         import inspect
 
-        from jarvis.app import Jalen
+        from jalen.app import Jalen
 
         source = inspect.getsource(Jalen.__init__)
         assert "interaction.install_confirm(" in source
@@ -304,8 +304,8 @@ class TestAOneTimeApprovalIsHisAnswer:
         And the spec must stop offering the flag that used to stand in for
         his answer.
         """
-        from jarvis import tools
-        from jarvis.brain.tools import TOOL_SPECS
+        from jalen import tools
+        from jalen.brain.tools import TOOL_SPECS
 
         for name in ("confirm", "install_confirm", "tie_secret",
                      "secret_binding", "has_secret"):
@@ -510,8 +510,8 @@ class TestASecretBelongsToItsSite:
         The file's NAME is what keeps it out of reach: it matches the
         never-touch pattern *secret*, so every file tool is refused on it.
         """
-        from jarvis.config import CONFIG
-        from jarvis.safety import SafetyEngine, Tier
+        from jalen.config import CONFIG
+        from jalen.safety import SafetyEngine, Tier
 
         engine = SafetyEngine(CONFIG)
         assert vault.SECRET_SITES_PATH.name == "secret_sites.json", (
@@ -605,8 +605,8 @@ class TestALoginCodeGoesToItsOwnSignIn:
     ("unlock_vault_prompt", {}),
 ])
 def test_no_path_that_types_a_secret_runs_for_content(tool, args, posture):
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     engine.posture = posture

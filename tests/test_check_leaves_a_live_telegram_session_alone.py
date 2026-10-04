@@ -28,12 +28,12 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.fixture
 def check_env(monkeypatch, tmp_path):
-    from jarvis import runtime
-    from jarvis.config import CONFIG
-    from jarvis.integrations import google_auth
+    from jalen import runtime
+    from jalen.config import CONFIG
+    from jalen.integrations import google_auth
 
-    for name, leaf in (("RUNTIME_DIR", ""), ("LOCK_PATH", "jarvis.lock"),
-                       ("STOP_PATH", "jarvis.stop"), ("SIGNAL_PATH", "jalen.signal")):
+    for name, leaf in (("RUNTIME_DIR", ""), ("LOCK_PATH", "jalen.lock"),
+                       ("STOP_PATH", "jalen.stop"), ("SIGNAL_PATH", "jalen.signal")):
         monkeypatch.setattr(runtime, name, tmp_path / leaf if leaf else tmp_path)
     monkeypatch.setitem(CONFIG.setdefault("telegram", {}).setdefault("personal", {}), "enabled", True)
     monkeypatch.setattr(google_auth, "have_token", lambda: True)
@@ -48,7 +48,7 @@ def check_env(monkeypatch, tmp_path):
 
 
 def _held_by(mode: str, pid: "int | None" = None) -> None:
-    from jarvis import runtime
+    from jalen import runtime
 
     if pid is None:
         me = psutil.Process(os.getpid())
@@ -59,7 +59,7 @@ def _held_by(mode: str, pid: "int | None" = None) -> None:
 
 
 def _status_must_not_connect(monkeypatch):
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     def connects():
         raise AssertionError("jalen check connected to Telegram while another program held the session")
@@ -77,7 +77,7 @@ def test_a_session_in_use_is_not_opened_a_second_time(check_env, monkeypatch, ca
 
 
 def test_with_nothing_holding_the_session_it_is_checked_as_before(check_env, monkeypatch, capsys):
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     monkeypatch.setattr(messaging, "telegram_status", lambda: "Personal Telegram signed in as Jalen (@x).")
     assert check_env._check_accounts() == 0
@@ -85,7 +85,7 @@ def test_with_nothing_holding_the_session_it_is_checked_as_before(check_env, mon
 
 
 def test_a_stale_lock_from_a_crash_does_not_stop_the_check(check_env, monkeypatch, capsys):
-    from jarvis.tools import messaging
+    from jalen.tools import messaging
 
     dead = 4_000_000          # far above any pid Windows hands out
     assert not psutil.pid_exists(dead)

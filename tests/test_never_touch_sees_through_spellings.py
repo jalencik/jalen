@@ -37,8 +37,8 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 HOME = str(Path.home())
 
@@ -138,7 +138,7 @@ def test_the_working_directory_is_not_mistaken_for_what_he_wrote(engine, monkeyp
 
 
 def test_a_path_that_cannot_be_canonicalised_is_refused_not_waved_through(engine, monkeypatch):
-    import jarvis.safety as safety
+    import jalen.safety as safety
 
     def boom(p):
         raise ValueError("cannot canonicalise")

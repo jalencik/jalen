@@ -18,7 +18,7 @@ import threading
 
 import pytest
 
-from jarvis.tools import selfeval
+from jalen.tools import selfeval
 
 
 @pytest.fixture(autouse=True)
@@ -148,10 +148,10 @@ def test_the_tools_are_registered_and_classified():
     silently AMBER, is a tool that does not work. log_weakness announcing
     itself and waiting two seconds would be absurd.
     """
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     for name in ("log_weakness", "review_weaknesses"):
@@ -162,8 +162,8 @@ def test_the_tools_are_registered_and_classified():
 
 def test_asking_out_loud_does_not_cost_a_claude_turn():
     """Reading a local file must not require the brain."""
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     router = IntentRouter(CONFIG)
     for phrase in [

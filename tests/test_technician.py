@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import repairs, technician
-from jarvis.tools.technician import Finding, Report
+from jalen.tools import repairs, technician
+from jalen.tools.technician import Finding, Report
 
 
 # --------------------------------------------------------------- reporting
@@ -197,10 +197,10 @@ def test_tiers_match_what_each_tool_actually_does():
     If diagnose ever became AMBER he would stop asking what is wrong; if
     clear_temp_files ever became GREEN a mis-heard word would delete files.
     """
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     expected = {
@@ -246,8 +246,8 @@ def test_symptoms_route_without_an_llm(phrase, tool):
     diagnostic, he says the wifi keeps cutting out. Asking what is wrong has
     to be free or he stops asking.
     """
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is not None, f"{phrase!r} fell through to Claude"
@@ -260,8 +260,8 @@ def test_the_launcher_rules_are_not_shadowed():
     and became open_target(name="a diagnostic"). Fixing that must not break
     the launcher in the other direction.
     """
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     router = IntentRouter(CONFIG)
     assert router.route("run notepad").tool == "open_target"

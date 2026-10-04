@@ -31,9 +31,9 @@ import types
 import psutil
 import pytest
 
-from jarvis import runtime
-from jarvis.integrations import telegram_user
-from jarvis.tools import messaging, stickers
+from jalen import runtime
+from jalen.integrations import telegram_user
+from jalen.tools import messaging, stickers
 from scripts import live_telegram_check as live
 from tests._telegram_fakes import FakeAccount, FakeChannel, emoji_doc, set_info, sticker_doc
 
@@ -120,11 +120,11 @@ def telegram(monkeypatch, tmp_path):
     monkeypatch.setattr(messaging, "_to_voice_note", lambda mp3: (b"OggS" + bytes(16), 3.4))
     monkeypatch.setattr(messaging, "_voice_notice_given", False)
 
-    for name, leaf in (("RUNTIME_DIR", ""), ("LOCK_PATH", "jarvis.lock"),
-                       ("STOP_PATH", "jarvis.stop"), ("SIGNAL_PATH", "jalen.signal")):
+    for name, leaf in (("RUNTIME_DIR", ""), ("LOCK_PATH", "jalen.lock"),
+                       ("STOP_PATH", "jalen.stop"), ("SIGNAL_PATH", "jalen.signal")):
         monkeypatch.setattr(runtime, name, tmp_path / leaf if leaf else tmp_path)
     # The suite itself may run from a work copy; the check refuses those.
-    monkeypatch.setattr(live, "ROOT", tmp_path / "jarvis")
+    monkeypatch.setattr(live, "ROOT", tmp_path / "jalen")
 
     stickers._forget()
     yield state
@@ -258,7 +258,7 @@ def test_jalen_cannot_start_while_the_check_holds_the_session(telegram, monkeypa
 
 
 def test_a_work_copy_refuses_to_run(telegram, monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(live, "ROOT", tmp_path / "jarvis" / ".claude" / "worktrees" / "collab-x")
+    monkeypatch.setattr(live, "ROOT", tmp_path / "jalen" / ".claude" / "worktrees" / "collab-x")
     assert live.main([], ask=_never) == 2
     assert telegram.runs == 0 and not runtime.LOCK_PATH.exists()
     assert "main Jalen folder" in capsys.readouterr().out

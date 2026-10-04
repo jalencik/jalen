@@ -1,6 +1,6 @@
 """
 Router phrasing benchmark: real utterances a person actually says, asserted
-to route LOCALLY (jarvis/brain/router.py) to the right tool.
+to route LOCALLY (jalen/brain/router.py) to the right tool.
 
 Why this file exists: every phrase that misses the router pays a full
 Claude round trip — 3 to 18 seconds instead of well under a millisecond,
@@ -21,7 +21,7 @@ so a future regression anywhere in router.py shows up as one exact phrase
 failing here rather than being noticed a week later in data/router_misses.log.
 
 Every tool any phrase below expects is proven, once, to actually exist and
-be dispatchable: present in jarvis.tools.REGISTRY (or one of the app-level
+be dispatchable: present in jalen.tools.REGISTRY (or one of the app-level
 jarvis_*/greet/cancel/acknowledge/audit_digest intents app.handle_local()
 special-cases directly, same as test_router_coverage.py's sweep), with a
 brain/tools.py TOOL_SPECS entry, and an EXPLICIT tier in config/safety.yaml.
@@ -42,9 +42,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.brain.router import IntentRouter  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.safety import SafetyEngine, Tier  # noqa: E402
+from jalen.brain.router import IntentRouter  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.safety import SafetyEngine, Tier  # noqa: E402
 
 
 @pytest.fixture
@@ -217,7 +217,7 @@ def test_measured_pass_rate(router):
 
 # ============================================================================
 # Every tool any phrase above expects must be real — present in
-# jarvis.tools.REGISTRY (or a special-cased app-level intent), have a
+# jalen.tools.REGISTRY (or a special-cased app-level intent), have a
 # brain/tools.py TOOL_SPECS entry, and an EXPLICIT safety.yaml tier. Mirrors
 # test_router_coverage.py's equivalent sweep so this file stands on its own.
 # ============================================================================
@@ -238,7 +238,7 @@ EXPECTED_TIERS = {
 
 
 def test_every_expected_tool_is_registered_and_dispatchable():
-    from jarvis import tools
+    from jalen import tools
 
     expected_tools = {tool for _phrase, tool in PHRASES}
     missing_registry = {
@@ -246,14 +246,14 @@ def test_every_expected_tool_is_registered_and_dispatchable():
         if t not in tools.REGISTRY and t not in APP_LEVEL_INTENTS
     }
     assert not missing_registry, (
-        f"these tools have no implementation in jarvis.tools.REGISTRY and "
+        f"these tools have no implementation in jalen.tools.REGISTRY and "
         f"aren't an app-level intent: {missing_registry}"
     )
 
 
 def test_every_expected_tool_has_a_tool_spec():
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
 
     expected_tools = {tool for _phrase, tool in PHRASES}
     registry_tools = expected_tools & set(tools.REGISTRY)
@@ -262,7 +262,7 @@ def test_every_expected_tool_has_a_tool_spec():
 
 
 def test_every_expected_tool_has_an_explicit_safety_tier():
-    from jarvis import tools
+    from jalen import tools
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False

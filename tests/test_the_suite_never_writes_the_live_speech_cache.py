@@ -31,7 +31,7 @@ LIVE = (ROOT / "data" / "tts_cache").resolve()
 
 
 def test_the_speech_cache_the_suite_uses_is_not_the_live_one():
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     assert Path(Speaker.CACHE_DIR).resolve() != LIVE, (
         "a Speaker built in a test caches into the live data/tts_cache")

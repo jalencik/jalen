@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.tools import documents
+from jalen.tools import documents
 
 
 @pytest.fixture
@@ -55,15 +55,15 @@ def test_read_document_refuses_a_pattern_protected_file(tree):
 def test_one_implementation_is_asked_everywhere():
     import inspect
 
-    from jarvis.tools import attachments
+    from jalen.tools import attachments
 
     assert "protected_path(" in inspect.getsource(documents.search_in_files)
     assert "protected_path(" in inspect.getsource(attachments._is_protected)
 
 
 def test_the_engine_answers_the_question_directly():
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     assert engine.protected_path(Path.home() / ".ssh" / "config")

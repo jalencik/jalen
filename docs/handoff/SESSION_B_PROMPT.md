@@ -8,8 +8,8 @@ Read the whole document before doing anything. Then read `CLAUDE.md` in the repo
 
 ## 0. Setup checklist (do these first, in order)
 
-1. Your working directory must be `C:\Users\user\Desktop\Jarvis-setup\jarvis` (the repository root).
-2. Read `CLAUDE.md` fully. Read `config/safety.yaml` and skim `config/jarvis.yaml` (its comments are the design record).
+1. Your working directory must be `C:\path\to\jalen` (the repository root).
+2. Read `CLAUDE.md` fully. Read `config/safety.yaml` and skim `config/jalen.yaml` (its comments are the design record).
 3. Read the coordination board `.claude/COORDINATION.md` (Section 5.3). Add a line saying you have started.
 4. Check memory before you spawn anything: `powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1KB"`.
 5. Run `git log --oneline -15` and `git worktree list` to see what Session A has done and what is in flight.
@@ -39,14 +39,14 @@ Read the whole document before doing anything. Then read `CLAUDE.md` in the repo
 - **Run it:** always through the project venv: `.venv\Scripts\python.exe`. Never bare `python`, which is a different install.
   - `.\jalen.ps1 start` runs voice, `.\jalen.ps1 text` runs typed mode, and `.\jalen.ps1 check` runs diagnostics (now including Google and Telegram accounts).
   - `python run.py --status` says whether a Jalen is running. `python run.py --why` says why the last run stopped.
-- **Main loop (`jarvis/app.py`):** microphone → wake word or name → voice detection → speech-to-text (Groq, falling back to Moonshine) → the address gate (`should_act_on`) → `process(text)`, which tries the fast router first.
-  - **Router:** `jarvis/brain/router.py`, more than 136 regex rules where the first match wins. Matches run locally through `handle_local`.
-  - **Brain:** otherwise the brain handles it (`jarvis/brain/agent.py`, Claude Agent SDK, `ClaudeSDKClient`).
+- **Main loop (`jalen/app.py`):** microphone → wake word or name → voice detection → speech-to-text (Groq, falling back to Moonshine) → the address gate (`should_act_on`) → `process(text)`, which tries the fast router first.
+  - **Router:** `jalen/brain/router.py`, more than 136 regex rules where the first match wins. Matches run locally through `handle_local`.
+  - **Brain:** otherwise the brain handles it (`jalen/brain/agent.py`, Claude Agent SDK, `ClaudeSDKClient`).
   - **Speech:** replies are spoken with edge-tts.
-- **Tools:** plain functions in `jarvis/tools/*.py`, each module with a `REGISTRY`. `TOOL_SPECS` in `jarvis/brain/tools.py` describes them to the model. Every tool has a tier in `config/safety.yaml`.
-- **Safety engine (`jarvis/safety.py`):** tiers are GREEN (run), AMBER (announce, then run unless he says stop), RED (spoken yes required) and BLACK (refused).
+- **Tools:** plain functions in `jalen/tools/*.py`, each module with a `REGISTRY`. `TOOL_SPECS` in `jalen/brain/tools.py` describes them to the model. Every tool has a tier in `config/safety.yaml`.
+- **Safety engine (`jalen/safety.py`):** tiers are GREEN (run), AMBER (announce, then run unless he says stop), RED (spoken yes required) and BLACK (refused).
   - **Never-touch list:** protected paths, filename patterns and domains, resolved the way Windows resolves them.
-  - **Injection guard:** after Jalen reads untrusted text (email, web, Telegram, another model), the turn is "tainted" (`jarvis/taint.py`). RED and AMBER tools are then refused, and so are the GREEN tools listed in `injection_guard.refuse_from_content`.
+  - **Injection guard:** after Jalen reads untrusted text (email, web, Telegram, another model), the turn is "tainted" (`jalen/taint.py`). RED and AMBER tools are then refused, and so are the GREEN tools listed in `injection_guard.refuse_from_content`.
   - **Router exception:** a router rule that matched his own words, untouched by expansion, is his instruction (`his_own_words` in `handle_local`). Read the CLAUDE.md invariant about it before changing anything nearby.
 - **Audit log:** `data/audit.jsonl` holds every utterance, action and timing line. It is the main source of truth about real use, so read it (read-only) to measure before changing behaviour.
 - **Accounts today:**
@@ -125,16 +125,16 @@ Read the whole document before doing anything. Then read `CLAUDE.md` in the repo
 
 | Area | Owner | Files |
 |---|---|---|
-| Router rules | **B** | `jarvis/brain/router.py` |
-| Reply text joining, reply tone | **B** | the text-assembly part of `Brain.ask` in `jarvis/brain/agent.py`, and the tone and wording parts of `Brain.system_prompt()` |
-| Machine facts | **B** | `jarvis/tools/sysinfo.py`, `jarvis/tools/system.py`, `jarvis/tools/desktop.py` |
-| Research | **B** | `jarvis/tools/research.py` (except `_fetch`'s safety checks, see below) |
-| Safety engine, taint, tiers | **A** | `jarvis/safety.py`, `jarvis/taint.py`, `config/safety.yaml` (B may edit only `injection_guard.suspicious_markers`, after announcing it on the board) |
-| Telegram | **A** | `jarvis/tools/messaging.py`, `stickers.py`, `attachments.py`, `drafting.py` |
-| Browser and web agent | **A** | `jarvis/tools/webagent.py`, `webforms.py`, `browser_ext.py`, `profile.py`, `autofill.py`, `otp.py`, `vault.py` |
-| Files and folder moves | **A** | `jarvis/tools/filesystem.py`, `foldermove.py`, `devwork.py`, `tasks.py` |
-| Microphone and address gates | **A** | the `run()` and `should_act_on` parts of `jarvis/app.py` |
-| Shared, announce first | both | `jarvis/brain/tools.py` (`TOOL_SPECS`), `jarvis/brain/agent.py` (outside B's parts), `tests/conftest.py`, `CLAUDE.md`, `config/jarvis.yaml` |
+| Router rules | **B** | `jalen/brain/router.py` |
+| Reply text joining, reply tone | **B** | the text-assembly part of `Brain.ask` in `jalen/brain/agent.py`, and the tone and wording parts of `Brain.system_prompt()` |
+| Machine facts | **B** | `jalen/tools/sysinfo.py`, `jalen/tools/system.py`, `jalen/tools/desktop.py` |
+| Research | **B** | `jalen/tools/research.py` (except `_fetch`'s safety checks, see below) |
+| Safety engine, taint, tiers | **A** | `jalen/safety.py`, `jalen/taint.py`, `config/safety.yaml` (B may edit only `injection_guard.suspicious_markers`, after announcing it on the board) |
+| Telegram | **A** | `jalen/tools/messaging.py`, `stickers.py`, `attachments.py`, `drafting.py` |
+| Browser and web agent | **A** | `jalen/tools/webagent.py`, `webforms.py`, `browser_ext.py`, `profile.py`, `autofill.py`, `otp.py`, `vault.py` |
+| Files and folder moves | **A** | `jalen/tools/filesystem.py`, `foldermove.py`, `devwork.py`, `tasks.py` |
+| Microphone and address gates | **A** | the `run()` and `should_act_on` parts of `jalen/app.py` |
+| Shared, announce first | both | `jalen/brain/tools.py` (`TOOL_SPECS`), `jalen/brain/agent.py` (outside B's parts), `tests/conftest.py`, `CLAUDE.md`, `config/jalen.yaml` |
 
 Before you touch any file owned by A or marked shared, write on the board what you will change and why, then wait 10 minutes for a reply line from A. If you need something in A's area, such as a new public function in `webagent.py`, ask on the board instead of editing it.
 

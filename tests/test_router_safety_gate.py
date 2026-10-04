@@ -24,12 +24,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.app import Jalen  # noqa: E402
-from jarvis.brain.router import Intent  # noqa: E402
+from jalen.app import Jalen  # noqa: E402
+from jalen.brain.router import Intent  # noqa: E402
 
 
 @pytest.fixture
-def jarvis():
+def jalen():
     j = Jalen()
     j.muted = True
     try:
@@ -39,7 +39,7 @@ def jarvis():
 
 
 # ------------------------------------------------------------- end phrases
-def test_end_phrase_as_a_substring_does_not_end_the_conversation(jarvis, monkeypatch):
+def test_end_phrase_as_a_substring_does_not_end_the_conversation(jalen, monkeypatch):
     """'...just the number, nothing else.' contains the end phrase 'nothing
     else' as a substring but is a real question, not a goodbye."""
     reached_brain = {}
@@ -49,27 +49,27 @@ def test_end_phrase_as_a_substring_does_not_end_the_conversation(jarvis, monkeyp
         return "handled"
 
     monkeypatch.setattr(Jalen, "handle_with_brain", fake_handle_with_brain)
-    jarvis.say = lambda t, force=False: None
+    jalen.say = lambda t, force=False: None
 
-    jarvis.process("What is 47 times 89? Answer with just the number, nothing else.")
+    jalen.process("What is 47 times 89? Answer with just the number, nothing else.")
 
     assert reached_brain.get("text"), "message was swallowed as an end phrase instead of reaching the brain"
 
 
-def test_end_phrase_exact_match_still_ends_the_conversation(jarvis):
+def test_end_phrase_exact_match_still_ends_the_conversation(jalen):
     said = []
-    jarvis.say = lambda t, force=False: said.append(t)
+    jalen.say = lambda t, force=False: said.append(t)
 
-    jarvis.process("nothing else")
+    jalen.process("nothing else")
 
     assert said == ["Any time."]
 
 
 # --------------------------------------------------------------- AMBER gate
-def test_amber_tier_router_tool_is_announced_before_executing(jarvis, monkeypatch):
+def test_amber_tier_router_tool_is_announced_before_executing(jalen, monkeypatch):
     """handle_local() must call announce() for AMBER-tier tools — not just
     run them straight through like GREEN."""
-    jarvis.safety.paranoid = False  # else paranoid_first_week promotes AMBER -> RED
+    jalen.safety.paranoid = False  # else paranoid_first_week promotes AMBER -> RED
     announced = {}
 
     async def fake_announce(self, text):
@@ -83,28 +83,28 @@ def test_amber_tier_router_tool_is_announced_before_executing(jarvis, monkeypatc
     # than doing anything. Deliberately not a real tool name (e.g.
     # close_app used to serve this role, until Phase C actually implemented
     # it) — a real tool's implementation status can change; this can't.
-    reply = jarvis.handle_local(Intent(tool="some_undefined_amber_tool_xyz", args={"name": "notepad"}))
+    reply = jalen.handle_local(Intent(tool="some_undefined_amber_tool_xyz", args={"name": "notepad"}))
 
     assert announced.get("text"), "AMBER tool executed without ever calling announce()"
     assert "stop" in announced["text"].lower()
     assert reply is None  # not implemented — the announce is what's under test
 
 
-def test_amber_tier_stop_cancels_before_executing(jarvis, monkeypatch):
+def test_amber_tier_stop_cancels_before_executing(jalen, monkeypatch):
     """Saying stop during the AMBER window must cancel — not execute anyway."""
-    jarvis.safety.paranoid = False  # else paranoid_first_week promotes AMBER -> RED
+    jalen.safety.paranoid = False  # else paranoid_first_week promotes AMBER -> RED
 
     async def instantly_stopped_announce(self, text):
         raise RuntimeError("cancelled by user")
 
     monkeypatch.setattr(Jalen, "announce", instantly_stopped_announce)
 
-    reply = jarvis.handle_local(Intent(tool="some_undefined_amber_tool_xyz", args={"name": "notepad"}))
+    reply = jalen.handle_local(Intent(tool="some_undefined_amber_tool_xyz", args={"name": "notepad"}))
 
     assert reply == "Cancelled."
 
 
-def test_green_tier_router_tool_still_executes_without_announcing(jarvis, monkeypatch):
+def test_green_tier_router_tool_still_executes_without_announcing(jalen, monkeypatch):
     """Sanity check the fix didn't over-apply: GREEN tools must NOT announce."""
     announced = {"called": False}
 
@@ -113,7 +113,7 @@ def test_green_tier_router_tool_still_executes_without_announcing(jarvis, monkey
 
     monkeypatch.setattr(Jalen, "announce", fake_announce)
 
-    reply = jarvis.handle_local(Intent(tool="get_time", args={}))
+    reply = jalen.handle_local(Intent(tool="get_time", args={}))
 
     assert announced["called"] is False
     assert reply and "it's" in reply.lower()

@@ -1,5 +1,5 @@
 """
-Tests for jarvis/tools/filesystem.py (Phase C). Real file I/O in an
+Tests for jalen/tools/filesystem.py (Phase C). Real file I/O in an
 isolated tmp_path per test — no mocks standing in for the filesystem.
 
 The never-touch list itself is SafetyEngine's job and is already covered
@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.tools import filesystem as fs  # noqa: E402
+from jalen.tools import filesystem as fs  # noqa: E402
 
 
 def test_create_read_edit_roundtrip(tmp_path):
@@ -133,7 +133,7 @@ def test_search_files_skips_excluded_dirs(tmp_path, monkeypatch):
     excluded = tmp_path / "node_modules"
     excluded.mkdir()
     (excluded / "target.txt").write_text("", encoding="utf-8")
-    from jarvis.config import CONFIG
+    from jalen.config import CONFIG
 
     monkeypatch.setitem(CONFIG, "index", {**CONFIG.get("index", {}), "exclude_dirs": ["node_modules"]})
     result = fs.search_files("target", root=str(tmp_path))
@@ -150,14 +150,14 @@ def test_search_files_skips_never_touch_dirs(tmp_path, monkeypatch):
 
 
 def test_unified_registry_has_no_collisions_and_covers_all_tools():
-    from jarvis import tools
+    from jalen import tools
 
     for name in ("read_file", "delete_file", "get_window_list", "read_screen", "get_time", "open_app"):
         assert name in tools.REGISTRY, f"{name} missing from unified registry"
 
 
 def test_call_unknown_tool_raises_keyerror():
-    from jarvis import tools
+    from jalen import tools
 
     with pytest.raises(KeyError):
         tools.call("not_a_real_tool", {})

@@ -49,8 +49,8 @@ import pytest
 
 from claude_agent_sdk.types import AssistantMessage, ResultMessage, TextBlock
 
-from jarvis.brain import agent as agent_mod
-from jarvis.brain.agent import Brain, BrainUnavailable, _looks_like_a_dead_client
+from jalen.brain import agent as agent_mod
+from jalen.brain.agent import Brain, BrainUnavailable, _looks_like_a_dead_client
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +244,7 @@ class _DownBrain:
 
 
 def _app(brain, creds_file):
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     app = Jalen.__new__(Jalen)
     app.brain = brain
@@ -294,7 +294,7 @@ def test_signing_back_in_is_noticed_without_a_restart(tmp_path):
 
 
 def test_the_latch_is_retried_eventually_even_with_no_file_change(tmp_path):
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     brain = _DownBrain()
     app = _app(brain, tmp_path / ".credentials.json")

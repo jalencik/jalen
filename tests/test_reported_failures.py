@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.brain.router import IntentRouter, looks_like_a_name
-from jarvis.config import CONFIG
+from jalen.brain.router import IntentRouter, looks_like_a_name
+from jalen.config import CONFIG
 
 
 @pytest.fixture(scope="module")
@@ -130,7 +130,7 @@ def test_a_dead_cli_subprocess_is_recognised_as_recoverable(message):
     subprocess lost the console window it was given. Every turn in between
     answered "My brain hit an error".
     """
-    from jarvis.brain.agent import _looks_like_a_dead_client
+    from jalen.brain.agent import _looks_like_a_dead_client
 
     assert _looks_like_a_dead_client(RuntimeError(message)) is True
 
@@ -144,7 +144,7 @@ def test_real_errors_are_not_mistaken_for_a_dead_client(message):
     Reconnecting on a genuine error would retry a request that failed for a
     reason retrying cannot fix, and hide the reason while doing it.
     """
-    from jarvis.brain.agent import _looks_like_a_dead_client
+    from jalen.brain.agent import _looks_like_a_dead_client
 
     assert _looks_like_a_dead_client(RuntimeError(message)) is False
 
@@ -153,7 +153,7 @@ def test_the_brain_reconnects_rather_than_giving_up():
     """The reconnect path has to exist, not just the detection."""
     import inspect
 
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     source = inspect.getsource(Brain.ask)
     assert "_restart_client" in source, "a dead client is never replaced"
@@ -204,7 +204,7 @@ class _BareApp:
 def _ask(app, text="hello"):
     import asyncio
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     # The real latch helpers, not stand-ins, so a change to how the latch
     # decides is exercised here too.
@@ -266,7 +266,7 @@ def test_the_cli_subprocess_gets_no_console_window():
 
     import anyio
 
-    from jarvis.brain.agent import suppress_cli_console_window
+    from jalen.brain.agent import suppress_cli_console_window
 
     suppress_cli_console_window()
     if sys.platform != "win32":
@@ -284,7 +284,7 @@ def test_the_cli_subprocess_gets_no_console_window():
 def test_brain_start_suppresses_the_window_before_spawning():
     import inspect
 
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     source = inspect.getsource(Brain.start)
     assert "suppress_cli_console_window()" in source
@@ -305,7 +305,7 @@ def test_barge_in_on_noise_does_not_announce_a_failure_to_understand():
     import inspect
     import re
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.run)
     block = re.search(
@@ -333,7 +333,7 @@ def test_playing_a_video_sends_no_keystrokes():
     """
     import inspect
 
-    from jarvis.tools.web import play_on_youtube
+    from jalen.tools.web import play_on_youtube
 
     source = inspect.getsource(play_on_youtube)
     assert "SendKeys" not in source, "still typing into whatever happens to have focus"
@@ -348,7 +348,7 @@ def test_the_first_result_parser_ignores_non_video_ids():
     """
     import inspect
 
-    from jarvis.tools.web import _first_youtube_result
+    from jalen.tools.web import _first_youtube_result
 
     source = inspect.getsource(_first_youtube_result)
     assert "videoRenderer" in source
@@ -359,7 +359,7 @@ def test_no_video_found_does_not_claim_playback():
     Reporting "Playing X" when nothing started is the failure mode this
     project keeps coming back to: a silent omission that reads as success.
     """
-    import jarvis.tools.web as web
+    import jalen.tools.web as web
 
     original = web._first_youtube_result
     web._first_youtube_result = lambda q: (None, None)

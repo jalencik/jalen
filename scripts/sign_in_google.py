@@ -41,8 +41,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jarvis.config import CONFIG                      # noqa: E402
-from jarvis.tools.webagent import (                   # noqa: E402
+from jalen.config import CONFIG                      # noqa: E402
+from jalen.tools.webagent import (                   # noqa: E402
     PROFILE_DIR, _chrome_exe, _kill_stale_profile_chrome,
 )
 
@@ -71,9 +71,9 @@ def main() -> int:
         print("    already signed in as:", ", ".join(already))
         if wanted and wanted in already:
             print()
-            print("That is the account config/jarvis.yaml names. Nothing to do.")
+            print("That is the account config/jalen.yaml names. Nothing to do.")
             return 0
-        print("    config/jarvis.yaml names:", wanted or "(nothing)")
+        print("    config/jalen.yaml names:", wanted or "(nothing)")
         print("    Opening anyway so you can add or switch account.")
     else:
         print("    no Google account yet - this is why you saw an empty chooser")
@@ -82,7 +82,7 @@ def main() -> int:
     exe = _chrome_exe()
     if not exe:
         print("I can't find chrome.exe. Install Chrome, or check the paths in")
-        print("jarvis/tools/webagent.py.")
+        print("jalen/tools/webagent.py.")
         return 1
 
     # A crash can leave a chrome.exe holding this profile; a second launch
@@ -130,7 +130,7 @@ def main() -> int:
             print()
             print("Signed in as:", ", ".join(sorted(now - seen)))
             if wanted and wanted not in now:
-                print(f"NOTE: config/jarvis.yaml names {wanted}, which is not")
+                print(f"NOTE: config/jalen.yaml names {wanted}, which is not")
                 print("in this profile. Jalen will look for that one.")
                 return 1
             print()

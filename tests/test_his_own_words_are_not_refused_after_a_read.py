@@ -38,11 +38,11 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis import taint
-from jarvis.app import Jalen
-from jarvis.brain.router import Intent
+from jalen import taint
+from jalen.app import Jalen
+from jalen.brain.router import Intent
 
-from test_router_safety_gate import jarvis  # noqa: F401 - the fixture
+from test_router_safety_gate import jalen  # noqa: F401 - the fixture
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +57,7 @@ def _tainted_turn():
 def ran(monkeypatch):
     """Records what would have run; nothing real is touched."""
     calls = []
-    from jarvis import tools as systools
+    from jalen import tools as systools
 
     monkeypatch.setattr(systools, "call", lambda tool, args: calls.append((tool, dict(args))) or "done")
     return calls
@@ -70,8 +70,8 @@ def ran(monkeypatch):
     ("open_folder", {"path": "~/Downloads"}),
     ("cancel_task", {"text": "cancel that"}),
 ])
-def test_a_rule_that_matched_his_own_words_runs_after_a_read(jarvis, ran, tool, args):
-    reply = jarvis.handle_local(Intent(tool=tool, args=args, reply=None), his_own_words=True)
+def test_a_rule_that_matched_his_own_words_runs_after_a_read(jalen, ran, tool, args):
+    reply = jalen.handle_local(Intent(tool=tool, args=args, reply=None), his_own_words=True)
     assert ran and ran[0][0] == tool, f"{tool} was refused: {reply}"
 
 
@@ -79,16 +79,16 @@ def test_a_rule_that_matched_his_own_words_runs_after_a_read(jarvis, ran, tool, 
     ("keyboard_shortcut", {"keys": "{PageDown}"}),
     ("open_app", {"name": "spotify"}),
 ])
-def test_without_that_flag_the_taint_still_decides(jarvis, ran, tool, args):
+def test_without_that_flag_the_taint_still_decides(jalen, ran, tool, args):
     """The default is unchanged: a habit recalled, or a caller that does not
     know, is checked against the taint exactly as before."""
-    reply = jarvis.handle_local(Intent(tool=tool, args=args, reply=None))
+    reply = jalen.handle_local(Intent(tool=tool, args=args, reply=None))
     assert not ran
     assert "I won't do that" in (reply or "")
 
 
-def test_his_own_words_do_not_unlock_what_the_never_touch_list_forbids(jarvis, ran):
-    reply = jarvis.handle_local(
+def test_his_own_words_do_not_unlock_what_the_never_touch_list_forbids(jalen, ran):
+    reply = jalen.handle_local(
         Intent(tool="open_target", args={"name": "C:\\Windows\\System32\\cmd.exe"}, reply=None),
         his_own_words=True)
     assert not ran, reply
@@ -103,9 +103,9 @@ def test_process_passes_the_flag_for_a_router_match_and_not_for_a_habit():
     assert "handle_local(Intent(tool=tool, args=args, reply=None))" in habit_call
 
 
-def test_an_expanded_sentence_is_not_his_own_words(jarvis, ran, monkeypatch):
+def test_an_expanded_sentence_is_not_his_own_words(jalen, ran, monkeypatch):
     """'open it' became 'open <something that was read>': taint decides."""
-    from jarvis import conversation
+    from jalen import conversation
 
     # "open spotify" is a real router rule, so the expanded sentence DOES
     # reach handle_local - the assertion below cannot pass by not running.
@@ -119,14 +119,14 @@ def test_an_expanded_sentence_is_not_his_own_words(jarvis, ran, monkeypatch):
         return real(self, intent, **kw)
 
     monkeypatch.setattr(Jalen, "handle_local", spy)
-    jarvis.say = lambda t, force=False: None
-    jarvis.process("open it", from_him=False)
+    jalen.say = lambda t, force=False: None
+    jalen.process("open it", from_him=False)
     assert "his_own_words" in seen, "the expanded sentence never reached the router path"
     assert seen["his_own_words"] is False
     assert not ran, "an expanded sentence ran after a read"
 
 
-def test_an_unexpanded_router_match_sends_the_flag_through_process(jarvis, ran, monkeypatch):
+def test_an_unexpanded_router_match_sends_the_flag_through_process(jalen, ran, monkeypatch):
     seen = {}
     real = Jalen.handle_local
 
@@ -135,13 +135,13 @@ def test_an_unexpanded_router_match_sends_the_flag_through_process(jarvis, ran, 
         return real(self, intent, **kw)
 
     monkeypatch.setattr(Jalen, "handle_local", spy)
-    jarvis.say = lambda t, force=False: None
-    jarvis.process("scroll down", from_him=False)
+    jalen.say = lambda t, force=False: None
+    jalen.process("scroll down", from_him=False)
     assert seen.get("his_own_words") is True
     assert ran and ran[0][0] == "keyboard_shortcut"
 
 
-def test_a_sentence_admitted_by_a_door_keeps_the_taint_check(jarvis, ran, monkeypatch):
+def test_a_sentence_admitted_by_a_door_keeps_the_taint_check(jalen, ran, monkeypatch):
     """
     The listening work lets some sentences in WITHOUT his name (a misheard
     name, a polite request, the bare-wake window). Those are the least certain
@@ -149,12 +149,12 @@ def test_a_sentence_admitted_by_a_door_keeps_the_taint_check(jarvis, ran, monkey
     skipping the taint check: found by the independent re-check of that work.
     An ordinary follow-up (no door) keeps the exemption.
     """
-    jarvis.say = lambda t, force=False: None
+    jalen.say = lambda t, force=False: None
 
-    jarvis.process("scroll down", from_him=False, door="polite-request")
+    jalen.process("scroll down", from_him=False, door="polite-request")
     assert not ran, "a door-admitted sentence ran after a read"
 
-    jarvis.process("scroll down", from_him=False)
+    jalen.process("scroll down", from_him=False)
     assert ran and ran[0][0] == "keyboard_shortcut"
 
 
@@ -170,6 +170,6 @@ def test_the_brain_path_is_untouched():
     """The model's tool calls still take their origin from the taint."""
     import inspect
 
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     assert "taint.origin_now()" in inspect.getsource(Brain._make_hook)

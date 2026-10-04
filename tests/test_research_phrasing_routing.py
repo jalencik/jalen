@@ -31,8 +31,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.brain.router import IntentRouter  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
+from jalen.brain.router import IntentRouter  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
 
 
 @pytest.fixture

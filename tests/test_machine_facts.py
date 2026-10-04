@@ -35,7 +35,7 @@ from datetime import timedelta, timezone
 
 import pytest
 
-from jarvis.tools import desktop, system
+from jalen.tools import desktop, system
 
 
 # ---------------------------------------------------------------------------
@@ -576,8 +576,8 @@ NEW_TOOLS = ("get_timezone", "time_in", "get_uptime", "foreground_app", "running
 def test_the_new_tools_are_registered_specced_and_green():
     import yaml
 
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
 
     y = yaml.safe_load(open("config/safety.yaml", encoding="utf-8"))
     green = set((y.get("green") or {}).get("tools") or [])
@@ -591,7 +591,7 @@ def test_the_new_tools_are_registered_specced_and_green():
 
 
 def test_time_in_is_the_only_one_that_takes_an_argument():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     assert set(TOOL_SPECS["time_in"][1]) == {"place"}
     for name in ("get_timezone", "get_uptime", "foreground_app"):
@@ -600,8 +600,8 @@ def test_time_in_is_the_only_one_that_takes_an_argument():
 
 def test_the_new_tools_classify_green_even_after_a_read():
     """Reading what a stranger wrote must not take away 'what time is it in Tokyo'."""
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False

@@ -1,5 +1,5 @@
 """
-Tests for jarvis/tools/documents.py.
+Tests for jalen/tools/documents.py.
 
 .docx/.pptx/.xlsx are exercised against REAL minimal OOXML zip files built
 here with the standard library zipfile module — not mocks standing in for
@@ -20,8 +20,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.tools import documents as docs  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.tools import documents as docs  # noqa: E402
 
 
 def _zip(path: Path, entries: dict[str, str]) -> Path:
@@ -203,7 +203,7 @@ def test_pdf_text_is_tidied_into_prose():
     file here). Left alone that triples the token cost of handing the
     document to the model and sounds like dictation when spoken.
     """
-    from jarvis.tools.documents import _tidy_pdf_text
+    from jalen.tools.documents import _tidy_pdf_text
 
     tidied = _tidy_pdf_text("the\nquick\nbrown\nfox\n\n\nnext para")
     assert "the quick brown fox" in tidied
@@ -335,7 +335,7 @@ def test_search_in_files_honours_max_file_mb(tmp_path, monkeypatch):
 
 # ----------------------------------------------------------------- registry
 def test_registered_in_unified_registry():
-    from jarvis import tools
+    from jalen import tools
 
     for name in ("read_document", "summarize_document", "search_in_files"):
         assert name in tools.REGISTRY, f"{name} missing from unified registry"
@@ -355,7 +355,7 @@ def test_call_unknown_tool_raises_keyerror():
 
 # ------------------------------------------------------------------- safety
 def test_documents_tools_are_all_green():
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False
@@ -367,7 +367,7 @@ def test_documents_tools_are_all_green():
 
 
 def test_documents_tool_specs_match_registry():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     for name in ("read_document", "summarize_document", "search_in_files"):
         assert name in TOOL_SPECS, f"{name} missing a TOOL_SPECS entry"

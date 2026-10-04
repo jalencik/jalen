@@ -36,7 +36,7 @@ import time
 
 import pytest
 
-from jarvis.app import ECHO_TAIL_S, Jalen
+from jalen.app import ECHO_TAIL_S, Jalen
 
 QUESTION = ("send Ali Karimov a voice message in Jalen's synthetic voice, saying: "
             "ok sounds good see you at six. Confirm?")

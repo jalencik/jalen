@@ -119,7 +119,7 @@ def test_barge_in_latency_is_measured():
     assert isinstance(result["injection_to_stop_ms"], float)
 
 
-def test_failure_paths_keep_jarvis_alive():
+def test_failure_paths_keep_jalen_alive():
     """Empty audio, pure silence, a 30s utterance, an invalid Groq key, a
     simulated timeout, no network — every case must end in either a clean
     result or the controlled RuntimeError transcribe() already raises when
@@ -155,8 +155,8 @@ def test_the_wake_clip_is_padded_at_the_end_not_the_front():
     """
     import numpy as np
 
-    from jarvis.audio.wake import WakeWord
-    from jarvis.config import CONFIG
+    from jalen.audio.wake import WakeWord
+    from jalen.config import CONFIG
 
     def best_score(audio):
         wake = WakeWord(CONFIG)

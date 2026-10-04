@@ -28,8 +28,8 @@ import inspect
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.tools import vault
+from jalen.config import CONFIG
+from jalen.tools import vault
 
 SOURCE = inspect.getsource(vault._ask_passphrase_on_screen)
 
@@ -111,7 +111,7 @@ def test_passphrase_is_still_a_redacted_argument():
     redaction list once already — which wrote the vault's master passphrase
     into a plain-text file sitting next to the vault.
     """
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     verdict = SafetyEngine(CONFIG).classify("unlock_vault",
                                             {"passphrase": "SUPERSECRET"})
@@ -122,7 +122,7 @@ def test_the_typed_prompt_is_still_refused_to_content():
     """
     A passphrase box any web page can summon is a phishing primitive.
     """
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     assert engine.classify("unlock_vault_prompt", {}).tier is Tier.AMBER

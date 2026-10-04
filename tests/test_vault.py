@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from jarvis.tools import vault
+from jalen.tools import vault
 
 
 @pytest.fixture(autouse=True)
@@ -132,7 +132,7 @@ def test_get_secret_is_not_exposed_as_a_tool():
     straight to the code that types them and nowhere else.
     """
     assert "get_secret" not in vault.REGISTRY
-    from jarvis import tools
+    from jalen import tools
 
     assert "get_secret" not in tools.REGISTRY
 
@@ -219,9 +219,9 @@ def test_decisions_survive_a_restart():
 
 # ----------------------------------------------------------- reachability
 def test_tiers_match_what_each_tool_does():
-    from jarvis import tools
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen import tools
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     expected = {

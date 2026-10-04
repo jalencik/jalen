@@ -36,8 +36,8 @@ import sys
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows path rules")
 

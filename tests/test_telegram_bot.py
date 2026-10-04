@@ -1,5 +1,5 @@
 """
-Tests for jarvis/integrations/telegram_bot.py (Phase D).
+Tests for jalen/integrations/telegram_bot.py (Phase D).
 
 TELEGRAM_ALLOWED_USER_IDS is the entire security boundary for this
 integration — is_authorized() gets the most thorough coverage here, as a
@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.integrations.telegram_bot import build_dispatcher, is_authorized  # noqa: E402
+from jalen.integrations.telegram_bot import build_dispatcher, is_authorized  # noqa: E402
 
 
 # ------------------------------------------------------------- is_authorized
@@ -86,25 +86,25 @@ class _FakeJarvis:
         self.processed.append(text)
 
 
-def _get_handler(jarvis, allowed_user_ids):
-    dp = build_dispatcher(jarvis, allowed_user_ids)
+def _get_handler(jalen, allowed_user_ids):
+    dp = build_dispatcher(jalen, allowed_user_ids)
     return dp.message.handlers[0].callback
 
 
 def test_unauthorized_message_never_reaches_process():
-    jarvis = _FakeJarvis()
-    handler = _get_handler(jarvis, [123])
+    jalen = _FakeJarvis()
+    handler = _get_handler(jalen, [123])
     message = _FakeMessage(user_id=999, text="do something")
 
     asyncio.run(handler(message))
 
-    assert jarvis.processed == []
+    assert jalen.processed == []
     assert message.answer_calls == []
 
 
 def test_authorized_message_dispatches_to_process():
-    jarvis = _FakeJarvis()
-    handler = _get_handler(jarvis, [123])
+    jalen = _FakeJarvis()
+    handler = _get_handler(jalen, [123])
     message = _FakeMessage(user_id=123, text="what time is it")
 
     asyncio.run(handler(message))
@@ -113,21 +113,21 @@ def test_authorized_message_dispatches_to_process():
     # give it a moment to actually execute before asserting.
     import time
     for _ in range(50):
-        if jarvis.processed:
+        if jalen.processed:
             break
         time.sleep(0.02)
 
-    assert jarvis.processed == ["what time is it"]
+    assert jalen.processed == ["what time is it"]
 
 
 def test_empty_text_is_ignored():
-    jarvis = _FakeJarvis()
-    handler = _get_handler(jarvis, [123])
+    jalen = _FakeJarvis()
+    handler = _get_handler(jalen, [123])
     message = _FakeMessage(user_id=123, text="   ")
 
     asyncio.run(handler(message))
 
-    assert jarvis.processed == []
+    assert jalen.processed == []
 
 
 def test_authorized_message_overrides_say_to_reply_on_this_chat():
@@ -136,15 +136,15 @@ def test_authorized_message_overrides_say_to_reply_on_this_chat():
     asyncio.run() call is still active, so the override must be exercised
     inside it, not after (the exact §3 class of bug: a loop torn down out
     from under an object that still expects to use it)."""
-    jarvis = _FakeJarvis()
-    handler = _get_handler(jarvis, [123])
+    jalen = _FakeJarvis()
+    handler = _get_handler(jalen, [123])
     message = _FakeMessage(user_id=123, text="hello")
 
     async def scenario():
         await handler(message)
-        assert jarvis.say is not None
-        assert jarvis.say_blocking is not None
-        jarvis.say("a reply")
+        assert jalen.say is not None
+        assert jalen.say_blocking is not None
+        jalen.say("a reply")
         await asyncio.sleep(0.05)  # let the scheduled coroutine run
 
     asyncio.run(scenario())

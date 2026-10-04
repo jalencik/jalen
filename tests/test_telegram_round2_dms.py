@@ -33,10 +33,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier, confirmation_question
-from jarvis.tools import messaging
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier, confirmation_question
+from jalen.tools import messaging
 
 from test_telegram_dms import (  # noqa: F401 - _clean_taint is an autouse fixture
     ALI, Dialog, FakeClient, Msg, User, _clean_taint, wire,
@@ -226,13 +226,13 @@ def test_the_number_of_bytes_that_arrive_is_checked_not_only_the_number_declared
     ("5 + 5 = 10", "", "en"),
 ])
 def test_the_language_is_the_one_named_else_read_from_the_script(text, language, expect):
-    from jarvis import voicelang
+    from jalen import voicelang
 
     assert voicelang.resolve(text, language) == expect
 
 
 def test_each_language_has_a_name_to_say_in_the_question():
-    from jarvis import voicelang
+    from jalen import voicelang
 
     assert voicelang.name("uz") == "Uzbek"
     assert voicelang.name("ru") == "Russian"
@@ -249,7 +249,7 @@ def test_the_config_names_a_real_voice_for_uzbek_and_russian_and_says_how_it_is_
     assert CONFIG.get_path("telegram.personal.voice_message.voices.ru") == "ru-RU-DmitryNeural"
     from pathlib import Path
 
-    text = (Path(__file__).resolve().parent.parent / "config" / "jarvis.yaml").read_text(
+    text = (Path(__file__).resolve().parent.parent / "config" / "jalen.yaml").read_text(
         encoding="utf-8")
     at = text.index("voices:")
     block = text[max(0, at - 1500): at + 400]
@@ -263,7 +263,7 @@ def _capture_voice(monkeypatch):
         seen.append((self.voice, text))
         return b"mp3"
 
-    monkeypatch.setattr("jarvis.audio.tts.Speaker._synthesise", fake)
+    monkeypatch.setattr("jalen.audio.tts.Speaker._synthesise", fake)
     return seen
 
 
@@ -330,7 +330,7 @@ def test_the_question_for_english_words_is_the_one_it_always_was(engine):
 
 
 def test_the_spec_offers_a_language_and_says_when_to_use_it():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     description, params = TOOL_SPECS["send_voice_message"]
     assert set(params) == {"to", "text", "language"}
@@ -343,7 +343,7 @@ def test_the_spec_offers_a_language_and_says_when_to_use_it():
 # 3. "a voice message" is not a chat name
 # =========================================================================
 def _route(phrase):
-    from jarvis.brain.router import IntentRouter
+    from jalen.brain.router import IntentRouter
 
     return IntentRouter(CONFIG).route(phrase)
 
@@ -379,7 +379,7 @@ def test_a_text_that_only_mentions_a_voice_message_still_routes(phrase, to, text
 # 4. The spec does not nudge a read followed by a transcription
 # =========================================================================
 def test_the_transcribe_spec_says_it_is_for_his_own_request_not_after_a_read():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     description = TOOL_SPECS["transcribe_voice_note"][0]
     lowered = description.lower()
@@ -390,7 +390,7 @@ def test_the_transcribe_spec_says_it_is_for_his_own_request_not_after_a_read():
 
 @pytest.fixture(scope="module")
 def prompt() -> str:
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     async def noop(*a, **k):
         return True
@@ -420,8 +420,8 @@ def test_that_is_what_the_gate_does_after_a_read(engine, monkeypatch):
 # =========================================================================
 def test_the_floor_is_the_one_the_transcriber_applies():
     """Pinned to the real Transcriber, so the two cannot drift apart."""
-    from jarvis.audio.stt import Transcriber
-    from jarvis.config import SECRETS
+    from jalen.audio.stt import Transcriber
+    from jalen.config import SECRETS
 
     assert messaging._VOICE_NOTE_MIN_SECONDS == 0.2
     stt = Transcriber(CONFIG, SECRETS)
@@ -437,7 +437,7 @@ def test_the_floor_is_the_one_the_transcriber_applies():
 
 def test_a_voice_note_under_a_fifth_of_a_second_says_too_short_and_sends_nothing(
         monkeypatch):
-    from jarvis.tools import messaging as m
+    from jalen.tools import messaging as m
 
     short, _ = m._to_voice_note(_mp3_tone(0.12))
     _notes_world(monkeypatch, short)
@@ -563,7 +563,7 @@ def test_an_echo_that_arrives_after_the_endpoint_and_the_transcription_is_still_
     the transcription - 3.2 s at the median - so a window of ECHO_TAIL_S alone
     would have caught almost none of them. Judged over the doors' window.
     """
-    from jarvis.app import ECHO_TAIL_S
+    from jalen.app import ECHO_TAIL_S
 
     for asked_ago in (ECHO_TAIL_S + 0.5, 6.0, 11.0):
         j = _heard_while_asking(VOICE_QUESTION, "ok sound good see you at six confirm",
@@ -572,7 +572,7 @@ def test_an_echo_that_arrives_after_the_endpoint_and_the_transcription_is_still_
 
 
 def test_after_that_window_the_same_words_are_him():
-    from jarvis.app import ECHO_REACHES_THE_GATE_S
+    from jalen.app import ECHO_REACHES_THE_GATE_S
 
     j = _heard_while_asking(VOICE_QUESTION, "ok sound good see you at six confirm",
                             asked_ago=ECHO_REACHES_THE_GATE_S + 1)
@@ -588,14 +588,14 @@ def test_a_one_word_tail_is_the_echo_for_the_whole_window_not_just_three_seconds
     echo. Now judged over the whole window; "yes" is the answer
     (tests/test_confirmation_echo_round_two.py).
     """
-    from jarvis.app import ECHO_TAIL_S
+    from jalen.app import ECHO_TAIL_S
 
     j = _heard_while_asking(VOICE_QUESTION, "confirm", asked_ago=ECHO_TAIL_S + 1)
     assert j._answer_q.empty()
 
 
 def test_a_one_word_confirm_after_the_whole_window_is_a_real_yes():
-    from jarvis.app import ECHO_REACHES_THE_GATE_S
+    from jalen.app import ECHO_REACHES_THE_GATE_S
 
     j = _heard_while_asking(VOICE_QUESTION, "confirm", asked_ago=ECHO_REACHES_THE_GATE_S + 1)
     assert not j._answer_q.empty()
@@ -614,13 +614,13 @@ def _measure():
 
 def test_the_real_log_none_of_his_answers_to_a_confirmation_is_taken_for_its_echo():
     """
-    The measurement quoted at _CONFIRM_ECHO_SHARE in jarvis/app.py, runnable:
+    The measurement quoted at _CONFIRM_ECHO_SHARE in jalen/app.py, runnable:
     every spoken "...Confirm?" in the log and the next thing he said. Skipped
     where there is no log ($JALEN_AUDIT_LOG, or data/audit.jsonl).
     """
     import re
 
-    import jarvis.app as app
+    import jalen.app as app
 
     module = _measure()
     log = module.audit_log_path()
@@ -661,7 +661,7 @@ def test_the_leaky_rule_carries_its_measurement_and_is_the_one_the_gate_uses():
     """
     import inspect
 
-    import jarvis.app as app
+    import jalen.app as app
 
     assert app._CONFIRM_ECHO_MIN_WORDS == 4 and app._CONFIRM_ECHO_SHARE == 0.80
     source = inspect.getsource(app)
@@ -679,7 +679,7 @@ def _page(text="<html><title>t</title><p>the article</p></html>"):
 
 def test_a_link_in_a_message_he_asked_to_have_read_can_be_followed_in_that_turn(
         monkeypatch, net):
-    from jarvis.tools import research
+    from jalen.tools import research
 
     wire(monkeypatch, FakeClient(dialogs=[Dialog(ALI)], chats={ALI.id: [
         Msg(4, "the paper is at https://papers.example/abs/2410.00001 have a look",
@@ -693,7 +693,7 @@ def test_a_link_in_a_message_he_asked_to_have_read_can_be_followed_in_that_turn(
 
 
 def test_an_address_the_message_did_not_show_is_still_refused(monkeypatch, net):
-    from jarvis.tools import research
+    from jalen.tools import research
 
     wire(monkeypatch, FakeClient(dialogs=[Dialog(ALI)], chats={ALI.id: [
         Msg(4, "the paper is at https://papers.example/abs/2410.00001", sender=ALI)]}))
@@ -706,7 +706,7 @@ def test_an_address_the_message_did_not_show_is_still_refused(monkeypatch, net):
 
 def test_a_link_in_a_voice_note_transcript_or_a_search_hit_is_followable_too(
         monkeypatch, net, ogg):
-    from jarvis.tools import research
+    from jalen.tools import research
 
     _notes_world(monkeypatch, ogg, words="read https://news.example/story-9 before the call")
     messaging.transcribe_voice_note(chat="Ali Karimov")

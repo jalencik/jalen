@@ -17,8 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.brain.router import IntentRouter  # noqa: E402
-from jarvis.config import CONFIG, Cfg  # noqa: E402
+from jalen.brain.router import IntentRouter  # noqa: E402
+from jalen.config import CONFIG, Cfg  # noqa: E402
 
 
 @pytest.fixture
@@ -130,14 +130,14 @@ def test_no_catch_all_rule_shadows_a_self_command(router):
 def test_title_pattern_is_case_insensitive():
     """The router lowercases every utterance, so a case-sensitive title
     regex never matched real window titles — close/focus silently failed."""
-    from jarvis.tools.system import _title_pattern
+    from jalen.tools.system import _title_pattern
 
     assert _title_pattern("chrome").search("Untitled - Google Chrome")
     assert _title_pattern("notepad").search("Untitled - Notepad")
 
 
 def test_title_pattern_escapes_regex_characters():
-    from jarvis.tools.system import _title_pattern
+    from jalen.tools.system import _title_pattern
 
     assert _title_pattern("c++ (test)").search("my c++ (test) window")
 
@@ -146,7 +146,7 @@ def test_title_pattern_escapes_regex_characters():
 def test_unknown_app_is_reported_not_faked():
     """open_app used to reply "Opening X" for anything Popen didn't raise on,
     so a nonexistent app produced a confident success and nothing opened."""
-    from jarvis.tools.system import open_app
+    from jalen.tools.system import open_app
 
     result = open_app("zzz_definitely_not_an_app_9x7")
     assert "couldn't find" in result.lower()
@@ -154,7 +154,7 @@ def test_unknown_app_is_reported_not_faked():
 
 
 def test_known_app_resolves_to_a_real_target():
-    from jarvis.tools.system import _resolve_executable
+    from jalen.tools.system import _resolve_executable
 
     assert _resolve_executable("notepad")
     assert _resolve_executable("zzz_definitely_not_an_app_9x7") is None
@@ -164,7 +164,7 @@ def test_known_app_resolves_to_a_real_target():
 def test_sentence_streaming_config_is_actually_read():
     """tts.sentence_streaming was documented and configured but nothing read
     it — synthesis and playback were always strictly serial."""
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     on = Cfg({**CONFIG, "tts": {**CONFIG.get("tts", {}), "sentence_streaming": True}})
     off = Cfg({**CONFIG, "tts": {**CONFIG.get("tts", {}), "sentence_streaming": False}})
@@ -176,7 +176,7 @@ def test_speaker_serializes_concurrent_calls():
     """Two turns finishing at once both called say(), and since the
     interrupt/speaking flags are instance state one call's cleanup clobbered
     the other's mid-playback."""
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     speaker = Speaker(CONFIG)
     overlaps = []
@@ -208,7 +208,7 @@ def test_queued_seconds_reports_backlog():
     """The wake handler needs this to tell "the rest of your sentence"
     (keep) from "the machine stalled" (drop)."""
     import numpy as np
-    from jarvis.audio.mic import Microphone
+    from jalen.audio.mic import Microphone
 
     mic = Microphone(CONFIG)
     assert mic.queued_seconds() == 0.0
@@ -222,7 +222,7 @@ def test_queued_seconds_reports_backlog():
 def test_window_state_is_green_not_amber():
     """Unclassified tools default to AMBER, so minimising a window paid a
     mandatory 4-second announce-and-wait."""
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False
@@ -233,7 +233,7 @@ def test_window_state_is_green_not_amber():
 
 def test_private_mode_default_is_honoured(tmp_path):
     """memory.private_mode_default was configurable but ignored."""
-    from jarvis.audit import AuditLog
+    from jalen.audit import AuditLog
 
     cfg = Cfg({
         **CONFIG,
@@ -251,27 +251,27 @@ def test_generic_client_name_resolves_to_whats_installed():
     AyuGram on this machine. String similarity alone never gets there
     ("telegram" vs "ayugram" scores below any safe cutoff), which is why an
     explicit equivalence family exists."""
-    from jarvis.tools.launcher import resolve_app
+    from jalen.tools.launcher import resolve_app
 
     target, _matched = resolve_app("telegram")
     assert target, "no installed Telegram-family client resolved"
 
 
 def test_filler_words_do_not_defeat_app_lookup():
-    from jarvis.tools.launcher import resolve_app
+    from jalen.tools.launcher import resolve_app
 
     assert resolve_app("my chrome")[1] == resolve_app("chrome")[1]
 
 
 def test_open_target_is_honest_when_nothing_matches():
-    from jarvis.tools.launcher import open_target
+    from jalen.tools.launcher import open_target
 
     assert "couldn't find" in open_target("zzz_no_such_thing_9x7").lower()
 
 
 def test_learned_alias_survives_and_resolves(tmp_path, monkeypatch):
     """A nickname you have to re-teach every restart is worthless."""
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
 
     monkeypatch.setattr(launcher, "ALIASES_PATH", tmp_path / "aliases.json")
     desktop = str(Path.home() / "Desktop")
@@ -282,7 +282,7 @@ def test_learned_alias_survives_and_resolves(tmp_path, monkeypatch):
 
 def test_file_search_ignores_filler_words():
     """"open my CV" must search for "cv", not the literal phrase "my cv"."""
-    from jarvis.tools.launcher import find_files
+    from jalen.tools.launcher import find_files
 
     assert find_files("my cv") == find_files("cv")
 
@@ -290,8 +290,8 @@ def test_file_search_ignores_filler_words():
 def test_open_target_is_registered_and_green():
     """Opening destroys nothing and closing the window undoes it, so it must
     just run — but as an EXPLICIT tier, never the unclassified default."""
-    from jarvis import tools
-    from jarvis.safety import SafetyEngine
+    from jalen import tools
+    from jalen.safety import SafetyEngine
 
     assert "open_target" in tools.REGISTRY
     engine = SafetyEngine(CONFIG)
@@ -311,7 +311,7 @@ def test_non_destructive_actions_never_ask(router):
     exactly like sending an email. The rule now is destructive-vs-not:
     opening, creating and reading just happen.
     """
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     silent = ["open_target", "open_app", "open_folder", "create_file", "create_folder",
@@ -324,7 +324,7 @@ def test_non_destructive_actions_never_ask(router):
 
 def test_destructive_actions_still_ask(router):
     """The other half of the same rule — speed must not cost the gate."""
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     must_ask = ["delete_file", "send_email", "send_telegram_message", "run_powershell",
@@ -335,7 +335,7 @@ def test_destructive_actions_still_ask(router):
 
 
 def test_black_tier_is_still_absolute():
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     for tool in ("transfer_funds", "execute_payment", "enter_password", "vps_access"):
@@ -351,7 +351,7 @@ def test_self_controls_are_never_gated():
     gating them is absurd, and the AMBER was inherited by accident rather
     than decided.
     """
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     controls = ["jalen_quit", "jalen_pause", "jalen_resume", "jalen_restart",
@@ -400,7 +400,7 @@ def test_a_thinking_pause_does_not_cut_the_command_in_half():
     not have closed for any reason, so the assertion held no matter what
     the endpointing logic did. It is asserted on real behaviour here.)
     """
-    from jarvis.app import looks_unfinished
+    from jalen.app import looks_unfinished
 
     # The exact phrase from the bug report, split where he paused.
     assert looks_unfinished("open chrome and"), (
@@ -433,7 +433,7 @@ def test_a_thinking_pause_does_not_cut_the_command_in_half():
 
 def test_the_fast_endpoint_is_actually_faster_than_the_patient_one():
     """The two thresholds must be ordered, or the optimisation is a no-op."""
-    from jarvis.audio.vad import VAD, UtteranceCollector
+    from jalen.audio.vad import VAD, UtteranceCollector
 
     vad = VAD(CONFIG)
     collector = UtteranceCollector(CONFIG, vad)
@@ -470,7 +470,7 @@ def test_a_noise_blip_cannot_hang_the_collector():
     32ms never reaches 250ms. Neither could ever fire.
     """
     import numpy as np
-    from jarvis.audio.vad import VAD, UtteranceCollector
+    from jalen.audio.vad import VAD, UtteranceCollector
 
     class _BlipVAD(VAD):
         """Speech on frame 1 only, silence forever after."""
@@ -519,7 +519,7 @@ def test_common_replies_are_cached_not_re_synthesised(tmp_path, monkeypatch):
     all. A test whose result depends on machine state is measuring the
     machine.
     """
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     monkeypatch.setattr(Speaker, "CACHE_DIR", tmp_path / "tts_cache")
     speaker = Speaker(CONFIG)
@@ -545,7 +545,7 @@ def test_the_cache_survives_a_restart(tmp_path, monkeypatch):
 
     A second Speaker, standing in for a second run, must synthesise nothing.
     """
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     monkeypatch.setattr(Speaker, "CACHE_DIR", tmp_path / "tts_cache")
 
@@ -575,7 +575,7 @@ def test_a_full_disk_costs_speed_and_never_a_reply(tmp_path, monkeypatch):
     The cache is an optimisation. If it cannot be written, Jalen must still
     speak - a spoken reply is not allowed to depend on free disk space.
     """
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     monkeypatch.setattr(Speaker, "CACHE_DIR", tmp_path / "tts_cache")
     speaker = Speaker(CONFIG)
@@ -594,7 +594,7 @@ def test_a_full_disk_costs_speed_and_never_a_reply(tmp_path, monkeypatch):
 def test_audio_cache_is_bounded():
     """This runs on a machine with ~1GB free — an unbounded audio cache
     would be a slow memory leak."""
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
     import numpy as np
 
     speaker = Speaker(CONFIG)
@@ -607,7 +607,7 @@ def test_audio_cache_is_bounded():
 def test_long_replies_are_not_cached():
     """Only short confirmations repeat; caching paragraphs would waste the
     bound on things said once."""
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
     import numpy as np
 
     speaker = Speaker(CONFIG)
@@ -653,7 +653,7 @@ def test_plain_open_still_goes_to_open_target(router):
 
 
 def test_open_in_reports_missing_app_and_target_honestly():
-    from jarvis.tools.launcher import open_in
+    from jalen.tools.launcher import open_in
 
     assert "couldn't find" in open_in("zzz_no_app_9x7", "eco pulse").lower()
     assert "couldn't find" in open_in("notepad", "zzz_no_file_9x7").lower()
@@ -704,7 +704,7 @@ def test_file_search_is_time_bounded():
     seconds of silence is exactly what "it's not responding" feels like.
     """
     import time
-    from jarvis.tools.launcher import find_files, SEARCH_TIME_BUDGET_S
+    from jalen.tools.launcher import find_files, SEARCH_TIME_BUDGET_S
 
     start = time.perf_counter()
     find_files("my cv")
@@ -734,7 +734,7 @@ def test_finds_the_app_inside_a_sentence(phrase):
     Now the app is found INSIDE whatever was said, so it degrades
     gracefully on phrasings nobody anticipated.
     """
-    from jarvis.tools.launcher import resolve_app
+    from jalen.tools.launcher import resolve_app
 
     target, matched = resolve_app(phrase)
     assert target, f"{phrase!r} resolved to nothing"
@@ -753,7 +753,7 @@ def test_similar_words_do_not_open_the_wrong_app(phrase):
     between real typos wrod/word 0.750 and telegran/telegram 0.875), so
     edit distance decides: a typo is 1 edit, or 2 on short words.
     """
-    from jarvis.tools.launcher import resolve_app
+    from jalen.tools.launcher import resolve_app
 
     target, matched = resolve_app(phrase)
     assert target is None, f"{phrase!r} wrongly opened {matched}"
@@ -765,7 +765,7 @@ def test_similar_words_do_not_open_the_wrong_app(phrase):
     ("capcut", True),
 ])
 def test_real_typos_and_abbreviations_still_resolve(typo, expect_something):
-    from jarvis.tools.launcher import resolve_app
+    from jalen.tools.launcher import resolve_app
 
     target, _matched = resolve_app(typo)
     assert bool(target) == expect_something, f"{typo!r} -> {target}"
@@ -831,8 +831,8 @@ def test_youtube_title_notification_count_is_not_spoken():
 
 
 def test_web_tools_are_green_and_registered():
-    from jarvis import tools
-    from jarvis.safety import SafetyEngine
+    from jalen import tools
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     for name in ("search_site", "play_on_youtube"):

@@ -1,5 +1,5 @@
 # ============================================================================
-#  Jarvis dependencies — Windows 10, Python 3.12 or 3.13, 64-bit.
+#  Jalen dependencies — Windows 10 or 11, Python 3.12 or 3.13, 64-bit.
 #  Pins are deliberate. Read the comments before "upgrading" anything.
 # ============================================================================
 
@@ -90,7 +90,7 @@ sqlite-vec==0.1.9            # pre-v1: pinned on purpose
 # --- dev ---
 pytest>=8.0.0
 
-# Driving ChatGPT and Gemini in a real browser (jarvis/tools/webagent.py).
+# Driving ChatGPT and Gemini in a real browser (jalen/tools/webagent.py).
 # channel="chrome" uses the Chrome already installed, so NO browser is
 # downloaded - the package itself is the only cost.
 playwright>=1.48

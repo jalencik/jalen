@@ -87,8 +87,8 @@ def routed_tools() -> set[str]:
     Read off the router's own rules rather than a maintained list, so a rule
     that gets deleted stops being advertised.
     """
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     return {tool for _pattern, tool, _build, _reply in IntentRouter(CONFIG)._rules}
 
@@ -129,10 +129,10 @@ def main() -> int:
         except (AttributeError, ValueError):
             pass
 
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(CONFIG)
     routed = routed_tools()

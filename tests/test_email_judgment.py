@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import bulkmail
+from jalen.tools import bulkmail
 
 
 # The real shape of his inbox in that session: research outreach in bulk,
@@ -189,7 +189,7 @@ def scan(monkeypatch, about="", rows=INBOX):
 
         return Service()
 
-    from jarvis.tools import gmail
+    from jalen.tools import gmail
 
     monkeypatch.setattr(gmail, "_enabled", lambda: True)
     monkeypatch.setattr(gmail, "gmail_service", fake_service)
@@ -253,8 +253,8 @@ def test_it_still_tells_him_to_open_anything_close(monkeypatch):
     ("summarise my emails", "unread_email_summary"),
 ])
 def test_ordinary_email_questions_still_route(phrase, tool):
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     hit = IntentRouter(CONFIG).route(phrase)
     assert hit is not None, f"{phrase!r} stopped routing"
@@ -266,7 +266,7 @@ def test_the_brain_is_told_to_pass_about():
     The parameter only helps if the model knows to use it, and the reason
     has to be in the description — a bare "optional" gets skipped.
     """
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     description, params = TOOL_SPECS["scan_inbox"]
     assert "about" in params

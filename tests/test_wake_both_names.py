@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.audio.wake import WakeWord
-from jarvis.config import CONFIG
+from jalen.audio.wake import WakeWord
+from jalen.config import CONFIG
 
 
 class Cfg:

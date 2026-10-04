@@ -238,7 +238,7 @@ def _decode_mp3(data: bytes) -> np.ndarray | None:
     drift — this pipeline would start training on audio that does not sound
     like the audio the assistant actually produces.
     """
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     try:
         pcm, rate = Speaker._decode_mp3(data)
@@ -602,7 +602,7 @@ def evaluate(model_path: Path, x_val: np.ndarray, y_val: np.ndarray,
     threshold that gets the best of both.
 
     THE THRESHOLD IS PART OF THE MODEL, and inheriting one is a mistake this
-    made once already. config/jarvis.yaml carries wake.threshold: 0.55,
+    made once already. config/jalen.yaml carries wake.threshold: 0.55,
     tuned for the pretrained hey_jarvis network — a completely different
     classifier with its own score distribution. Judged at 0.55 the first
     "Hey Jalen" model accepted 1.96% of non-wake audio and was refused,
@@ -675,7 +675,7 @@ def evaluate(model_path: Path, x_val: np.ndarray, y_val: np.ndarray,
         )
     else:
         print(
-            f"\nReady to swap in. In config/jarvis.yaml set:\n"
+            f"\nReady to swap in. In config/jalen.yaml set:\n"
             f"    identity.wake_word: \"hey jalen\"\n"
             f"    wake.model: \"hey_jalen\"\n"
             f"    wake.threshold: {best[0]}\n"

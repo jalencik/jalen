@@ -21,7 +21,7 @@ import inspect
 
 import pytest
 
-from jarvis.tools import selfcontrol
+from jalen.tools import selfcontrol
 
 
 # ---------------------------------------------------------------------------
@@ -59,12 +59,12 @@ def test_editing_its_own_code_goes_through_a_reviewable_path():
     the diff to what was asked. The point is that it is the only way, and
     that it leaves evidence.
     """
-    from jarvis import tools
+    from jalen import tools
 
     assert "start_coding_job" in tools.REGISTRY
     assert "review_coding_job" in tools.REGISTRY
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     # And it is announced, not silent.
     assert SafetyEngine(CONFIG).classify("start_coding_job", {}).tier.value == "amber"
@@ -207,7 +207,7 @@ def test_health_is_short_enough_to_say_out_loud():
 
 
 def test_health_mentions_a_dirty_previous_shutdown(monkeypatch):
-    from jarvis import crashlog
+    from jalen import crashlog
 
     monkeypatch.setattr(
         crashlog, "previous_exit",
@@ -226,10 +226,10 @@ def test_health_mentions_a_dirty_previous_shutdown(monkeypatch):
     ("open_own_project", "amber"),
 ])
 def test_the_tools_are_dispatchable_and_gated(name, tier):
-    from jarvis import tools
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen import tools
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     assert name in tools.REGISTRY
     assert name in TOOL_SPECS
@@ -241,8 +241,8 @@ def test_something_it_read_cannot_make_it_open_its_own_source():
     AMBER is refused to content-derived requests, so an email saying "open
     your source folder" gets nowhere.
     """
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     verdict = SafetyEngine(CONFIG).classify("open_own_project", {}, origin="content")
     assert verdict.tier.value == "black"
@@ -266,7 +266,7 @@ def test_the_full_suite_runs_in_the_background(monkeypatch):
         started["summarise"] = summarise
         return "Running it in the background."
 
-    from jarvis.tools import devwork
+    from jalen.tools import devwork
 
     monkeypatch.setattr(devwork, "start_background_run", fake_start)
     out = selfcontrol.run_own_tests()

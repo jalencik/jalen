@@ -23,10 +23,10 @@ from pathlib import Path
 
 import pytest
 
-from jarvis import taint
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
-from jarvis.tools import messaging, stickers
+from jalen import taint
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
+from jalen.tools import messaging, stickers
 from tests._telegram_fakes import (
     FakeAccount, FakeChannel, emoji_doc, set_info, sticker_doc,
 )
@@ -231,14 +231,14 @@ def test_no_pack_at_all_with_the_emoji_still_says_so_without_a_question(wire):
 
 
 def test_the_reply_still_opens_the_way_send_posts_reads_it(wire):
-    from jarvis.tools import drafting
+    from jalen.tools import drafting
 
     wire(_account())
     assert drafting._outcome(stickers.send_sticker(to=CHANNEL, emoji=CLAP_C)) == "failed"
 
 
 def test_the_spec_says_to_ask_and_no_longer_says_it_picks_the_first():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     spec = TOOL_SPECS["send_sticker"][0].lower()
     assert "took the first match" not in spec and "first match" not in spec
@@ -246,7 +246,7 @@ def test_the_spec_says_to_ask_and_no_longer_says_it_picks_the_first():
 
 
 def test_the_prompt_and_the_post_guide_say_ask_too_not_pick_the_first():
-    from jarvis.brain.agent import Brain
+    from jalen.brain.agent import Brain
 
     async def noop(*a, **k):
         return True
@@ -268,7 +268,7 @@ STALE = "nothing a pack author wrote"
 
 
 def test_the_tool_spec_no_longer_says_nothing_a_pack_author_wrote():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     spec = TOOL_SPECS["find_premium_emoji"][0]
     assert STALE not in spec.lower()
@@ -290,7 +290,7 @@ def test_the_abilities_page_carries_the_current_text_of_every_tool_this_work_cha
     spec verbatim, so a stale page fails here instead of promising what the
     brain is no longer told.
     """
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     page = (ROOT / "ABILITIES.md").read_text(encoding="utf-8")
     for tool in ("find_premium_emoji", "send_sticker", "send_voice_message",

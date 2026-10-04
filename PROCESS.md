@@ -11,62 +11,62 @@ that does it and the reason it exists. Timings are measured from your own
 ```
     you speak
        |
-   [1] microphone                      jarvis/audio/mic.py
+   [1] microphone                      jalen/audio/mic.py
        |  32 ms frames, 16 kHz mono, one queue
        |
    [2] wake word          ~3% of one core, always on, never leaves the machine
-       |  openWakeWord (ONNX)          jarvis/audio/wake.py
+       |  openWakeWord (ONNX)          jalen/audio/wake.py
        |
-   [3] voice activity + endpointing    jarvis/audio/vad.py
+   [3] voice activity + endpointing    jalen/audio/vad.py
        |  Silero VAD. Closes the phrase after 1.4 s of silence
        |
-   [4] transcription                   jarvis/audio/stt.py
+   [4] transcription                   jalen/audio/stt.py
        |  Groq Whisper, moonshine locally if Groq is down
        |  ~1.9 s p50   <-- THE SINGLE BIGGEST COST IN THE TURN
        |
-   [5] THE ADDRESS GATE                jarvis/app.py :: should_act_on
+   [5] THE ADDRESS GATE                jalen/app.py :: should_act_on
        |  is this even for Jalen?  if not -> silently dropped
        |
-   [6] TAINT CLEARED                   jarvis/taint.py
+   [6] TAINT CLEARED                   jalen/taint.py
        |  he spoke, so everything read before now stops being in play
        |
-   [7] REFERENCES EXPANDED             jarvis/conversation.py
+   [7] REFERENCES EXPANDED             jalen/conversation.py
        |  "send it there" -> "send the draft to Saved Messages"
        |
-   [8] THE CONTRACT                    jarvis/plan.py
+   [8] THE CONTRACT                    jalen/plan.py
        |  ACTION + DESTINATION extracted and kept for the turn
        |
-   [9] normalise + stitch              jarvis/brain/router.py :: _normalise
+   [9] normalise + stitch              jalen/brain/router.py :: _normalise
        |  strip politeness, re-attach a cut-off fragment
        |
   [10] kill phrases -> "go on" -> pending question -> pending rating -> router
        |
-  [11a] ROUTER HIT                     jarvis/brain/router.py
+  [11a] ROUTER HIT                     jalen/brain/router.py
        |   a regex matched. No model, no network, no cost.
        |   p50 3.29 s to first word
        |
-  [11b] NO MATCH -> a habit?           jarvis/habits.py
+  [11b] NO MATCH -> a habit?           jalen/habits.py
        |   same sentence, same decision, 3 times -> skip the model
        |
-  [11c] STILL NOTHING -> THE BRAIN     jarvis/brain/agent.py
+  [11c] STILL NOTHING -> THE BRAIN     jalen/brain/agent.py
        |   Claude, with 145 tools. p50 4.49 s to first word
        |
-  [12] SAFETY GATE, before every tool  jarvis/safety.py
+  [12] SAFETY GATE, before every tool  jalen/safety.py
        |   origin comes from taint.origin_now(), NOT a hardcoded "user"
        |   GREEN runs / AMBER announces / RED asks / BLACK refuses
        |
-  [13] speech out, sentence by sentence  jarvis/audio/tts.py
+  [13] speech out, sentence by sentence  jalen/audio/tts.py
        |   edge-tts. Sentence 1 plays while sentence 3 is still being written
        |   no cap at all when he said "read it"
        |
-  [14] on screen if long              jarvis/ui/orb.py :: TranscriptWindow
+  [14] on screen if long              jalen/ui/orb.py :: TranscriptWindow
        |
-  [15] DID IT DO WHAT HE ASKED?        jarvis/plan.py :: betrayed_by
+  [15] DID IT DO WHAT HE ASKED?        jalen/plan.py :: betrayed_by
        |   he said send and it drafted -> he is TOLD, not silently corrected
        |
-  [16] rating, if it was real work    jarvis/tools/feedback.py
+  [16] rating, if it was real work    jalen/tools/feedback.py
        |
-  [17] learn, if one tool did it      jarvis/habits.py
+  [17] learn, if one tool did it      jalen/habits.py
 ```
 
 ---
@@ -130,7 +130,7 @@ the answer — not a new command.
 
 **6. The router.** ~95 regex rules. A hit costs nothing and needs no network.
 
-**7. The safety engine** (`jarvis/safety.py`), before *every* tool call:
+**7. The safety engine** (`jalen/safety.py`), before *every* tool call:
 
 | tier | behaviour | examples |
 |---|---|---|
@@ -180,7 +180,7 @@ the other direction is an email talking Jalen into sending mail.
 
 ## The present tense: what "it" and "yes" mean
 
-`jarvis/conversation.py`. Long-term memory (`jarvis/tools/memory.py`,
+`jalen/conversation.py`. Long-term memory (`jalen/tools/memory.py`,
 fastembed + sqlite-vec, local) was never the gap; the gap was the last few
 minutes.
 
@@ -201,7 +201,7 @@ into a password.
 
 ## The contract: action and destination
 
-`jarvis/plan.py`. He said *"send them in my saved messages"* and got a draft
+`jalen/plan.py`. He said *"send them in my saved messages"* and got a draft
 somewhere else.
 
 ```
@@ -222,7 +222,7 @@ this" with no destination is him trusting Jalen to choose.
 
 ## Filling in forms
 
-`jarvis/tools/webforms.py`, on the page open in Jalen's own browser.
+`jalen/tools/webforms.py`, on the page open in Jalen's own browser.
 
 `autofill.py` refuses to pick a field, and that refusal is correct *there*:
 it drives the desktop with keystrokes, where finding a field is Tab-and-hope.
@@ -330,12 +330,12 @@ Jalen can drive a browser two different ways, because Chrome makes exactly
 one of them impossible and the other only recently possible.
 
 ```
-  the SEPARATE window  (jarvis/tools/webagent.py)
+  the SEPARATE window  (jalen/tools/webagent.py)
     plain chrome.exe on a dedicated profile, attached over CDP
     -> his account, but not the tabs he browses in
     -> used when the extension isn't connected
 
-  his REAL Chrome      (jarvis/bridge/ + browser_extension/)
+  his REAL Chrome      (jalen/bridge/ + browser_extension/)
     an extension inside his everyday Chrome, talking to the app
     -> the very tab he's looking at
     -> used when he asks to use his own Chrome
@@ -354,7 +354,7 @@ the extension isn't loaded.
   his voice
     -> Python brain            (Gmail, vault, safety — the authority)
     -> task state / safety tier
-    -> BridgeServer            (loopback, token-authed)   jarvis/bridge/server.py
+    -> BridgeServer            (loopback, token-authed)   jalen/bridge/server.py
     -> native_host.py          (the process Chrome launches; a dumb relay)
     -> Chrome Native Messaging (length-prefixed JSON frames)
     -> service_worker.js       (carries out an ALREADY-authorised command)

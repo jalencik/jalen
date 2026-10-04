@@ -28,7 +28,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.tools import foldermove as fm  # noqa: E402
+from jalen.tools import foldermove as fm  # noqa: E402
 
 WINDOWS_ONLY = pytest.mark.skipif(os.name != "nt", reason="junctions are an NTFS thing")
 
@@ -380,9 +380,9 @@ def test_a_protected_folder_hidden_inside_a_dependency_folder_still_blocks(tmp_p
 
 
 def test_jalens_own_folder_and_its_parent_are_refused(tmp_path, drive_d, monkeypatch):
-    repo = make_tree(tmp_path / "work" / "jarvis", {"run.py": "x", "jarvis/__init__.py": ""})
+    repo = make_tree(tmp_path / "work" / "jalen", {"run.py": "x", "jalen/__init__.py": ""})
     monkeypatch.setattr(fm, "ROOT", repo)
-    for victim in (repo, repo / "jarvis", repo.parent):
+    for victim in (repo, repo / "jalen", repo.parent):
         plan = fm.make_plan(str(victim), str(drive_d))
         assert plan.refusal, victim
         assert "jalen" in plan.refusal.lower()
@@ -1007,7 +1007,7 @@ class Launched:
 
 @pytest.fixture
 def launched(monkeypatch):
-    from jarvis.tools import devwork
+    from jalen.tools import devwork
     spy = Launched()
     monkeypatch.setattr(devwork, "start_background_run", spy)
     return spy
@@ -1026,7 +1026,7 @@ def test_after_the_plan_the_move_starts_in_the_background_and_says_so(downloads,
     said = fm.move_folder(str(downloads), str(drive_d))
     assert len(launched.calls) == 1
     call = launched.calls[0]
-    assert call["args"][1:4] == ["-m", "jarvis.tools.foldermove", "run"]
+    assert call["args"][1:4] == ["-m", "jalen.tools.foldermove", "run"]
     state = Path(call["args"][4])
     record = fm._read_state(state)
     assert record["src"] == str(downloads) and record["dst"] == str(drive_d / "Downloads")
@@ -1096,7 +1096,7 @@ def test_an_interrupted_move_is_offered_as_a_resume(downloads, drive_d, two_volu
 
 def test_the_job_uses_a_long_enough_deadline(downloads, drive_d, two_volumes, monkeypatch):
     """A move can outlast devwork's one-hour default; the deadline is passed on."""
-    from jarvis.tools import devwork
+    from jalen.tools import devwork
     seen: dict = {}
 
     def spy(args, cwd, label, summarise=None, timeout_s=None):
@@ -1110,7 +1110,7 @@ def test_the_job_uses_a_long_enough_deadline(downloads, drive_d, two_volumes, mo
 
 
 def test_a_job_that_would_not_start_is_not_reported_as_started(downloads, drive_d, two_volumes, monkeypatch):
-    from jarvis.tools import devwork
+    from jalen.tools import devwork
     monkeypatch.setattr(devwork, "start_background_run",
                         lambda *a, **k: "I couldn't write the job down, so I haven't started it.")
     fm.plan_folder_move(str(downloads), str(drive_d))
@@ -1120,7 +1120,7 @@ def test_a_job_that_would_not_start_is_not_reported_as_started(downloads, drive_
 
 
 def test_a_job_that_would_not_start_leaves_no_record_to_be_mistaken_for_a_cut_short_move(downloads, drive_d, two_volumes, monkeypatch):
-    from jarvis.tools import devwork
+    from jalen.tools import devwork
     monkeypatch.setattr(devwork, "start_background_run",
                         lambda *a, **k: "I couldn't write the job down, so I haven't started it.")
     fm.plan_folder_move(str(downloads), str(drive_d))
@@ -1211,7 +1211,7 @@ def test_the_disk_report_does_not_count_what_a_link_leads_to_as_this_drives_usag
     """
     import _winapi
 
-    from jarvis.tools import sysinfo
+    from jalen.tools import sysinfo
 
     elsewhere = make_tree(tmp_path / "D_drive" / "Downloads", {"big.bin": b"x" * 5000})
     root = make_tree(tmp_path / "Desktop", {"mine.txt": "hello"})
@@ -1227,7 +1227,7 @@ def test_the_disk_report_does_not_count_what_a_link_leads_to_as_this_drives_usag
 def test_a_watched_folder_that_is_itself_a_link_is_not_scanned(tmp_path):
     import _winapi
 
-    from jarvis.tools import sysinfo
+    from jalen.tools import sysinfo
 
     elsewhere = make_tree(tmp_path / "D_drive" / "Downloads", {"big.bin": b"x" * 5000})
     link = tmp_path / "C_drive" / "Downloads"
@@ -1242,7 +1242,7 @@ def test_a_watched_folder_that_is_itself_a_link_is_not_scanned(tmp_path):
 def test_old_downloads_behind_a_link_are_not_offered_as_space_to_free(tmp_path, monkeypatch):
     import _winapi
 
-    from jarvis.tools import sysinfo
+    from jalen.tools import sysinfo
 
     home = tmp_path / "home"
     elsewhere = make_tree(tmp_path / "D_drive" / "Downloads", {"old.bin": b"x" * 5000})
@@ -1264,7 +1264,7 @@ def test_a_known_folder_name_resolves_to_the_real_one(monkeypatch):
 
 
 def test_a_project_name_is_found_by_the_same_search_open_target_uses(tmp_path, monkeypatch):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
     cafe = make_tree(tmp_path / "Desktop" / "Cafe", {"a": "a"})
     monkeypatch.setattr(launcher, "find_files", lambda q, limit=12, dirs_only=False: [str(cafe)])
     path, why = fm._resolve_source("my cafe folder")
@@ -1272,7 +1272,7 @@ def test_a_project_name_is_found_by_the_same_search_open_target_uses(tmp_path, m
 
 
 def test_two_folders_with_the_name_are_asked_about_not_guessed(tmp_path, monkeypatch):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
     a = make_tree(tmp_path / "Desktop" / "Cafe", {"a": "a"})
     b = make_tree(tmp_path / "Documents" / "Cafe", {"b": "b"})
     monkeypatch.setattr(launcher, "find_files", lambda q, limit=12, dirs_only=False: [str(a), str(b)])
@@ -1281,7 +1281,7 @@ def test_two_folders_with_the_name_are_asked_about_not_guessed(tmp_path, monkeyp
 
 
 def test_folders_inside_dependency_folders_are_not_offered(tmp_path, monkeypatch):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
     real = make_tree(tmp_path / "Desktop" / "projects", {"a": "a"})
     noise = make_tree(tmp_path / "Desktop" / "app" / "node_modules" / "x" / "projects", {"b": "b"})
     monkeypatch.setattr(launcher, "find_files", lambda q, limit=12, dirs_only=False: [str(noise), str(real)])
@@ -1290,7 +1290,7 @@ def test_folders_inside_dependency_folders_are_not_offered(tmp_path, monkeypatch
 
 
 def test_nothing_found_is_a_sentence(monkeypatch):
-    from jarvis.tools import launcher
+    from jalen.tools import launcher
     monkeypatch.setattr(launcher, "find_files", lambda q, limit=12, dirs_only=False: [])
     path, why = fm._resolve_source("zzz-not-here")
     assert path is None and "couldn't find a folder" in why.lower()
@@ -1300,7 +1300,7 @@ def test_nothing_found_is_a_sentence(monkeypatch):
 def test_the_background_entry_point_really_moves_a_folder(tmp_path):
     """
     The one test that starts the real process the way devwork does:
-    `python -m jarvis.tools.foldermove run <record>`. The child cannot see this
+    `python -m jalen.tools.foldermove run <record>`. The child cannot see this
     process's patches, so the machine is made to look different through the
     environment instead - a profile that tmp_path is not inside - and the move
     is a same-volume one, which `run` still does as copy, check, rename, delete.
@@ -1327,7 +1327,7 @@ def test_the_background_entry_point_really_moves_a_folder(tmp_path):
     code = (
         "import sys; sys.path.insert(0, %r);"
         "from pathlib import Path;"
-        "from jarvis.tools import foldermove as fm;"
+        "from jalen.tools import foldermove as fm;"
         "fm.MOVES_DIR = Path(%r);"
         "fm._same_volume = lambda a, b: False;"
         "plan = fm.make_plan(%r, %r, leave_link=False);"
@@ -1338,7 +1338,7 @@ def test_the_background_entry_point_really_moves_a_folder(tmp_path):
     assert made.returncode == 0, made.stderr
     record = made.stdout.strip().splitlines()[-1]
 
-    ran = subprocess.run([sys.executable, "-m", "jarvis.tools.foldermove", "run", record],
+    ran = subprocess.run([sys.executable, "-m", "jalen.tools.foldermove", "run", record],
                          capture_output=True, text=True, env=env, cwd=str(repo), timeout=180)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert "RESULT:" in ran.stdout
@@ -1350,8 +1350,8 @@ def test_the_background_entry_point_really_moves_a_folder(tmp_path):
 def test_the_three_tools_are_registered_specced_and_tiered():
     import yaml
 
-    from jarvis.brain.tools import TOOL_SPECS
-    from jarvis.tools import REGISTRY
+    from jalen.brain.tools import TOOL_SPECS
+    from jalen.tools import REGISTRY
 
     tiers = yaml.safe_load(open("config/safety.yaml", encoding="utf-8"))
     for tool, tier in (("plan_folder_move", "green"), ("folder_move_status", "green"), ("move_folder", "red")):
@@ -1360,8 +1360,8 @@ def test_the_three_tools_are_registered_specced_and_tiered():
 
 
 def test_moving_a_folder_asks_out_loud_and_names_where_it_is_going():
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False
@@ -1374,9 +1374,9 @@ def test_moving_a_folder_asks_out_loud_and_names_where_it_is_going():
 
 def test_the_brain_is_told_the_order_plan_then_move():
     """The model is the only thing that can make plan-before-move happen in a turn."""
-    from jarvis.brain.agent import Brain
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine
+    from jalen.brain.agent import Brain
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine
 
     async def noop(*a, **k):
         return True
@@ -1388,8 +1388,8 @@ def test_the_brain_is_told_the_order_plan_then_move():
 
 
 def test_a_page_cannot_start_a_move():
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False
@@ -1398,8 +1398,8 @@ def test_a_page_cannot_start_a_move():
 
 
 def test_the_gate_refuses_a_protected_source_or_destination_before_the_tool_runs():
-    from jarvis.config import CONFIG
-    from jarvis.safety import SafetyEngine, Tier
+    from jalen.config import CONFIG
+    from jalen.safety import SafetyEngine, Tier
 
     engine = SafetyEngine(CONFIG)
     engine.paranoid = False
@@ -1409,7 +1409,7 @@ def test_the_gate_refuses_a_protected_source_or_destination_before_the_tool_runs
 
 
 def test_move_file_refuses_a_folder_and_points_at_move_folder(tmp_path):
-    from jarvis.tools import filesystem as fs
+    from jalen.tools import filesystem as fs
 
     src = make_tree(tmp_path / "Cafe", {"a.txt": "a"})
     said = fs.move_file(str(src), str(tmp_path / "elsewhere"))
@@ -1418,7 +1418,7 @@ def test_move_file_refuses_a_folder_and_points_at_move_folder(tmp_path):
 
 
 def test_move_file_still_moves_a_file(tmp_path):
-    from jarvis.tools import filesystem as fs
+    from jalen.tools import filesystem as fs
 
     f = tmp_path / "x.txt"
     f.write_text("x")
@@ -1428,7 +1428,7 @@ def test_move_file_still_moves_a_file(tmp_path):
 
 
 def test_copy_file_says_a_folder_is_a_folder(tmp_path):
-    from jarvis.tools import filesystem as fs
+    from jalen.tools import filesystem as fs
 
     src = make_tree(tmp_path / "Cafe", {"a.txt": "a"})
     said = fs.copy_file(str(src), str(tmp_path / "copy"))
@@ -1437,8 +1437,8 @@ def test_copy_file_says_a_folder_is_a_folder(tmp_path):
 
 
 def test_the_router_hears_move_my_downloads_to_d_as_a_dry_run_first():
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     router = IntentRouter(CONFIG)
     for phrase, path, dest in (
@@ -1455,8 +1455,8 @@ def test_the_router_hears_move_my_downloads_to_d_as_a_dry_run_first():
 
 
 def test_the_router_does_not_take_over_moving_a_file_or_moving_things_on_screen():
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     router = IntentRouter(CONFIG)
     for phrase in ("move the mouse to the left", "move on", "move cafe.txt to the desktop",
@@ -1466,8 +1466,8 @@ def test_the_router_does_not_take_over_moving_a_file_or_moving_things_on_screen(
 
 
 def test_go_ahead_and_move_it_uses_the_plan_he_just_heard(downloads, drive_d, two_volumes):
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     router = IntentRouter(CONFIG)
     assert router.route("go ahead and move it") is None, "with no plan there is nothing to go ahead with"
@@ -1480,8 +1480,8 @@ def test_go_ahead_and_move_it_uses_the_plan_he_just_heard(downloads, drive_d, tw
 
 
 def test_a_plan_in_the_conversation_does_not_outlive_its_ttl_for_the_router_either(downloads, drive_d, two_volumes, monkeypatch):
-    from jarvis.brain.router import IntentRouter
-    from jarvis.config import CONFIG
+    from jalen.brain.router import IntentRouter
+    from jalen.config import CONFIG
 
     router = IntentRouter(CONFIG)
     fm.plan_folder_move(str(downloads), str(drive_d))

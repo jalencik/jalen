@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.brain.router import is_kill_phrase
-from jarvis.config import CONFIG
+from jalen.brain.router import is_kill_phrase
+from jalen.config import CONFIG
 
 PHRASES = [p.lower() for p in CONFIG.get_path("safety.kill_phrases", [])]
 
@@ -56,7 +56,7 @@ def test_a_sentence_that_merely_contains_a_stop_word_does_not(said):
 def test_both_gates_use_the_one_matcher():
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     assert "is_kill_phrase(" in inspect.getsource(Jalen.process)
     assert "is_kill_phrase(" in inspect.getsource(Jalen.should_act_on)

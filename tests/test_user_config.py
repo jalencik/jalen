@@ -1,10 +1,10 @@
 """
 Per-user configuration — HANDOFF item 6, "hardcoded to him".
 
-config/jarvis.yaml carried his name, his folders and his channel, and every
+config/jalen.yaml carried his name, his folders and his channel, and every
 value in it is commented with WHY it is that value. Those comments are the
 most useful documentation this project has, so the fix is not to strip them
-out: jarvis.yaml stays the defaults and the design record, and an optional,
+out: jalen.yaml stays the defaults and the design record, and an optional,
 gitignored config/user.yaml overlays it.
 
 Two properties matter more than the merging itself:
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis import config as config_module
+from jalen import config as config_module
 
 
 @pytest.fixture()
@@ -46,7 +46,7 @@ def test_with_no_user_config_nothing_changes(monkeypatch, tmp_path):
     monkeypatch.setattr(config_module, "USER_CONFIG", tmp_path / "absent.yaml")
     cfg = config_module.load_config()
     assert cfg.get_path("identity.name") == "Jalen"
-    assert cfg.get_path("identity.user_name") == "O'ktam"
+    assert cfg.get_path("identity.user_name") == "User"
     assert cfg.get_path("identity.wake_word") == "hey jalen"
     assert cfg.get_path("tts.voice") == "en-US-AndrewNeural"
 
@@ -178,7 +178,7 @@ def test_the_pre_approved_destinations_can_be_replaced(with_user_config):
             send_without_asking_to:
               - "Saved Messages"
     """)
-    from jarvis.safety import SafetyEngine
+    from jalen.safety import SafetyEngine
 
     engine = SafetyEngine(cfg)
     assert engine._is_preapproved("send_telegram_message", {"to": "Saved Messages"})
@@ -267,7 +267,7 @@ def test_his_own_voice_skill_is_still_found(monkeypatch, tmp_path):
 
 
 def test_a_second_user_can_point_at_their_own_writing(tmp_path, monkeypatch):
-    from jarvis.tools import voice
+    from jalen.tools import voice
 
     sample = tmp_path / "my-essays.md"
     sample.write_text("I write in short sentences. Like this.", encoding="utf-8")
@@ -276,7 +276,7 @@ def test_a_second_user_can_point_at_their_own_writing(tmp_path, monkeypatch):
     monkeypatch.setattr(voice, "_SEARCH_PATHS", [])
     monkeypatch.setattr(voice, "_cache", {})
 
-    from jarvis.config import CONFIG
+    from jalen.config import CONFIG
 
     monkeypatch.setitem(CONFIG, "personal", {"voice_guide": str(sample)})
     guide = voice.voice_guide()
@@ -291,13 +291,13 @@ def test_with_no_writing_sample_it_says_it_would_be_guessing(monkeypatch):
     the old one listed three paths, which is only actionable if you already
     know a my-voice skill is a thing that exists.
     """
-    from jarvis.tools import voice
+    from jalen.tools import voice
 
     monkeypatch.delenv("JARVIS_VOICE_SKILL", raising=False)
     monkeypatch.setattr(voice, "_SEARCH_PATHS", [])
     monkeypatch.setattr(voice, "_cache", {})
 
-    from jarvis.config import CONFIG
+    from jalen.config import CONFIG
 
     monkeypatch.setitem(CONFIG, "personal", {"voice_guide": ""})
     out = voice.voice_guide()
@@ -311,8 +311,8 @@ def test_a_second_user_signs_posts_with_their_own_handle(monkeypatch):
     The post format signs off with a Telegram handle in four worked examples.
     Left alone, a second user's assistant tells readers to DM somebody else.
     """
-    from jarvis.tools import voice
-    from jarvis.config import CONFIG
+    from jalen.tools import voice
+    from jalen.config import CONFIG
 
     monkeypatch.setitem(CONFIG, "personal", {"channel_handle": "@someone_else"})
     guide = voice.community_post_guide()
@@ -321,8 +321,8 @@ def test_a_second_user_signs_posts_with_their_own_handle(monkeypatch):
 
 
 def test_his_handle_survives_when_nothing_is_configured(monkeypatch):
-    from jarvis.tools import voice
-    from jarvis.config import CONFIG
+    from jalen.tools import voice
+    from jalen.config import CONFIG
 
     monkeypatch.setitem(CONFIG, "personal", {"channel_handle": ""})
     assert voice.DEFAULT_HANDLE in voice.community_post_guide()

@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.integrations import telegram_user  # noqa: E402
+from jalen.integrations import telegram_user  # noqa: E402
 
 BAR = "=" * 68
 

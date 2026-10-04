@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis import taint
-from jarvis.tools import research
+from jalen import taint
+from jalen.tools import research
 
 from test_web_read_is_bounded import _Resp, net  # noqa: F401 - the fixture
 
@@ -127,7 +127,7 @@ def test_every_fence_that_makes_text_untrusted_also_records_its_addresses():
     'read my email and open the link in it' into a refusal."""
     import inspect
 
-    from jarvis.tools import devwork, gmail, messaging
+    from jalen.tools import devwork, gmail, messaging
 
     # Every door untrusted text comes through. messaging._fence is the Telegram
     # door (reads, searches, voice-note transcripts, sticker pack titles); it
@@ -139,7 +139,7 @@ def test_every_fence_that_makes_text_untrusted_also_records_its_addresses():
 
 def test_a_link_in_a_coding_jobs_output_can_be_followed_after_reading_it(net):
     """The coding-job fence records its addresses like the others."""
-    from jarvis.tools import devwork
+    from jalen.tools import devwork
 
     devwork._fence("see the docs at https://docs.example/guide for details", "coding job", "output")
     net.responses = [_page("<html><title>Guide</title><p>the guide text</p></html>")]

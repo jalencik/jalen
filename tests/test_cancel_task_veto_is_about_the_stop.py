@@ -30,7 +30,7 @@ from test_coding_job_process import (  # noqa: F401 - fixtures and helpers
     "stop the coding job, I do not need it",
 ])
 def test_a_stop_with_a_dont_somewhere_else_still_stops(table, tmp_path, no_conversation_tasks, said):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     proc = hold(table, tmp_path, "c0ffee22", "proj")
     reply = tasks.cancel_task(said)
@@ -48,7 +48,7 @@ def test_a_stop_with_a_dont_somewhere_else_still_stops(table, tmp_path, no_conve
     "don’t stop the coding job",
 ])
 def test_a_real_veto_still_leaves_it_running(table, tmp_path, no_conversation_tasks, said):
-    from jarvis.tools import tasks
+    from jalen.tools import tasks
 
     proc = hold(table, tmp_path, "c0ffee33", "proj")
     reply = tasks.cancel_task(said)

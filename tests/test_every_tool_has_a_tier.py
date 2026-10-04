@@ -20,8 +20,8 @@ import collections
 
 import yaml
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 _Y = yaml.safe_load(open("config/safety.yaml", encoding="utf-8"))
 
@@ -35,7 +35,7 @@ def _tiers_of() -> dict[str, list[str]]:
 
 
 def test_every_tool_the_brain_can_call_has_a_tier():
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
 
     where = _tiers_of()
     untiered = sorted(t for t in TOOL_SPECS if t not in where)

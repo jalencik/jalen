@@ -12,8 +12,8 @@ against promises no longer in the code.
 
 Everything here comes from the running system:
 
-    the tool list       jarvis.tools.REGISTRY
-    what each does      jarvis.brain.tools.TOOL_SPECS
+    the tool list       jalen.tools.REGISTRY
+    what each does      jalen.brain.tools.TOOL_SPECS
     how risky it is     config/safety.yaml, via the real SafetyEngine
     what to SAY         the (phrase, tool) pairs the test suite already
                         asserts, so every example printed here is one the
@@ -31,10 +31,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from jarvis import tools as systools          # noqa: E402
-from jarvis.brain.tools import TOOL_SPECS      # noqa: E402
-from jarvis.config import CONFIG               # noqa: E402
-from jarvis.safety import SafetyEngine         # noqa: E402
+from jalen import tools as systools          # noqa: E402
+from jalen.brain.tools import TOOL_SPECS      # noqa: E402
+from jalen.config import CONFIG               # noqa: E402
+from jalen.safety import SafetyEngine         # noqa: E402
 
 
 def spoken_examples() -> dict[str, list[str]]:

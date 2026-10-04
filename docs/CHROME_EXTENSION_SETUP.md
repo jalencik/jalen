@@ -9,7 +9,7 @@ Chrome 136 and later refuse to let an outside program automate the profile you b
 ## What you need
 
 - Google Chrome 116 or newer (this laptop has 154).
-- The Jalen project's **main checkout**, `C:\Users\user\Desktop\Jarvis-setup\jarvis`, with its `.venv` set up (not a `.claude\worktrees\...` copy).
+- The Jalen project's **main checkout**, `C:\path\to\jalen`, with its `.venv` set up (not a `.claude\worktrees\...` copy).
 
 ## Steps
 
@@ -29,7 +29,7 @@ It prints where it wrote the launcher, the host manifest and the registry entry.
 2. Turn on **Developer mode** (top-right).
 3. Click **Load unpacked**.
 4. Choose the folder:
-   `C:\Users\user\Desktop\Jarvis-setup\jarvis\browser_extension`
+   `C:\path\to\jalen\browser_extension`
 5. It appears as **Jalen** with its blue orb icon. Because the ID is pinned
    in the manifest, it always matches what step 1 registered — nothing to
    copy or paste.

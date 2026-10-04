@@ -23,7 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.tools import system  # noqa: E402
+from jalen.tools import system  # noqa: E402
 
 
 # ------------------------------------------------------------------ open_url

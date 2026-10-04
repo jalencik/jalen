@@ -30,7 +30,7 @@ import asyncio
 from claude_agent_sdk.types import (AssistantMessage, ResultMessage, StreamEvent,
                                     TextBlock, ToolUseBlock)
 
-from jarvis.brain.agent import Brain
+from jalen.brain.agent import Brain
 
 
 class _FakeClient:

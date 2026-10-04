@@ -10,7 +10,7 @@ independent subsystems, and specifying eight subsystems at once produces a
 document nobody can implement. This decomposes them into four phases, built
 strictly in order, each finished and tested before the next begins.
 
-Decisions taken by O'ktam on 2026-08-21:
+Decisions taken by the user on 2026-08-21:
 
 | Question | Answer |
 |---|---|
@@ -47,9 +47,9 @@ launcher, the orb title, the transcript window, the Telegram bot's replies,
 docs.
 
 **What deliberately does not change.** The Python package directory stays
-`jarvis/`. Renaming it rewrites every import in 37 modules and 22 test
+`jalen/`. Renaming it rewrites every import in 37 modules and 22 test
 files, invalidates the `.venv` and the on-disk paths in
-`data/jarvis.lock`, and buys nothing a user can perceive. Internal module
+`data/jalen.lock`, and buys nothing a user can perceive. Internal module
 paths are not product surface. This is recorded here so the decision is
 visible rather than looking like an oversight.
 
@@ -67,7 +67,7 @@ Two mechanisms, both chosen:
 (it currently launches `run.py` with no flags, which starts muted per
 config) and run.
 
-**Global hotkey.** `config/jarvis.yaml` has promised
+**Global hotkey.** `config/jalen.yaml` has promised
 `kill_switch_hotkey: "ctrl+alt+space"` since day one, labelled
 `[NOT IMPLEMENTED]`. A single low-level keyboard listener now serves both
 that promise and this one:

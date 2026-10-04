@@ -39,7 +39,7 @@ collection.
 
 Three voice tests hit live Groq and edge-tts and fail intermittently:
 `test_stt_roundtrips_through_groq`, `test_barge_in_latency_is_measured`,
-`test_failure_paths_keep_jarvis_alive`. The trap is that the fallback *working*
+`test_failure_paths_keep_jalen_alive`. The trap is that the fallback *working*
 is what trips the assertion — `transcribe()` silently falls back to moonshine
 and the test asserts `engine_used == 'groq'`. Re-run two or three times in
 isolation before touching `stt.py`.
@@ -48,7 +48,7 @@ There is no linter, no type checker, no CI and no git remote.
 
 ## Invariants — these fail silently when broken
 
-- **Injection-guard ordering.** In `SafetyEngine.classify` (jarvis/safety.py:134)
+- **Injection-guard ordering.** In `SafetyEngine.classify` (jalen/safety.py:134)
   the `origin=='content'` check (:173) must stay *above* the pre-approved
   destination downgrade (:200). Swap them and a pre-approved Telegram channel
   becomes an open relay for anyone who gets text in front of Jalen — and every
@@ -130,11 +130,11 @@ There is no linter, no type checker, no CI and no git remote.
 
 - A tool is a plain module-level function taking keyword args and returning a
   spoken-quality `str`. No decorator, no base class — `@tool` is applied
-  programmatically once at `jarvis/brain/tools.py:1064`.
+  programmatically once at `jalen/brain/tools.py:1064`.
 - **Errors are return values, not exceptions.** They get spoken out loud, so a
   traceback is a bug and an error message is a sentence.
 - **Adding a tool is three edits**: the module's `REGISTRY`, `TOOL_SPECS` in
-  `jarvis/brain/tools.py`, and a tier in `config/safety.yaml`. The first two
+  `jalen/brain/tools.py`, and a tier in `config/safety.yaml`. The first two
   hard-fail at startup when they drift; the third used to fail at nothing and
   silently degrade to unclassified-AMBER, and now fails
   `tests/test_every_tool_has_a_tier.py`. If the tool is GREEN and acts on the
@@ -161,10 +161,10 @@ There is no linter, no type checker, no CI and no git remote.
 | Add a free spoken command | `_rules()` — router.py:403-1150, 136 rules, first match wins |
 | Change a tier or the never-touch list | `config/safety.yaml` only; tool docstrings are stale |
 | Make it faster | `vad.fast_silence_ms`/`silence_ms`, `stt.groq_timeout_s`, the TTS cache — tune together |
-| Understand why a design is what it is | `config/jarvis.yaml` comments first (683 lines, they *are* the design record), then `report.md` |
+| Understand why a design is what it is | `config/jalen.yaml` comments first (683 lines, they *are* the design record), then `report.md` |
 | See the real current state | `report.md` — supersedes every committed doc's numbers, and is currently untracked |
 
-`config/jarvis.yaml` comments are the design record. `PROCESS.md` is a runtime
+`config/jalen.yaml` comments are the design record. `PROCESS.md` is a runtime
 narrative, not a working agreement; the contributor rules are at
 `HANDOFF.md:79-111` and `:797-816`.
 

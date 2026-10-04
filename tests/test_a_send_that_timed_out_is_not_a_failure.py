@@ -6,7 +6,7 @@ send_telegram_message and send_telegram_file end in RUNTIME.run(work), which
 waits with asyncio.run_coroutine_threadsafe(...).result(60). On timeout that
 raises - and the coroutine KEEPS RUNNING on the Telegram loop, so the post can
 land a moment later. The exception escaped the tool, and the tool wrapper
-(jarvis/brain/tools.py) turned it into "send_telegram_message failed:
+(jalen/brain/tools.py) turned it into "send_telegram_message failed:
 TimeoutError". The brain's obvious next move is to send it again: two copies
 in his channel, as him. A network error raised AFTER the request went out has
 the same shape. drafting.send_posts already knew this for batches; a single
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.tools import messaging
+from jalen.tools import messaging
 
 from test_telegram_posting import FakeClient, _run
 
@@ -67,7 +67,7 @@ def test_an_error_before_anything_was_sent_says_nothing_was_sent(monkeypatch):
 
 
 def test_send_posts_counts_it_unconfirmed_not_failed(monkeypatch):
-    from jarvis.tools import drafting
+    from jalen.tools import drafting
 
     _wire(monkeypatch, FakeClient(), run_raises=TimeoutError())
     result = drafting.send_posts(to="ML community", posts=["one"])
@@ -76,7 +76,7 @@ def test_send_posts_counts_it_unconfirmed_not_failed(monkeypatch):
 
 
 def test_a_file_that_timed_out_is_not_confirmed(monkeypatch, tmp_path):
-    from jarvis.tools import attachments
+    from jalen.tools import attachments
 
     doc = tmp_path / "poster.pdf"
     doc.write_bytes(b"%PDF-1.4 test")
@@ -90,7 +90,7 @@ def test_a_file_that_timed_out_is_not_confirmed(monkeypatch, tmp_path):
 def test_not_being_signed_in_still_raises_the_sign_in_error(monkeypatch):
     """Unchanged: that error carries the fix (connect_telegram.py) and
     proves nothing went out."""
-    from jarvis.integrations.telegram_user import TelegramNotConnected
+    from jalen.integrations.telegram_user import TelegramNotConnected
 
     _wire(monkeypatch, FakeClient(), run_raises=TelegramNotConnected("run connect_telegram.py"))
     with pytest.raises(TelegramNotConnected):

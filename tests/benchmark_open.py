@@ -44,9 +44,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jarvis.brain.router import IntentRouter  # noqa: E402
-from jarvis.config import CONFIG  # noqa: E402
-from jarvis.tools.launcher import find_files, resolve_app  # noqa: E402
+from jalen.brain.router import IntentRouter  # noqa: E402
+from jalen.config import CONFIG  # noqa: E402
+from jalen.tools.launcher import find_files, resolve_app  # noqa: E402
 
 # --------------------------------------------------------------------------
 # The table. (utterance, expected_tool, kind)
@@ -216,7 +216,7 @@ def test_resolves_against_real_machine(router, utterance, expected_tool, kind):
         # against the known special folders when the naive join doesn't
         # already point at a real directory.
         if not expanded.is_dir():
-            from jarvis.tools.launcher import _SPECIAL_FOLDERS
+            from jalen.tools.launcher import _SPECIAL_FOLDERS
 
             key = intent.args.get("name", "").strip().lower()
             for prefix in ("my ", "the ", "a ", "an "):

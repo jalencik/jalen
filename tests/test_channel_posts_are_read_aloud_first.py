@@ -28,8 +28,8 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 CHANNEL = "AI engineering & Machine learning"
 SAVED = "Saved Messages"
@@ -133,8 +133,8 @@ def test_the_real_hook_speaks_the_summary_before_the_post_goes(monkeypatch):
     """End to end through the brain's hook: announce() gets the first line."""
     import asyncio
 
-    from jarvis.audit import AuditLog
-    from jarvis.brain.agent import Brain
+    from jalen.audit import AuditLog
+    from jalen.brain.agent import Brain
 
     spoken = []
     safety = SafetyEngine(CONFIG)
@@ -151,7 +151,7 @@ def test_the_real_hook_speaks_the_summary_before_the_post_goes(monkeypatch):
                   confirm=confirm, announce=announce)
     hook = brain._make_hook()
     result = asyncio.run(hook({
-        "tool_name": "mcp__jarvis__send_telegram_message",
+        "tool_name": "mcp__jalen__send_telegram_message",
         "tool_input": {"to": CHANNEL, "text": "<b>Reading group tonight</b> https://meet.example/room"},
     }, "id-read-aloud", None))
 

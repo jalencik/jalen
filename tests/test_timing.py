@@ -18,14 +18,14 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.timing import MARKS, TimingLog, TurnTimer
+from jalen.timing import MARKS, TimingLog, TurnTimer
 
 
 @pytest.fixture
 def clock(monkeypatch):
     """A stopwatch we drive by hand, so timings are exact, not approximate."""
     now = {"t": 1000.0}
-    monkeypatch.setattr("jarvis.timing.time.perf_counter", lambda: now["t"])
+    monkeypatch.setattr("jalen.timing.time.perf_counter", lambda: now["t"])
 
     def advance(seconds: float) -> None:
         now["t"] += seconds
@@ -167,7 +167,7 @@ def test_report_names_the_last_turn(clock):
 
 def test_history_is_bounded(clock):
     """A long session must not grow this without limit."""
-    from jarvis.timing import MAX_HISTORY
+    from jalen.timing import MAX_HISTORY
 
     log = TimingLog()
     for _ in range(MAX_HISTORY + 50):
@@ -192,7 +192,7 @@ def test_a_turn_is_not_finished_until_the_audio_is():
     import threading
     import time as real_time
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     class LateStartingSpeaker:
         """Starts 100ms after the turn ends, then plays for 200ms."""
@@ -228,7 +228,7 @@ def test_await_playback_gives_up_rather_than_hanging_forever():
     """
     import time as real_time
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     class StuckSpeaker:
         speaking = True
@@ -249,7 +249,7 @@ def test_the_turn_loop_actually_calls_the_wait():
     """
     import inspect
 
-    from jarvis.app import Jalen
+    from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.run)
     assert "_await_playback()" in source, (
@@ -266,7 +266,7 @@ def test_speaker_exposes_the_audio_start_hook():
     the streaming path funnel through. If that attribute is renamed, timing
     silently stops being collected and every wait_s becomes None.
     """
-    from jarvis.audio.tts import Speaker
+    from jalen.audio.tts import Speaker
 
     assert hasattr(Speaker, "_play")
     import inspect

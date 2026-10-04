@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis import tools
-from jarvis.config import CONFIG
-from jarvis.safety import SafetyEngine, Tier
+from jalen import tools
+from jalen.config import CONFIG
+from jalen.safety import SafetyEngine, Tier
 
 
 @pytest.fixture()
@@ -112,7 +112,7 @@ def test_the_ordering_is_structural_not_incidental():
 # ---------------------------------------------------------------------------
 def test_get_secret_is_not_a_tool():
     assert "get_secret" not in tools.REGISTRY
-    from jarvis.brain.tools import TOOL_SPECS
+    from jalen.brain.tools import TOOL_SPECS
     assert "get_secret" not in TOOL_SPECS
 
 
@@ -139,12 +139,12 @@ def test_a_spoken_passphrase_is_not_transcribed_into_the_log(tmp_path):
     this project CAN control. (Groq has already seen it by then — which is
     why unlock_vault_prompt exists.)
     """
-    from jarvis.audit import AuditLog
+    from jalen.audit import AuditLog
 
     cfg = dict(CONFIG)
     cfg["audit"] = {"db_path": str(tmp_path / "a.db"),
                     "jsonl_path": str(tmp_path / "a.jsonl")}
-    from jarvis.config import Cfg
+    from jalen.config import Cfg
 
     audit = AuditLog(Cfg(cfg), "adversarial")
     audit.utterance("unlock the vault, my passphrase is correct-horse-battery",
@@ -178,7 +178,7 @@ def test_a_lookalike_domain_does_not_inherit_approval(evil, tmp_path, monkeypatc
     The whole business model of phishing. Approving accounts.google.com must
     approve exactly that host and nothing that merely contains it.
     """
-    from jarvis.tools import vault
+    from jalen.tools import vault
 
     monkeypatch.setattr(vault, "APPROVALS_PATH", tmp_path / "approvals.json")
     vault.remember_site_decision("https://accounts.google.com", "always")
@@ -201,7 +201,7 @@ def test_autofill_never_searches_for_the_field():
     """
     import inspect
 
-    from jarvis.tools import autofill
+    from jalen.tools import autofill
 
     source = inspect.getsource(autofill)
     for forbidden in ("find_element", "FindControl", "password_field",
@@ -247,7 +247,7 @@ def test_a_secret_cannot_be_exfiltrated_as_an_attachment(engine):
     for tool, key in (("send_telegram_file", "path"),
                       ("draft_email_with_file", "path")):
         verdict = engine.classify(
-            tool, {"to": "someone", key: "C:/Users/user/Desktop/Jarvis-setup/jarvis/data/vault.json"}
+            tool, {"to": "someone", key: "C:/Users/user/Desktop/Jalen-setup/jalen/data/vault.json"}
         )
         assert verdict.tier is Tier.BLACK, f"{tool} would attach the vault"
 
