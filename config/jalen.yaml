@@ -647,6 +647,16 @@ ui:
   transcript_window: true          # C15 long content appears here instead of being read out
   show_transcript: true            # small caption under the orb showing the last thing
                                     # Jalen heard (the STT transcript); auto-hides after ~8s
+  # How often the orb is redrawn. Moving states (listening, thinking,
+  # speaking, blocked) every frame_ms - 40 is 25 frames a second - and idle
+  # and muted every idle_frame_ms, ~7 a second, because little moves there
+  # and this laptop is short on headroom. A change of colour between states
+  # (0.25 s, eased - jalen/ui/orb.py) always draws at frame_ms. Lower both
+  # for a smoother orb at the cost of CPU: NOT MEASURED on this laptop either
+  # way. Each frame is now timed from its own start, so the number is what
+  # you get rather than the number plus the time spent drawing.
+  frame_ms: 40
+  idle_frame_ms: 150
   theme:
     # idle WAS "#161c24" — near-black, from an earlier "black when stopped"
     # instruction. He then reported the orb as simply not appearing, "no

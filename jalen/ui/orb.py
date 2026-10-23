@@ -359,6 +359,30 @@ def _project(point, yaw: float, pitch: float):
     return x, y, z
 
 
+# SMOOTH, NOT SNAPPED ("smooth like iPhone", 2026-10-23). A state change
+# swapped the whole sphere's colour between one frame and the next, the
+# listening core jumped with every raw microphone level, and a frame that took
+# 15 ms to draw at a 40 ms interval ran at 55 ms (after() counts from when it
+# is called), so "25 fps" was nearer 18. Now the colour eases from what is on
+# screen to the new state's over TRANSITION_S, the core follows the level
+# through LEVEL_SMOOTH_S, and the next frame is timed from the start of this
+# one. Both times NOT MEASURED - chosen to sit with the length of a phone's
+# own state animations; they cost arithmetic, not drawing.
+TRANSITION_S = 0.25
+LEVEL_SMOOTH_S = 0.08
+
+
+def _ease_out(t: float) -> float:
+    """Quick at first and settling at the end, the way a phone's own transitions move."""
+    t = max(0.0, min(1.0, t))
+    return 1.0 - (1.0 - t) ** 3
+
+
+def _next_frame_ms(interval_ms: int, spent_s: float) -> int:
+    """Milliseconds until the next frame is due, counted from the start of this one."""
+    return max(1, int(round(interval_ms - spent_s * 1000)))
+
+
 def _mix(colour: str, target: str, t: float) -> str:
     """
     Blend two #rrggbb colours. Used to dim a state's own colour toward black
@@ -414,9 +438,19 @@ class Orb:
             "blocked": theme.get("blocked", "#ff4d4f"),
             "muted": "#4a4a4a",
         }
+        # How often a frame is drawn: moving states every frame_ms, idle and
+        # muted every idle_frame_ms (config/jalen.yaml, ui).
+        self._frame_ms = int(cfg.get_path("ui.frame_ms", 40))
+        self._idle_frame_ms = int(cfg.get_path("ui.idle_frame_ms", 150))
         self._q: queue.Queue[tuple[str, object]] = queue.Queue()
         self._state = "idle"
+        # The colour a change of state eases FROM, and when it began; a
+        # change that began TRANSITION_S ago or more is over.
+        self._from_colour = self.colours["idle"]
+        self._changed_at = -TRANSITION_S
         self._level = 0.0
+        self._shown_level = 0.0     # the level as drawn (_level_now)
+        self._level_at = 0.0
         self._heard = ""
         self._heard_at = 0.0
         self._click_through_applied: bool | None = None
@@ -462,6 +496,34 @@ class Orb:
 
     def stop(self) -> None:
         self._stop.set()
+
+    # -------------------------------------------------------------- smoothness
+    def _note_state(self, state: str, now: float) -> None:
+        """Change state, easing the colour from whatever is on screen now."""
+        if state == self._state:
+            return
+        self._from_colour = self._colour_now(now)
+        self._changed_at = now
+        self._state = state
+
+    def _colour_now(self, now: float) -> str:
+        """The state's colour - or, just after a change, on its way there."""
+        target = self.colours.get(self._state, self.colours["idle"])
+        progress = (now - self._changed_at) / TRANSITION_S if TRANSITION_S > 0 else 1.0
+        if progress >= 1.0:
+            return target
+        return _mix(self._from_colour, target, _ease_out(progress))
+
+    def _changing(self, now: float) -> bool:
+        return now - self._changed_at < TRANSITION_S
+
+    def _level_now(self, now: float) -> float:
+        """The microphone level as drawn: following the level, not jumping with it."""
+        elapsed = max(0.0, now - self._level_at)
+        self._level_at = now
+        follow = 1.0 - math.exp(-elapsed / LEVEL_SMOOTH_S) if LEVEL_SMOOTH_S > 0 else 1.0
+        self._shown_level += (self._level - self._shown_level) * follow
+        return self._shown_level
 
     # ------------------------------------------------------------------ render
     def _geometry(self, root: tk.Tk, w: int, h: int) -> str:
@@ -698,7 +760,7 @@ class Orb:
         than one assistant changing mood.
         """
         state = self._state
-        colour = self.colours.get(state, self.colours["idle"])
+        colour = self._colour_now(now)
         r = base * 0.66
 
         if state == "muted":
@@ -746,7 +808,7 @@ class Orb:
                     outline=_mix(CHROMA, colour, 0.70 * fade),
                     width=max(1, int(4 * fade)),
                 )
-            level = self._level
+            level = self._level_now(now)
             self._draw_wireframe(canvas, cx, cy, r, now, colour)
             self._draw_mesh(canvas, cx, cy, r, now, colour, spin=0.30,
                             energy=0.35 + 0.65 * level)
@@ -910,10 +972,11 @@ class Orb:
             if self._stop.is_set():
                 root.destroy()
                 return
+            started = time.perf_counter()
             while not self._q.empty():
                 kind, value = self._q.get_nowait()
                 if kind == "state":
-                    self._state = str(value)
+                    self._note_state(str(value), time.monotonic())
                 elif kind == "level":
                     self._level = float(value)  # type: ignore[arg-type]
                 elif kind == "heard":
@@ -922,8 +985,9 @@ class Orb:
                 elif kind == "flash":
                     state, seconds = value  # type: ignore[misc]
                     previous = self._state
-                    self._state = state
-                    root.after(int(float(seconds) * 1000), lambda: setattr(self, "_state", previous))
+                    self._note_state(state, time.monotonic())
+                    root.after(int(float(seconds) * 1000),
+                               lambda: self._note_state(previous, time.monotonic()))
             now = time.monotonic()
             canvas.delete("all")
             name_h = name_height()
@@ -932,8 +996,8 @@ class Orb:
             base = self.size / 2
             self._draw_orb(canvas, cx, cy, base, now)
             if name_h:
-                colour = self.colours.get(self._state, self.colours["idle"])
-                self._draw_name(canvas, cx, orb_area + name_h * 0.45, base, colour)
+                self._draw_name(canvas, cx, orb_area + name_h * 0.45, base,
+                                self._colour_now(now))
             self._draw_caption(canvas, canvas_w, orb_area + name_h, now)
 
             # Resolved once, when the window is genuinely realized, and
@@ -989,8 +1053,11 @@ class Orb:
                 if self._topmost_tick % TOPMOST_REASSERT_TICKS == 0:
                     raise_to_top(self._hwnd)
 
-            interval = 40 if self._state in _ACTIVE_STATES else 150
-            root.after(interval, tick)
+            # A colour still easing between states draws at the moving rate:
+            # at the idle rate a 0.25 s change would be two frames.
+            moving = self._state in _ACTIVE_STATES or self._changing(time.monotonic())
+            interval = self._frame_ms if moving else self._idle_frame_ms
+            root.after(_next_frame_ms(interval, time.perf_counter() - started), tick)
 
         tick()
         root.mainloop()
