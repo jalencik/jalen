@@ -554,6 +554,21 @@ class _Clock:
         return self.now
 
 
+class _BargeIn:
+    """CONFIG with conversation.barge_in fixed for one room."""
+
+    def __init__(self, base, barge_in):
+        self.base, self.barge_in = base, barge_in
+
+    def get_path(self, key, default=None):
+        if key == "conversation.barge_in":
+            return self.barge_in
+        return self.base.get_path(key, default)
+
+    def get(self, *args, **kwargs):
+        return self.base.get(*args, **kwargs)
+
+
 class Room:
     """
     Jalen.run() with everything it touches replaced by a fake: scripted
@@ -562,8 +577,13 @@ class Room:
     """
 
     def __init__(self, monkeypatch, script, *, barge=False, speaker=None, sync_turns=False,
-                 wake_first=False):
+                 wake_first=False, barge_in=True):
         """
+        `barge_in`: conversation.barge_in for this room. These tests were
+        written for `true` - any sustained voice interrupts - and keep it;
+        "wake_word" (shipped since 2026-10-23) has its own tests in
+        test_only_his_name_interrupts_him.py.
+
         `barge`: Jalen is mid-sentence when the microphone hears him, so the
         window that opens is the barge-in one - the only way, in this harness,
         to get a window with no question open behind it.
@@ -612,7 +632,7 @@ class Room:
         jalen = Jalen.__new__(Jalen)
         self.audit = _Audit()
         self.collector = _Collector(script, self.clock)
-        jalen.cfg = CONFIG
+        jalen.cfg = _BargeIn(CONFIG, barge_in)
         jalen.running = type("E", (), {"set": lambda s: None})()
         jalen.orb = _Orb()
         jalen.wake = _Wake(fires=1 if wake_first else 0)

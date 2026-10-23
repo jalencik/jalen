@@ -68,6 +68,7 @@ green:
     # with his name (Jalen._lockdown_off).
     - jalen_lockdown
     - jalen_lift_lockdown
+    - what_is_wrong        # reads its own state and says it; touches nothing
     - jalen_timing         # reads its own stopwatch; touches nothing
     - list_web_chats       # reads a local json file
     - read_web_result      # reads what already came back

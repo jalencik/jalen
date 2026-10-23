@@ -16,6 +16,7 @@ Design notes worth knowing before you change anything here:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import queue
 import re
 import sys
@@ -943,7 +944,12 @@ class Jalen:
         if self._loop is None:
             raise RuntimeError("Jalen's event loop isn't running")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=timeout)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            # Out of time: stop it, rather than leave it running on the loop.
+            future.cancel()
+            raise
 
     def _stop_loop(self) -> None:
         if self._loop is None:
@@ -2132,6 +2138,10 @@ class Jalen:
             return self._lockdown_on()
         if tool == "jalen_lift_lockdown":
             return self._lockdown_off(his_own_words and from_him)
+        # "What's wrong with you?" Answered here, from what this process
+        # knows, because the thing that is wrong may be the brain itself.
+        if tool == "what_is_wrong":
+            return self.what_is_wrong()
         if tool == "morning_brief":
             # This rule existed with reply=None and no implementation, so
             # "brief me" produced total silence — indistinguishable from
@@ -2343,6 +2353,79 @@ class Jalen:
         if time.monotonic() - self._brain_down_at >= self.BRAIN_RETRY_S:
             return None
         return kind
+
+    def what_is_wrong(self) -> str:
+        """
+        "What's wrong with you?" - what is broken RIGHT NOW, in plain words,
+        and what he can do about each. "As the backup it should be able to
+        explain what is wrong with it, so that I could understand the issue"
+        (2026-10-23).
+
+        It used to run `run.py --check` and read the printout: a minute of
+        package versions and file paths, describing the INSTALL, not this
+        running Jalen - whose sign-in may have expired, whose microphone may
+        have gone quiet, or whose speech recognition may have fallen back to
+        the slow offline model. Those live in this process, so this is
+        answered here, from the router, without the brain - which may be the
+        part that is broken. "Run a diagnostic" still runs the full check.
+        """
+        problems: list[str] = []
+        down = getattr(self, "_brain_down", None)
+        if down:
+            problems.append(self._brain_down_sentence(
+                down, getattr(self, "_brain_down_detail", ""), first=True))
+        mic = getattr(self, "mic", None)
+        if getattr(mic, "_told_it_is_down", False):
+            problems.append("My microphone isn't delivering any sound, so I may not hear "
+                            "you. Check that it's plugged in.")
+        elif getattr(mic, "reopened", 0):
+            times = mic.reopened
+            problems.append(f"My microphone dropped out {times} time{'s' if times != 1 else ''} "
+                            "since I started. It's working now.")
+        stt = getattr(self, "stt", None)
+        engine = getattr(stt, "last_engine", "") or ""
+        primary = getattr(stt, "primary", "") or ""
+        if engine and primary and engine != primary:
+            problems.append(f"Speech recognition fell back to the offline model ({engine}), "
+                            f"which is slower and makes more mistakes: {primary} didn't answer. "
+                            "Check the internet connection.")
+        governor = _governor_of(self)
+        if governor is not None:
+            if governor.locked:
+                problems.append("I'm in lockdown, so I won't act on anything until you say "
+                                "\"Jalen, end the lockdown\".")
+            full = [u for u in governor.usage() if u.get("max") and u.get("used", 0) >= u["max"]]
+            if full:
+                names = ", ".join(str(u.get("label") or u.get("name")) for u in full)
+                problems.append(f"You've reached your limit on {names}, so I'll ask before "
+                                "each one.")
+        if getattr(self, "muted", False):
+            problems.append("I'm muted, so I won't say anything out loud. Press Ctrl+Alt+J "
+                            "or say \"Jalen, unmute\".")
+        if getattr(self, "paused", False):
+            problems.append("I'm paused. Say \"Hey Jalen\" to bring me back.")
+        try:
+            record = crashlog.previous_exit()
+        except Exception:  # noqa: BLE001 - a missing record is not a problem to report
+            record = None
+        if record and record.get("state") == "running":
+            problems.append("My last run ended without shutting down properly. python run.py "
+                            "--why shows what was recorded.")
+        try:
+            import shutil
+
+            free_gb = shutil.disk_usage(str(Path(__file__).resolve().parent.parent)).free / 1e9
+        except OSError:
+            free_gb = None
+        if free_gb is not None and free_gb < 1.0:
+            problems.append(f"Your disk is almost full, {free_gb:.1f} gigabytes left, and "
+                            "things will start to fail.")
+        if not problems:
+            return ("Nothing looks wrong: I can hear you, I can think, and I can speak. If "
+                    "something specific isn't working, tell me what you were doing and I'll "
+                    "look at that.")
+        lead = "One thing is wrong. " if len(problems) == 1 else f"{len(problems)} things are wrong. "
+        return lead + " ".join(problems)
 
     def _brain_down_sentence(self, kind: str, detail: str, first: bool) -> str:
         """
@@ -3088,6 +3171,18 @@ class Jalen:
 
         threading.Thread(target=watch, name="jalen-kill-key", daemon=True).start()
 
+    @staticmethod
+    def _barge_mode(setting) -> tuple[bool, bool]:
+        """
+        conversation.barge_in, read: (only the wake word interrupts him while
+        he speaks, any sustained voice does). "wake_word" ships; true is the
+        old any-voice barge-in; false, "off" or "no" is neither.
+        """
+        word = str(setting).strip().lower()
+        wake_only = word in ("wake_word", "wake-word", "wake")
+        any_voice = bool(setting) and not wake_only and word not in ("false", "off", "no")
+        return wake_only, any_voice
+
     def run(self, *, standby: bool = False) -> None:
         """
         The microphone loop. `standby` (run.py --standby) loads everything
@@ -3133,7 +3228,8 @@ class Jalen:
         sound_began_at = time.monotonic()
         follow_up_until = 0.0
         follow_up_s = float(self.cfg.get_path("conversation.follow_up_timeout_s", 12))
-        barge_in = bool(self.cfg.get_path("conversation.barge_in", True))
+        barge_on_the_wake_word, barge_in = self._barge_mode(
+            self.cfg.get_path("conversation.barge_in", True))
         barge_threshold = float(self.cfg.get_path("conversation.barge_in_threshold", 0.75))
         barge_grace_s = float(self.cfg.get_path("conversation.barge_in_grace_s", 1.2))
         barge_frames = int(self.cfg.get_path("conversation.barge_in_frames", 6))
@@ -3256,6 +3352,14 @@ class Jalen:
                 self.say(note)
 
         frames_seen = 0
+        # The microphone reopens itself when its device goes quiet and says so
+        # out loud (Microphone._reopen_if_stalled) - forced, because "I can't
+        # hear you" is worth breaking a mute for. Written down too.
+        def _the_microphone_says(sentence: str) -> None:
+            self.audit.write("system", summary=f"microphone: {sentence}")
+            self.say(sentence, force=True)
+
+        self.mic.notify = _the_microphone_says
         with self.mic:
             self._note_the_microphone_opened()
             for frame in self.mic.frames():
@@ -3366,6 +3470,37 @@ class Jalen:
                     # Playback is over, so the latch below re-arms for the
                     # next reply.
                     barge_fired = False
+
+                # ONLY "HEY JALEN" INTERRUPTS HIM (conversation.barge_in:
+                # wake_word). His words, 2026-10-23: "while it is working it
+                # should be able to hear only my Hey Jalen word, nothing else
+                # should interrupt it". Any sustained voice used to: the
+                # television, a cough, someone else in the room - and Jalen's
+                # own voice, which is what the three dials below were tuned
+                # against. The wake model is the one detector here that is
+                # about HIM saying the name, not about sound. Ctrl+Alt+J still
+                # stops him mid-sentence, and Ctrl+Alt+K stops everything.
+                if barge_on_the_wake_word and self.speaker.speaking:
+                    if not self.wake.feed(frame) or barge_fired:
+                        continue
+                    barge_fired = True
+                    self.audit.write(
+                        "system",
+                        summary=(f"the wake word stopped playback after "
+                                 f"{self.speaker.speaking_for():.1f}s"),
+                    )
+                    self.speaker.stop()
+                    listening = True
+                    # The wake word: he called, so this window is his - unlike
+                    # the sound-triggered barge-in below, which vouches for
+                    # nothing.
+                    wake_initiated = True
+                    opened_by = "wake"
+                    vouched_by = None
+                    sound_began_at = time.monotonic()
+                    self.orb.set_state("listening")
+                    self.collector._reset()
+                    continue
 
                 if barge_in and self.speaker.speaking:
                     if self.speaker.speaking_for() < barge_grace_s:

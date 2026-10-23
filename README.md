@@ -79,6 +79,14 @@ After installing hotkeys, **Ctrl+Alt+J** wakes Jalen and **Ctrl+Alt+K** stops it
 
 **Ctrl+Alt+K** silences Jalen the moment you press it and ends everything it was doing. A fresh Jalen then loads in the background in standby: microphone closed, nothing on screen. The next **Ctrl+Alt+J** only has to open the microphone and you can talk straight away, with no "Hey Jalen" needed. Before this, K ended the process, so J had to start everything from cold, which took about a minute. Press **Ctrl+Alt+K** again while Jalen is in standby to end it completely. `startup.standby_after_kill: false` in `config/jalen.yaml` brings back the old behaviour. The first start after logging in, or after K twice, still loads from cold. Each start writes a "microphone open" row to the audit log with how long it took.
 
+**While Jalen is talking, only "Hey Jalen" interrupts it.** The TV, someone else talking or a cough no longer cuts it off mid-sentence; Ctrl+Alt+J and Ctrl+Alt+K still do. This is `conversation.barge_in: wake_word`. Set it to `true` for the old behaviour, where any voice interrupts, or `false` for nothing.
+
+**Ask "what's wrong with you?"** (or "why can't you hear me?", "why aren't you working?") and Jalen says in plain words what is broken right now and what to do about it: an expired Claude sign-in, a microphone that went quiet, speech recognition stuck on the slow offline model, a lockdown, a limit you've hit, mute or pause, or a run that crashed. It answers even when the brain is down. "Diagnose yourself" still runs the full install check.
+
+**The microphone reopens itself.** If it stops delivering sound (unplugged headset, driver reset, another app taking it), Jalen reopens it after ten seconds, trying the default device if yours is gone, and tells you whether it's back or still dead.
+
+**Memory.** Jalen stores lasting facts you tell it (people, preferences, how you like things done) in its long-term memory, which survives restarts, and looks them up before work they matter to. Nothing it only *read* is stored, and nothing that looks like a password.
+
 Run one Jalen instance at a time. Stop it before checking or reconnecting a personal Telegram session, because only one client may use that session at once.
 
 ## Configuration and privacy

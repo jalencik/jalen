@@ -195,6 +195,12 @@ There is no linter, no type checker, no CI and no git remote.
   its queue. A new way to hand a sentence on that skips `_judging` closes the
   window on a "stop" in flight, and every test of the 2 s still passes.
   `tests/test_saying_stop_stops_it.py`, `tests/test_a_late_yes_is_still_a_yes.py`.
+- **While he speaks, only the wake word interrupts him** (`conversation.barge_in:
+  wake_word`, `Jalen._barge_mode`). That branch sets `wake_initiated = True`
+  because the wake model heard the name; the any-voice branch below it
+  (`barge_in: true`) must never, because it fires on sound, his own echo
+  included (`tests/test_reported_failures.py`).
+  `tests/test_only_his_name_interrupts_him.py`.
 - **A tap is an answer, never an instruction.** In `--telegram` mode a question
   goes out with Yes/No (a "Confirm?") or Stop (an AMBER announcement) under it
   (`Jalen._put_the_question`, `telegram_bot.prompt_keyboard`). A tap reaches

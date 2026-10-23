@@ -350,7 +350,13 @@ conversation:
   # sentence starting with "and" is treated as a new thought.
   stitch_window_s: 8
   end_phrases: ["that's all", "thats all", "that is all", "thank you jalen", "we're done", "nothing else"]
-  barge_in: true                   # C20 you can talk over it
+  # C20 you can talk over it - but since 2026-10-23 only by saying his name.
+  # "While it is working it should be able to hear only my Hey Jalen word,
+  # nothing else should interrupt it." wake_word: only "Hey Jalen" stops him
+  # mid-sentence (and Ctrl+Alt+J, and Ctrl+Alt+K). true: any sustained voice
+  # does, through the three dials below - the television and his own echo
+  # included, which is what they were tuned against. false: nothing does.
+  barge_in: wake_word
   # HE WAS INTERRUPTING HIMSELF. Measured in data/audit.jsonl: 17 replies
   # ended far earlier than their text needed, and six of them stopped at
   # 747-764ms — the same instant every time. Nothing random clusters like

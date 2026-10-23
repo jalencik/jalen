@@ -1258,9 +1258,22 @@ def _rules() -> list[Rule]:
            r"|^how are you (?:doing|feeling)\??$"
            r"|^(?:your|self) health$", re.I),
          "own_health", n, None),
+        # "What's wrong with you?" - what is broken in THIS running Jalen, in
+        # plain words (Jalen.what_is_wrong): the sign-in, the microphone, the
+        # speech recognition, a lockdown, a limit. It used to run the full
+        # install check below and read out its printout. Above it, so that
+        # this wording is taken first; "run a diagnostic" still reaches it.
+        (R(r"^(?:what.?s|what is) (?:wrong|the (?:problem|matter)|up) with you\??$"
+           r"|^(?:is )?(?:something|anything) wrong(?: with you)?\??$"
+           r"|^(?:tell me|explain) what.?s wrong\??$|^explain what is wrong\??$"
+           r"|^why (?:aren.?t|are not|can.?t|cannot|don.?t|do not) you "
+           r"(?:work(?:ing)?|hear(?:ing)? me|listen(?:ing)?(?: to me)?|answer(?:ing)?(?: me)?"
+           r"|respond(?:ing)?(?: to me)?)\??$"
+           r"|^why are you (?:silent|so quiet|not working|deaf|broken)\??$"
+           r"|^what happened to you\??$", re.I),
+         "what_is_wrong", n, None),
         (R(r"^(?:run |do )?(?:your |a )?(?:self.?)?diagnos(?:e|tics?)(?: yourself)?$"
-           r"|^diagnose yourself$"
-           r"|^what.?s wrong with you\??$", re.I),
+           r"|^diagnose yourself$", re.I),
          "self_diagnose", n, None),
         (R(r"^open (?:your|the) (?:own )?(?:code|source|project)(?: in vs ?code)?$"
            r"|^open yourself in vs ?code$", re.I),

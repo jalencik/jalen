@@ -370,6 +370,8 @@ def test_every_new_rule_targets_a_real_registered_tool(router):
         # Hands off / end the lockdown (jalen/limits.py): Jalen's own state,
         # handled in handle_local before the gate.
         "jalen_lockdown", "jalen_lift_lockdown",
+        # "What's wrong with you?" - read from this process's own state.
+        "what_is_wrong",
         # Hand-gesture orb resizing. App-level for the same reason
         # jalen_orb_size is: it needs the orb and the camera controller this
         # process owns, and a camera toggle must not depend on the network.
