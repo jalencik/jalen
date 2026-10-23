@@ -302,6 +302,14 @@ amber:
     # read" or "mark all my chats read" and have it done. RED would ask a
     # spoken yes for a thing he just asked for by name.
     - mark_telegram_read
+    # Pins a message at the top of a chat, or takes it down; puts his reaction
+    # on a message, or takes it off. Both are seen by the other people in the
+    # chat, and both are undone by doing the opposite, so they are announced
+    # rather than asked. Being AMBER, both are refused to a turn that has read
+    # somebody's text: a message cannot get itself pinned or reacted to. A pin
+    # that notifies everyone says so in the announcement.
+    - pin_telegram_message
+    - react_to_telegram_message
     # Sends ONE voice note somebody recorded to Groq (a third party) to be
     # turned into words. The audio leaves the laptop, so it is announced - the
     # line names whose voice note goes to Groq (SafetyEngine._describe) - and
@@ -465,6 +473,12 @@ red:
     # through send_telegram_message and its destination check.
     - send_posts
     - send_whatsapp_message     # F46
+    # Changes what a chat already reads under his name, and puts a message
+    # in front of whoever `to` is. Decided like a send to the same place
+    # (SafetyEngine._DESTINATION_ARG): his channel is read aloud first, his
+    # Saved Messages need no question, and everyone else is asked.
+    - edit_telegram_message
+    - forward_telegram_message
     - post_public               # F46 - channels, social, anything others see
     - delete_file               # F46
     # Moves a whole folder to another drive: copies it, checks the copy, then
@@ -860,11 +874,14 @@ limits:
       max: 10
       window_s: 3600
     # send_telegram_message: 13 in 13.7 days, the rest of the family under 8
-    # each (and the voice and sticker tools post-date the measurement).
+    # each (and the voice, sticker and forward tools post-date the
+    # measurement). A forward puts a message in front of people like a send,
+    # so it counts as one; an edit or a pin adds no message, so they do not.
     - name: messages
       noun: "messages"
       tools: [send_telegram_message, send_telegram_file, send_sticker,
-              send_voice_message, send_whatsapp_message]
+              send_voice_message, send_whatsapp_message,
+              forward_telegram_message]
       max: 30
       window_s: 3600
     # One send_posts call is a whole batch (each post is still checked for its

@@ -227,6 +227,9 @@ random one.
   to fix; fix it and send again.
 - **When he asks for a different layout on purpose**, send it with
   `as_written` set, and it goes exactly as written.
+- **A post already in the channel is fixed with `edit_telegram_message`**,
+  never by sending it again: `message` is "last" (his newest post) or its
+  number, and `text` is the whole corrected post, checked exactly like a send.
 
 ---
 

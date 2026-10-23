@@ -65,11 +65,15 @@ def _run(work, client):
 POST = (
     "<b>Lab Opportunity for NLP students</b> \U0001f58a\n\n"
     "A new opening with the <b>Lee Language Lab</b>.\n\n"
+    "<b>Research Areas:</b> \U0001f6e3\n\n"
+    "• Multilingual datasets\n\n"
     "<b>Requirements:</b>\n\n"
     "• Passion in NLP\n"
     "• Leave a reaction to this post\n\n"
     "<blockquote expandable><b>Most Asked Questions</b>\n\n"
-    "<b>1</b> What will you get?\n— Real research experience\n</blockquote>\n\n"
+    "<b>1</b> What will you get?\n— Real research experience\n\n"
+    "<b>2</b> Who should apply?\nStudents who are competent in:\n— NLP\n\n"
+    "<b>3</b> How are applicants selected?\nBy the challenge tasks.\n</blockquote>\n\n"
     "Interested? Don't hesitate to dm me \U0001f447:\n@Iht_student"
 )
 

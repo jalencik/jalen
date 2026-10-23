@@ -8,7 +8,7 @@ Common commands run through a local intent router. More involved requests go to 
 
 - **Control your computer:** open apps and files, manage windows, type, click, and read the screen.
 - **Work in your browser:** find information, manage tabs, fill forms, and use a Chrome extension to interact with pages.
-- **Handle communication:** read Gmail, manage Calendar events, draft emails, and work with your personal Telegram account or a Telegram bot.
+- **Handle communication:** read Gmail, manage Calendar events, draft emails, and work with your personal Telegram account or a Telegram bot. On Telegram it reads, searches, drafts and sends, and acts on messages already sent: edit, delete, forward, pin and react.
 - **Help with writing and coding:** prepare drafts, start coding jobs, and hand work to other assistants.
 - **Diagnose Windows problems:** check disk space, startup apps, network settings, and system health.
 - **Remember useful information:** store notes and keep credentials in an encrypted vault with site-specific permissions.

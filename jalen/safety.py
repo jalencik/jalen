@@ -301,10 +301,77 @@ def _voice_note_summary(args: dict[str, Any]) -> str:
             "internet, to be turned into words")
 
 
+# How he names "the newest message" when he gives neither its number nor its
+# words - and leaving the message out means the same. One list for the
+# question he is asked and for the message the tool then acts on
+# (messaging._which_message), so the two cannot name different messages.
+LAST_MESSAGE_WORDS = frozenset({
+    "", "last", "latest", "newest", "last one", "the last one", "the latest one",
+    "the last message", "the latest message", "last message", "latest message",
+    "my last message", "my latest message", "my last post", "my latest post",
+    "the last post", "the latest post", "last post", "it", "that", "that one",
+    "this", "this one",
+})
+
+
+def _message_said(args: dict[str, Any], *, his: bool, pinned: bool = False) -> str:
+    """Which message a Telegram action is about, as he hears it in the question."""
+    which = _said(args.get("message"), 50)
+    if " ".join(which.lower().split()) in LAST_MESSAGE_WORDS:
+        if pinned:
+            return "the pinned message"
+        return "your last message" if his else "the last message"
+    number = which.lstrip("#").strip()
+    if number.isdigit():
+        return f"message number {number}"
+    return f'the message with "{which}"'
+
+
+def _in_chat(args: dict[str, Any]) -> str:
+    return _said(args.get("chat"), 60) or "that chat"
+
+
+def _edit_summary(args: dict[str, Any]) -> str:
+    """The question before an edit: which message, where, and what it will say."""
+    head = f"change {_message_said(args, his=True)} in {_in_chat(args)}"
+    first = _first_spoken_line(str(args.get("text") or ""))
+    return f'{head} so it starts "{first}"' if first else head
+
+
+def _delete_message_summary(args: dict[str, Any]) -> str:
+    head = f"delete {_message_said(args, his=True)} in {_in_chat(args)}"
+    return head if _is_self_chat(args.get("chat", "")) else f"{head} for everyone"
+
+
+def _forward_summary(args: dict[str, Any]) -> str:
+    to = _said(args.get("to"), 60) or "another chat"
+    return f"forward {_message_said(args, his=False)} from {_in_chat(args)} to {to}"
+
+
+def _pin_summary(args: dict[str, Any]) -> str:
+    if args.get("unpin"):
+        return f"unpin {_message_said(args, his=False, pinned=True)} in {_in_chat(args)}"
+    told = ", and notify everyone there" if args.get("notify") else ""
+    return f"pin {_message_said(args, his=False)} in {_in_chat(args)}{told}"
+
+
+def _reaction_summary(args: dict[str, Any]) -> str:
+    emoji = _said(args.get("emoji"), 12)
+    which = _message_said(args, his=False)
+    if not emoji:
+        return f"take your reaction off {which} in {_in_chat(args)}"
+    return f"react {emoji} to {which} in {_in_chat(args)}"
+
+
 # Tools whose question or announcement has to say more than "<tool>: <to>".
 _SUMMARIES = {
     "send_voice_message": _voice_message_summary,
     "transcribe_voice_note": _voice_note_summary,
+    "edit_telegram_message": _edit_summary,
+    "delete_message": _delete_message_summary,
+    "forward_telegram_message": _forward_summary,
+    "pin_telegram_message": _pin_summary,
+    "react_to_telegram_message": _reaction_summary,
 }
 
 
@@ -961,6 +1028,11 @@ class SafetyEngine:
     # chat it sends to, exactly as for a text. It is NOT in
     # _SAFE_TO_OWN_CHAT_UNDER_TAINT below: after a read, a voice message is
     # refused even to Saved Messages.
+    #
+    # An edit changes what a chat reads, and a forward posts into `to`, so both
+    # are decided like a send to the same place: his channel announced first,
+    # his Saved Messages without a question. delete_message is NOT here: a
+    # deletion is asked twice wherever it is (`consequences:`).
     _DESTINATION_ARG = {
         "send_telegram_message": "to",
         "save_telegram_draft": "to",
@@ -968,6 +1040,8 @@ class SafetyEngine:
         "send_telegram_file": "to",
         "send_sticker": "to",
         "send_voice_message": "to",
+        "edit_telegram_message": "chat",
+        "forward_telegram_message": "to",
     }
 
     # What may still go to his OWN Saved Messages after Jalen has read
@@ -1005,6 +1079,10 @@ class SafetyEngine:
         where = _said(args.get("to"), 60) or "your channel"
         if tool == "send_voice_message":
             return _voice_message_summary(args)
+        if tool == "forward_telegram_message":
+            # What the message says is not known until it is fetched; which
+            # one, from where, and to where are.
+            return _forward_summary(args)
         if tool == "send_sticker":
             what = " ".join(x for x in (_said(args.get("emoji"), 20),
                                         _said(args.get("pack"), 40)) if x)
@@ -1020,6 +1098,11 @@ class SafetyEngine:
             name = _said(str(args.get("file", "")).replace("\\", "/").rsplit("/", 1)[-1], 60)
             text = str(args.get("caption") or "")
             head = f"send the file {name} to {where}" if name else f"send a file to {where}"
+            joined = text
+        elif tool == "edit_telegram_message":
+            where = _said(args.get("chat"), 60) or "your channel"
+            text = str(args.get("text") or "")
+            head = f"change {_message_said(args, his=True)} in {where} to a new version"
             joined = text
         else:
             text = str(args.get("text") or "")

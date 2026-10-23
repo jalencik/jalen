@@ -210,6 +210,13 @@ There is no linter, no type checker, no CI and no git remote.
   that would make a button press a new instruction (it would clear taint). Where
   "stop" has to be typed or tapped the AMBER window is `undo_window_typed_s`,
   not the 2 s that is only long enough to say it.
+- **A reply Jalen composes never quotes a stranger.** The Telegram actions
+  (edit, delete, forward, pin, react) name someone else's message - and
+  anything forwarded - by its time and number (`messaging._called`); only his
+  own words come back. Those replies are not fenced, so quoting the message
+  would hand its text to the model unmarked. And `unpin_message(entity, None)`
+  unpins EVERY message in the chat, so an unpin always names one.
+  `tests/test_any_action_in_telegram.py`.
 - **Never pass user text as an argument to a `.cmd`.** `shutil.which
   ("claude")` returns npm's `claude.CMD`, Windows runs it through cmd.exe,
   and cmd.exe truncates at the first newline, flattens em dashes, strips

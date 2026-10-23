@@ -1,5 +1,5 @@
 
-# What Jalen can do  (189 things)
+# What Jalen can do  (194 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -98,10 +98,15 @@ _Reading, drafting and sending Gmail._
 _Your own chats and your channel._
 
 - [ ]   **community_post_guide** - The layout rules for his AI Engineering & Machine Learning channel: bullet character, where bold goes, the expandable Q&A block, the fixed sign-off
+- [ ]   **delete_message** - Delete a Telegram message for everyone  [stops and waits for you to say yes]
+- [ ]   **edit_telegram_message** - Change one of HIS Telegram messages in place - fix a typo in a post that already went out, correct a time  [stops and waits for you to say yes]
 - [ ]   **find_premium_emoji** - Look up his PREMIUM custom emoji, read from his own Telegram account, and get the <tg-emoji emoji-id="ID">E</tg-emoji> tag for each
+- [ ]   **forward_telegram_message** - Forward one Telegram message from one chat to another, showing who wrote it  [stops and waits for you to say yes]
 - [ ]   **list_sticker_packs** - List the custom emoji sets and sticker packs on his Telegram account, or, with pack, the stickers inside one pack (numbered, with their emoji)
 - [ ] * **list_telegram_chats** - List his recent Telegram conversations with unread counts
 - [ ]   **mark_telegram_read** - Mark ONE chat as read  [tells you first, you can say stop]
+- [ ]   **pin_telegram_message** - Pin a Telegram message at the top of a chat, or with unpin=true take it down  [tells you first, you can say stop]
+- [ ]   **react_to_telegram_message** - Put his reaction on a Telegram message - exactly one emoji, such as a thumbs-up, a heart or a fire - or with an empty emoji take his reaction off  [tells you first, you can say stop]
 - [ ] * **read_telegram** - Read recent messages from ONE Telegram chat, named the way he says it — 'Uluhbek', 'Saved Messages', an @username
 - [ ]   **save_draft_text** - Write a long piece — an essay, a personal statement, an application answer, a post — to a file AND his clipboard
 - [ ]   **save_telegram_draft** - Write text into a chat's DRAFT box without sending it
@@ -263,8 +268,8 @@ _The vault, and typing into forms._
 
 ---
 
-171 tools: 24 amber, 131 green, 16 red
-96 of them also answer to a spoken phrase, for free.
+176 tools: 26 amber, 131 green, 19 red
+97 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
   - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S

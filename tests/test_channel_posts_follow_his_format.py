@@ -226,3 +226,59 @@ def test_the_brain_is_told_about_the_check():
 
     description, params = TOOL_SPECS["send_telegram_message"]
     assert "as_written" in params and "fix it and send again" in description
+    description, params = TOOL_SPECS["save_telegram_draft"]
+    assert "as_written" in params and "fix it and save the draft again" in description
+
+
+# --------------------------------------------------------------------------
+# 5. A DRAFT IS CHECKED TOO
+#
+# save_telegram_draft is the path the brain is told to use for a channel post
+# ("compose it, save it here, and tell him it's waiting"), and it was the one
+# path that skipped the check: the post he opened on his phone to press send
+# could carry every mistake the send refuses.
+# --------------------------------------------------------------------------
+def draft(markup, **kwargs):
+    return messaging.save_telegram_draft(to="AI engineering & Machine learning",
+                                         text=markup, **kwargs)
+
+
+@pytest.mark.parametrize("name", sorted(BROKEN))
+def test_a_broken_post_is_not_left_as_a_draft(wired, name):
+    breaks, says = BROKEN[name]
+    reply = draft(breaks(LEE_LAB))
+    assert reply.startswith("Nothing saved — the post doesn't follow your channel's format yet")
+    assert says in reply
+    assert wired.wire == [], f"{name}: a broken post was left in his draft box"
+
+
+def test_a_refused_draft_says_save_it_again_never_send_it():
+    """Told to "send it again", the brain would post what he asked to see first."""
+    broken = BROKEN["no requirements"][0](LEE_LAB)
+    reply = messaging._in_house_format(broken, False, "save the draft again")[2]
+    assert "save the draft again" in reply and "send" not in reply
+
+
+def test_a_drafted_post_is_tidied_and_says_so(wired):
+    reply = draft(LEE_LAB.replace(f"{BULLET} Passion in NLP", "- Passion in NLP"))
+    assert reply.startswith("Saved as a draft in")
+    assert reply.endswith(f"Tidied to the channel format: changed 1 bullet to {BULLET}.")
+    kind, text, _entities = wired.wire[-1]
+    assert kind == "draft" and f"{BULLET} Passion in NLP" in text
+
+
+def test_his_real_post_is_drafted_word_for_word(wired):
+    reply = draft(LEE_LAB)
+    assert reply.startswith("Saved as a draft in") and "Tidied" not in reply
+    assert wired.wire[-1][1] == plain_of(LEE_LAB)
+
+
+def test_as_written_drafts_a_house_post_in_his_own_layout(wired):
+    custom = BROKEN["no requirements"][0](LEE_LAB)
+    assert draft(custom, as_written=True).startswith("Saved as a draft in")
+    assert wired.wire[-1][1] == plain_of(custom)
+
+
+def test_a_dm_reply_draft_is_not_a_channel_post(wired):
+    assert draft("see you at six").startswith("Saved as a draft in")
+    assert wired.wire[-1][1] == "see you at six"

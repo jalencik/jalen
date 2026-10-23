@@ -549,6 +549,66 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
          "as_written": ("boolean", "send exactly as written, skipping the channel-format "
                         "check - only when he asked for a different layout", False)},
     ),
+    "edit_telegram_message": (
+        "Change one of HIS Telegram messages in place - fix a typo in a post "
+        "that already went out, correct a time. Only his own messages (or "
+        "posts in a channel he runs) can be edited. message is its number "
+        "(#4821, as read_telegram shows it), a few of its words, or 'last' "
+        "for his newest message in that chat. text is the WHOLE new message, "
+        "not the change: read the old one first if you need to keep the rest "
+        "of it. Same formatting, premium emoji and channel-format check as "
+        "send_telegram_message, and gated like a send to the same chat: his "
+        "channel is read out first, Saved Messages just goes, anyone else is "
+        "asked. If it says 'Not confirmed', check the chat before trying again.",
+        {"chat": ("string", "the chat the message is in: name, @username, or 'Saved Messages'", True),
+         "text": ("string", "the whole new message, in Telegram HTML like a send", True),
+         "message": ("string", "its number, a few of its words, or 'last' for his newest; defaults to last", False),
+         "as_written": ("boolean", "skip the channel-format check - only when he asked for a different layout", False)},
+    ),
+    "delete_message": (
+        "Delete a Telegram message for everyone. It cannot be brought back, "
+        "so the safety gate asks him, says what cannot be undone and asks a "
+        "second time; do not ask him yourself as well. message is its number "
+        "(#4821), a few of its words, or 'last' for HIS newest message in "
+        "that chat. Someone else's message is deleted only where Telegram "
+        "allows it (a private chat, or a group or channel he runs); "
+        "otherwise it says so and deletes nothing.",
+        {"chat": ("string", "the chat the message is in: name, @username, or 'Saved Messages'", True),
+         "message": ("string", "its number, a few of its words, or 'last' for his newest; defaults to last", False)},
+    ),
+    "forward_telegram_message": (
+        "Forward one Telegram message from one chat to another, showing who "
+        "wrote it. It reaches whoever 'to' is, so it is gated like a send "
+        "there: his channel is read out first, Saved Messages just goes, "
+        "anyone else is asked. message is its number (#4821), a few of its "
+        "words, or 'last' for the newest message in that chat. If it says "
+        "'Not confirmed', check the destination before trying again.",
+        {"chat": ("string", "the chat the message is in", True),
+         "to": ("string", "where it goes: chat name, @username, or 'Saved Messages'", True),
+         "message": ("string", "its number, a few of its words, or 'last'; defaults to last", False)},
+    ),
+    "pin_telegram_message": (
+        "Pin a Telegram message at the top of a chat, or with unpin=true take "
+        "it down. Announced first. message is its number (#4821), a few of "
+        "its words, or 'last' - which, for an unpin, means the message pinned "
+        "there now. notify=true tells everyone in the chat; leave it off "
+        "unless he asks, because in his channel that notifies every member.",
+        {"chat": ("string", "the chat to pin in", True),
+         "message": ("string", "its number, a few of its words, or 'last'; defaults to last", False),
+         "unpin": ("boolean", "take the pin down instead", False),
+         "notify": ("boolean", "notify everyone in the chat - only when he asks", False)},
+    ),
+    "react_to_telegram_message": (
+        "Put his reaction on a Telegram message - exactly one emoji, such as "
+        "a thumbs-up, a heart or a fire - or with an empty emoji take his "
+        "reaction off. Announced first. message is its number (#4821), a few "
+        "of its words, or 'last' for the newest message in that chat. A chat "
+        "can limit which reactions it allows; if Telegram refuses one, say so "
+        "and offer another.",
+        {"chat": ("string", "the chat the message is in", True),
+         "emoji": ("string", "one emoji; empty takes his reaction off", True),
+         "message": ("string", "its number, a few of its words, or 'last'; defaults to last", False)},
+    ),
     "send_voice_message": (
         "Send a Telegram VOICE MESSAGE AS HIM to a person, in a DM or a group. "
         "Jalen's own text-to-speech voice reads `text` aloud and it goes out "
@@ -593,11 +653,16 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "a reply to a DM is prepared: write it as him (voice_guide first), "
         "save it with reply_to naming the message it answers, read it back "
         "to him, and let him say send it. A draft in a person's chat reaches "
-        "nobody.",
+        "nobody. A post in his channel's format is checked exactly as a send "
+        "is: slips are put right and said, a structural mistake saves nothing "
+        "and says what to fix - fix it and save the draft again. as_written="
+        "true only when he asked for a different layout.",
         {"to": ("string", "chat or channel name, @username, or 'Saved Messages'", True),
          "text": ("string", "the full post in Telegram HTML; a short DM reply is plain text", True),
          "reply_to": ("string", "the message being answered: its number, or a few of its words", False),
-         "topic": ("string", "in a forum group, the topic to draft in", False)},
+         "topic": ("string", "in a forum group, the topic to draft in", False),
+         "as_written": ("boolean", "save exactly as written, skipping the channel-format "
+                        "check - only when he asked for a different layout", False)},
     ),
     "community_post_guide": (
         "The layout rules for his AI Engineering & Machine Learning channel: "
