@@ -418,6 +418,20 @@ class ConfirmAnswer:
 
 
 @dataclass(frozen=True)
+class Tap:
+    """What a tap on a button under a question came to: see Jalen.answer_from_tap."""
+
+    accepted: bool
+    toast: str
+
+
+# One tap is decided at a time: "is this question still open?" and "put the
+# answer on the queue" are one step, or Yes and No tapped together could both
+# answer it. Process-wide, because there is one Jalen per process.
+_TAP_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
 class Expectation:
     """
     Jalen asked him something and is waiting for the answer.
@@ -538,6 +552,11 @@ class Jalen:
         # The confirmation currently being asked, and when it finished
         # playing - for recognising its own echo. See confirm().
         self._confirm_lock: asyncio.Lock | None = None
+        # The id of the question that is open, for the buttons under it to bind
+        # to, and the door's way of sending a question WITH buttons if it has
+        # one (the Telegram bot installs it). See _put_the_question.
+        self._prompt_id = ""
+        self._offer_buttons = None
         self._confirm_question = ""
         self._confirm_asked_at = 0.0
         self._confirm_reasked = False
@@ -962,12 +981,91 @@ class Jalen:
             return max(spoken, float(self.cfg.get_path("safety.confirm_timeout_typed_s", 300)))
         return spoken
 
+    def _undo_window_s(self) -> float:
+        """
+        How long an AMBER announcement waits for "stop": two seconds by voice,
+        longer where "stop" has to be TYPED. In the Telegram bot two seconds is
+        less than the time it takes to read the message, so the stop window
+        existed on paper and nobody could ever use it - the action just ran. The
+        same split as _confirm_timeout_s, for the same reason.
+        """
+        spoken = float(self.cfg.get_path("safety.undo_window_s", 4))
+        if getattr(self, "mode", "voice") in ("text", "telegram"):
+            return max(spoken, float(self.cfg.get_path("safety.undo_window_typed_s", 10)))
+        return spoken
+
+    def _put_the_question(self, question: str, kind: str) -> None:
+        """
+        Put a question to him: say it, and where the door can carry buttons (the
+        Telegram bot) send it with something to tap - Yes and No under a
+        "Confirm?", Stop under an announcement. `kind` is "confirm" or "stop".
+
+        safety.yaml has promised "or a tap in Telegram" since the first draft and
+        nothing sent one: a question that reached his phone could only be
+        answered by typing, which is the slow path on exactly the device that
+        asks for it. The words are still sent, so a door that cannot show
+        buttons, or a button that fails to send, costs nothing but the buttons.
+
+        Every question gets a fresh id and a tap is only accepted for the one
+        that is open (answer_from_tap), so a button from an earlier question,
+        or the same button twice, can never answer this one.
+        """
+        self._prompt_id = uuid.uuid4().hex[:8]
+        offer = getattr(self, "_offer_buttons", None)
+        if offer is not None:
+            try:
+                offer(question, kind, self._prompt_id)
+                return
+            except Exception as exc:  # noqa: BLE001 - buttons are a convenience
+                self.audit.error("prompt.buttons", exc)
+        self.say_blocking(question)
+
+    def answer_from_tap(self, data: str) -> "Tap":
+        """
+        He tapped a button under a question. Called by the Telegram bot for a
+        callback from the authorized user, and by nothing else.
+
+        A tap counts only if ALL of these hold, and a tap that fails any of them
+        changes nothing and says why:
+          * it carries the id of the question that is open RIGHT NOW (an old
+            button, or a question that has timed out, is refused);
+          * it is the kind of answer that question takes - Yes or No for a
+            "Confirm?", Stop for an announcement - so a Stop cannot approve a
+            RED action and a Yes cannot be read as "stop";
+          * it is the first: the id is spent when it is accepted, so a second
+            tap of the same button, or both Yes and No, cannot answer twice.
+
+        It does NOT go through process(), and so cannot be mistaken for a new
+        instruction, clears no taint, and has no echo to defend against: no
+        microphone is involved.
+        """
+        parts = (data or "").split(":")
+        if len(parts) != 3 or parts[0] != "jalen" or not parts[1]:
+            return Tap(False, "That isn't one of my buttons.")
+        _tag, prompt_id, choice = parts
+        gone = Tap(False, "That question was already answered, or ran out of time.")
+        with _TAP_LOCK:
+            if prompt_id != getattr(self, "_prompt_id", ""):
+                return gone
+            if choice in ("yes", "no") and self._awaiting_confirmation:
+                self._prompt_id = ""
+                self._answer_q.put(ConfirmAnswer(choice, f"tapped {choice}"))
+                done = Tap(True, "Approved." if choice == "yes" else "Cancelled.")
+            elif choice == "stop" and self._awaiting_stop:
+                self._prompt_id = ""
+                self._answer_q.put(False)
+                done = Tap(True, "Stopped.")
+            else:
+                return gone
+        self.audit.write("system", summary=f"tapped {choice} under a question")
+        return done
+
     async def confirm(self, question: str) -> "ConfirmAnswer":
         """RED tier: ask out loud and wait for a real yes (spec F45/F46)."""
         timeout = self._confirm_timeout_s()
         async with self._prompt_lock():
             self.orb.set_state("blocked")
-            self.say_blocking(question)
+            self._put_the_question(question, "confirm")
             # Stamped AFTER the question has finished playing, so the echo
             # window measures the tail of "...Confirm?" arriving back through
             # the microphone - not the length of the question.
@@ -982,6 +1080,7 @@ class Jalen:
                 )
             finally:
                 self._awaiting_confirmation = False
+                self._prompt_id = ""        # a button under this question is spent
                 self.orb.set_state("thinking")
         if answer is None:
             self.say_blocking("No answer, so I've cancelled it.")
@@ -994,9 +1093,9 @@ class Jalen:
 
     async def announce(self, text: str) -> None:
         """AMBER tier: say it, then give a short window to say stop."""
-        window = float(self.cfg.get_path("safety.undo_window_s", 4))
+        window = self._undo_window_s()
         async with self._prompt_lock():
-            self.say_blocking(text)
+            self._put_the_question(text, "stop")
             self._awaiting_stop = True
             self._drain_answers()
             try:
@@ -1005,6 +1104,7 @@ class Jalen:
                 )
             finally:
                 self._awaiting_stop = False
+                self._prompt_id = ""        # a button under this announcement is spent
         if stopped:
             raise RuntimeError("cancelled by user")
 

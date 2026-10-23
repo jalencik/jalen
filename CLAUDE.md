@@ -141,6 +141,15 @@ There is no linter, no type checker, no CI and no git remote.
   row at the longest wait; change `safety.confirm_timeout_s` or
   `confirm_timeout_typed_s` and it follows.
   `tests/test_confirmation_windows.py` pins it.
+- **A tap is an answer, never an instruction.** In `--telegram` mode a question
+  goes out with Yes/No (a "Confirm?") or Stop (an AMBER announcement) under it
+  (`Jalen._put_the_question`, `telegram_bot.prompt_keyboard`). A tap reaches
+  `Jalen.answer_from_tap`, not `process()`, and counts only if it is from an
+  allowed user, carries the id of the question open *now*, is the kind of answer
+  that question takes, and is the first. Do not route taps through `process()`:
+  that would make a button press a new instruction (it would clear taint). Where
+  "stop" has to be typed or tapped the AMBER window is `undo_window_typed_s`,
+  not the 2 s that is only long enough to say it.
 - **Never pass user text as an argument to a `.cmd`.** `shutil.which
   ("claude")` returns npm's `claude.CMD`, Windows runs it through cmd.exe,
   and cmd.exe truncates at the first newline, flattens em dashes, strips

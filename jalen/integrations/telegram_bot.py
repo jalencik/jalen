@@ -38,6 +38,29 @@ def is_authorized(user_id: int | None, allowed_user_ids: list[int]) -> bool:
     return user_id is not None and user_id in allowed_user_ids
 
 
+def prompt_keyboard(kind: str, prompt_id: str):
+    """
+    The buttons under a question: Yes and No under a "Confirm?", Stop under an
+    announcement ("Say stop if you don't want that").
+
+    The callback data is "jalen:<question id>:<choice>" - 18 characters, far
+    inside Telegram's 64 bytes. The id is what makes a button belong to ONE
+    question: Jalen.answer_from_tap refuses any tap whose id is not the open
+    one, so an old keyboard left in the chat cannot answer a new question.
+    aiogram is imported here and not at module level, like every heavy import.
+    """
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    if kind == "confirm":
+        row = [InlineKeyboardButton(text="Yes", callback_data=f"jalen:{prompt_id}:yes"),
+               InlineKeyboardButton(text="No", callback_data=f"jalen:{prompt_id}:no")]
+    elif kind == "stop":
+        row = [InlineKeyboardButton(text="Stop", callback_data=f"jalen:{prompt_id}:stop")]
+    else:
+        raise ValueError(f"no buttons for a question of kind {kind!r}")
+    return InlineKeyboardMarkup(inline_keyboard=[row])
+
+
 def build_dispatcher(jalen: Any, allowed_user_ids: list[int]):
     """
     Wires an aiogram Dispatcher to drive the given Jalen instance.
@@ -47,6 +70,10 @@ def build_dispatcher(jalen: Any, allowed_user_ids: list[int]):
     single-consumer model: running the bot and voice mode at once isn't
     supported yet (see the module docstring in run.py's --telegram branch
     for what that would actually take).
+
+    A question that needs an answer (Jalen.confirm, Jalen.announce) goes out
+    with buttons - jalen._offer_buttons is installed the same way - and a tap
+    comes back through handle_tap below, under the same allow-list as a message.
     """
     from aiogram import Dispatcher
 
@@ -89,6 +116,21 @@ def build_dispatcher(jalen: Any, allowed_user_ids: list[int]):
         jalen.say = say
         jalen.say_blocking = say_blocking
 
+        # A question that wants an answer is sent with buttons. Like say(),
+        # bound to THIS message's chat. If it raises, Jalen._put_the_question
+        # falls back to say_blocking, so a keyboard that fails to send costs
+        # the buttons and nothing else.
+        async def _send_with_buttons(t: str, markup) -> None:  # noqa: ANN001
+            await message.answer(t, reply_markup=markup)
+
+        def offer_buttons(question: str, kind: str, prompt_id: str) -> None:
+            markup = prompt_keyboard(kind, prompt_id)
+            future = asyncio.run_coroutine_threadsafe(
+                _send_with_buttons(question, markup), loop)
+            future.result(timeout=15)
+
+        jalen._offer_buttons = offer_buttons
+
         def run_turn() -> None:
             # Same dispatch-to-thread + COM-init pattern as run.py --text and
             # app.py's mic loop: process() can block on a RED confirmation or
@@ -99,6 +141,24 @@ def build_dispatcher(jalen: Any, allowed_user_ids: list[int]):
                 jalen.process(text)
 
         threading.Thread(target=run_turn, daemon=True).start()
+
+    @dp.callback_query()
+    async def handle_tap(query) -> None:  # noqa: ANN001
+        # The same boundary as a message, applied to the person who TAPPED: in
+        # a group, or on a forwarded keyboard, anyone can press a button, and
+        # only an allowed id may answer. Silent for everyone else.
+        user_id = query.from_user.id if query.from_user else None
+        if not is_authorized(user_id, allowed_user_ids):
+            return
+
+        tap = jalen.answer_from_tap(query.data or "")
+        with contextlib.suppress(Exception):
+            await query.answer(tap.toast)       # the little popup on his phone
+        if tap.accepted and getattr(query, "message", None) is not None:
+            # Take the buttons away so the question looks answered. Best
+            # effort: a button left behind is refused by id anyway.
+            with contextlib.suppress(Exception):
+                await query.message.edit_reply_markup(reply_markup=None)
 
     return dp
 

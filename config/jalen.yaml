@@ -469,6 +469,12 @@ safety:
                                    # Set false once you trust it. This is the one dial
                                    # to turn when confirmations get annoying.
   undo_window_s: 2                 # AMBER actions announce, then wait this long for "stop"
+  # The same, when "stop" has to be TYPED or TAPPED (run.py --text, the Telegram
+  # bot). Two seconds is shorter than the time it takes to read the message, so
+  # the stop window existed on paper and the action simply ran. NOT MEASURED:
+  # ten seconds is a guess at "looking at the phone"; revise it from the first
+  # month of AMBER rows in telegram mode. Voice is unchanged.
+  undo_window_typed_s: 10
   confirm_timeout_s: 20            # RED actions cancel if you don't answer in time
   # The same, when the answer is TYPED (run.py --text, the Telegram bot). A
   # question that arrives as a phone notification is read when the phone is
