@@ -962,6 +962,11 @@ class Brain:
     # characters a second (measured: app.speak_brain_reply), which is 27
     # seconds, plus synthesis. 40 leaves room for that and nothing longer.
     _QUESTION_SPEECH_S = 40.0
+    # The most questions one tool call can put to him, in a row: a limit and
+    # the leash (jalen/limits.py), the action's own "Confirm?", and for an
+    # action dangerous enough to name its consequence, that second question
+    # (`consequences:` in config/safety.yaml).
+    _QUESTIONS_PER_CALL = 4
 
     def _hook_timeout_s(self) -> float:
         """
@@ -982,22 +987,26 @@ class Brain:
         ran unapproved. What it broke was the question: the CLI gave up while
         Jalen was still asking, so his answer, given after the cut-off, went to
         a call that was already refused, and the RED path logged it "executed"
-        if he said yes. Sized so that it never happens: three questions, each
-        with its full wait and its longest speech, and ten seconds over.
+        if he said yes. Sized so that it never happens: every question one call
+        can ask (_QUESTIONS_PER_CALL), each at its longest, and ten seconds over.
 
-        The longest wait is a "Confirm?" as shipped, but an AMBER announcement
-        is a question too, and by voice it now waits out its window AND a
-        sentence of his on its way to it (app.STOP_HOLD_S, 12 s) - so it is in
-        the comparison, and a config with short confirmations cannot leave it
-        uncovered.
+        A question at its longest: by voice its window is held for an answer
+        of his on its way (app.ANSWER_HOLD_S, 12 s); and a "Confirm?" whose
+        answer was neither yes nor no is asked once more in full, with the
+        whole window again (Jalen._ask_again) - two windows, two speeches. An
+        AMBER announcement is a question too, so a config with short
+        confirmations cannot leave it uncovered.
         """
-        from ..app import stop_hold_s       # app builds the brain; not the reverse
+        from ..app import answer_hold_s       # app builds the brain; not the reverse
 
+        hold = answer_hold_s(self.cfg)
         spoken = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
         typed = float(self.cfg.get_path("safety.confirm_timeout_typed_s", 300))
-        announced = max(float(self.cfg.get_path("safety.undo_window_s", 4)) + stop_hold_s(self.cfg),
-                        float(self.cfg.get_path("safety.undo_window_typed_s", 10)))
-        return 3 * (max(spoken, typed, announced) + self._QUESTION_SPEECH_S) + 10.0
+        confirm = 2 * (max(spoken + hold, typed) + self._QUESTION_SPEECH_S)
+        announced = (max(float(self.cfg.get_path("safety.undo_window_s", 4)) + hold,
+                         float(self.cfg.get_path("safety.undo_window_typed_s", 10)))
+                     + self._QUESTION_SPEECH_S)
+        return self._QUESTIONS_PER_CALL * max(confirm, announced) + 10.0
 
     def _hook_matcher(self, matcher_class):
         """The PreToolUse matcher, given its timeout where the SDK has one."""
@@ -1077,6 +1086,14 @@ class Brain:
                 )
                 approved = approved_by_limit or await self.confirm(
                     template.format(summary=verdict.summary))
+                # DANGEROUS ENOUGH TO ASK TWICE (`consequences:` in
+                # safety.yaml): after his yes, what it does that cannot be
+                # taken back, and the question again - asked the same way by
+                # the router path (app.handle_local). A limit's yes stood in
+                # for the first question, never for this one.
+                second = getattr(verdict, "second_question", "")
+                if approved and second:
+                    approved = await self.confirm(second)
                 self.audit.action(verdict, "executed" if approved else "cancelled")
                 if not approved:
                     return {

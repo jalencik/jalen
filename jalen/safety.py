@@ -33,10 +33,21 @@ class Verdict:
     announce: bool
     blocked: bool
     detail: dict[str, Any]
+    # For a RED action dangerous enough to say what it does that cannot be
+    # taken back, and ask a second time (`consequences:` in safety.yaml);
+    # "" for every other verdict. Both gate paths ask it after the first yes.
+    consequence: str = ""
 
     @property
     def allowed_immediately(self) -> bool:
         return self.tier is Tier.GREEN
+
+    @property
+    def second_question(self) -> str:
+        """The question asked after his first yes, or "" when there is none."""
+        if not self.consequence:
+            return ""
+        return f"{self.consequence} Still want it? Confirm?"
 
 
 # Argument names that carry a program or a window: open_app(name=),
@@ -413,6 +424,11 @@ class SafetyEngine:
         self._reasons = {
             t: (tiers.get(t.value) or {}).get("reason", "") for t in Tier
         }
+        # RED actions dangerous enough to say what they do that cannot be
+        # taken back, and ask a second time - see Verdict.consequence.
+        self._consequences: dict[str, str] = {
+            str(tool): str(text) for tool, text in (tiers.get("consequences") or {}).items()
+            if text}
         never = tiers.get("never_touch") or {}
         self._never_paths = [self._norm(p) for p in never.get("paths", [])]
         # ...and each as Windows resolves it, so a profile reached through a
@@ -904,7 +920,31 @@ class SafetyEngine:
             announce=tier is Tier.AMBER,
             blocked=False,
             detail=detail,
+            consequence=self._consequence(tool, args) if tier is Tier.RED else "",
         )
+
+    def _consequence(self, tool: str, args: dict[str, Any]) -> str:
+        """
+        What this RED action does that cannot be taken back, in his words to
+        hear, from `consequences:` in safety.yaml - or "" when it is not listed.
+        A {name} is filled from the action's arguments (redacted as the audit
+        log has them), and one it does not have is spoken as "it" rather than
+        as a brace.
+        """
+        template = self._consequences.get(tool, "")
+        if not template:
+            return ""
+
+        class _Filled(dict):
+            def __missing__(self, key):
+                return "it"
+
+        values = _Filled({k: str(v) for k, v in self._redact(args).items()})
+        try:
+            return template.format_map(values).strip()
+        except (ValueError, IndexError, AttributeError):
+            # A brace the template did not mean as a field: said without it.
+            return re.sub(r"[{}]", "", template).strip()
 
     # --------------------------------------------------- pre-approved sends
     # tool -> which argument carries the destination.

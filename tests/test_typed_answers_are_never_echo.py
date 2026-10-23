@@ -197,7 +197,9 @@ def test_confirm_typed_in_the_panel_is_his_yes_not_an_echo(panel):
 
 def test_the_panel_says_what_was_done_and_never_claims_more(panel):
     ask(panel, 30)
-    panel._answer_panel("maybe later perhaps")      # neither yes nor no
+    # Neither yes nor no. ("maybe later perhaps" was the example here until
+    # "later" became a refusal on 2026-10-23: not now is no.)
+    panel._answer_panel("perhaps the blue one")
     assert panel._answer_q.empty()
     assert panel.shown == ["Sorry - was that a yes or a no?"]
 

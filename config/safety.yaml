@@ -6,7 +6,7 @@
 #  GREEN  -> just do it, log it.
 #  AMBER  -> say what you're about to do, wait `undo_window_s`, then do it
 #            unless he says "stop". By voice, a sentence he began inside
-#            the window is waited for (app.STOP_HOLD_S). (When
+#            the window is waited for (app.ANSWER_HOLD_S). (When
 #            paranoid_first_week is on, AMBER behaves like RED.)
 #  RED    -> stop, describe the action, wait for an explicit spoken "yes"
 #            (or a tap in Telegram). No answer in time = cancelled.
@@ -496,6 +496,39 @@ red:
     - modify_system_setting
     - change_account_setting
     - spend_money               # F46 - see the BLACK note below
+
+# ---------------------------------------------------------------------------
+# DANGEROUS ENOUGH TO SAY WHAT HAPPENS, AND ASK A SECOND TIME
+# ---------------------------------------------------------------------------
+# His words, 2026-10-23: "if the consequence is dangerous enough it should
+# this time dictate the consequence, and it should basically ask for
+# confirmation once more". After his yes to one of these RED actions, Jalen
+# says what it does that cannot be taken back and asks again ("... Still want
+# it? Confirm?"); only a second yes runs it. A limit question that named the
+# action (limits.py) stands in for the first yes, never for this one.
+#
+# Each is the action's real, irreversible cost, read from the code that does
+# it: delete_file is os.unlink - NOT the Recycle Bin; move_folder deletes the
+# original once the copy checks out; sign_out closes every program. The tools
+# not built yet are listed so that they are born asking twice, the way BLACK
+# names tools nobody has written.
+#
+# WRITE THEM WITHOUT ANSWER WORDS. The second question's own echo comes back
+# through the microphone, and a sentence here containing "no", "stop", "sure"
+# or "okay" would make that echo an answer, or his real answer an echo
+# (tests/test_dangerous_actions_ask_twice.py checks every one). A {name} in
+# braces is filled from the action's own arguments.
+consequences:
+  delete_file: "The file is deleted for good. It does not go to the Recycle Bin, so it can't be brought back."
+  empty_recycle_bin: "Everything in the Recycle Bin is deleted for good, and none of it can be brought back."
+  move_folder: "Once the copy is checked, the original folder is deleted for good. It does not go to the Recycle Bin."
+  sign_out: "Every open program closes, and anything not saved in them can be lost."
+  submit_form: "Whatever the form does happens the moment it is sent, and it can't be undone."
+  delete_email: "The email is deleted, and it can't be undone from here."
+  delete_message: "The message is deleted, and it can't be undone from here."
+  uninstall_software: "The program is removed from this computer, with what it keeps here."
+  git_force_push: "The branch on the server is overwritten, and commits that exist only there are lost."
+  spend_money: "Real money is spent, and getting it back would be up to the seller."
 
 black:
   reason: "Refused unconditionally. Jalen explains and hands the task back to you."

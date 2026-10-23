@@ -16,7 +16,7 @@ stop that almost never stopped anything.
 NOW
 ---
 A sentence of his that BEGAN before the window closed holds it until process()
-has judged it, and at most app.STOP_HOLD_S (12 s) from when it began. The
+has judged it, and at most app.ANSWER_HOLD_S (12 s) from when it began. The
 microphone loop says what is on its way - the onset of the sentence it is
 hearing or transcribing (`_hearing_since`), handed on to `_judging` when the
 sentence is dispatched - and process() lets go right after _take_as_answer.
@@ -37,14 +37,14 @@ import time
 
 import pytest
 
-from jalen.app import ANSWER_STT_SLACK_S, SAYING_A_REFUSAL_S, STOP_HOLD_S, Jalen, stop_hold_s
+from jalen.app import ANSWER_STT_SLACK_S, SAYING_AN_ANSWER_S, ANSWER_HOLD_S, Jalen, answer_hold_s
 from jalen.config import CONFIG, Cfg
 
 from test_listening_does_not_obey_other_people_or_itself import Heard, Room, _Mic, _Stt, _Vad
 from test_stop_window_takes_answers import ANNOUNCEMENT, _Stop, a_jalen, run_announce
 
 WINDOW = 0.3          # stands for undo_window_s, 2 s as shipped
-HOLD = 2.0            # stands for STOP_HOLD_S, 12 s as shipped
+HOLD = 2.0            # stands for ANSWER_HOLD_S, 12 s as shipped
 ARRIVES = 0.7         # when process() gets his words: after the window has shut
 
 
@@ -52,7 +52,7 @@ def a_listening_jalen():
     j = a_jalen()
     j._hearing_since = None
     j._judging = set()
-    j._stop_hold_s = HOLD
+    j._answer_hold_s = HOLD
     return j
 
 
@@ -346,14 +346,14 @@ def test_the_loop_adds_before_it_starts_the_turn_and_passes_the_onset():
 # 6. THE HOLD IS DERIVED FROM WHAT IT IS MADE OF
 # --------------------------------------------------------------------------
 def test_the_hold_is_the_sum_of_saying_it_the_longest_endpoint_and_transcription():
-    assert STOP_HOLD_S == SAYING_A_REFUSAL_S + 4.0 + ANSWER_STT_SLACK_S == 12.0
-    assert stop_hold_s(CONFIG) == STOP_HOLD_S       # vad.silence_ms ships 4000
-    assert stop_hold_s(Cfg({"vad": {"silence_ms": 1000}})) == 9.0
+    assert ANSWER_HOLD_S == SAYING_AN_ANSWER_S + 4.0 + ANSWER_STT_SLACK_S == 12.0
+    assert answer_hold_s(CONFIG) == ANSWER_HOLD_S       # vad.silence_ms ships 4000
+    assert answer_hold_s(Cfg({"vad": {"silence_ms": 1000}})) == 9.0
 
 
 def test_the_hold_covers_a_short_refusal_at_the_slow_end_of_the_pipeline():
     word, patient_endpoint, stt_p95 = 1.0, 4.0, 4.4
-    assert STOP_HOLD_S >= word + patient_endpoint + stt_p95
+    assert ANSWER_HOLD_S >= word + patient_endpoint + stt_p95
 
 
 def test_the_window_alone_could_not_have_heard_a_stop():
@@ -365,5 +365,5 @@ def test_the_window_alone_could_not_have_heard_a_stop():
 
 
 def test_jalen_takes_its_hold_from_config_and_the_stop_window_uses_it():
-    assert "self._stop_hold_s = stop_hold_s(cfg)" in inspect.getsource(Jalen.__init__)
+    assert "self._answer_hold_s = answer_hold_s(cfg)" in inspect.getsource(Jalen.__init__)
     assert "hold=self._held_for" in inspect.getsource(Jalen._wait_for_stop)

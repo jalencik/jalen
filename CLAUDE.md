@@ -147,7 +147,23 @@ There is no linter, no type checker, no CI and no git remote.
 - **Past a limit, one question, not two.** The governor's question names the
   action and ends "Confirm?", so `Admission.approved_action` makes the RED
   "Confirm?" (and the AMBER announcement) stand down for that action. Do not
-  let a limit question that does NOT name the action set it.
+  let a limit question that does NOT name the action set it. It never stands
+  in for the consequence question below.
+- **A dangerous RED action is asked twice.** A tool under `consequences:` in
+  `config/safety.yaml` carries `Verdict.second_question`: after his first yes
+  he hears what it does that cannot be taken back and is asked again, on BOTH
+  paths, and only a second yes runs it. A consequence must contain no plain
+  answer word (`_PLAIN_ANSWER_WORDS`): its echo would answer the question, or
+  his real "no" would be thrown away as its echo.
+  `tests/test_dangerous_actions_ask_twice.py`.
+- **The yes/no rules decide first, and nothing overrules them.**
+  `_parse_yes_no` reads negatives first; a self-correction ("no no, I mean
+  yes") counts only when what he finished on is nothing but an answer
+  (`_his_last_word`). Only a sentence the rules left unclear goes to the model
+  that reads rambling answers (`jalen/answer_reader.py`, Groq), so a model can
+  never turn a refusal into approval - keep it after the rules, never before,
+  and never for a question or a correction.
+  `tests/test_he_answers_like_a_person.py`.
 - **One answer path, and the echo tests are for the microphone only.** Every
   front door hands a sentence to `Jalen._take_as_answer(text, heard=...)`
   before treating it as an instruction: `process()` (voice, text, Telegram) and
@@ -163,17 +179,21 @@ There is no linter, no type checker, no CI and no git remote.
   ignores only an exact tail of the announcement (`_echoes_the_announcement`) -
   narrower than the confirm echo test on purpose, because here a missed echo
   can only stop an action.
-- **By voice the AMBER window is held for a sentence on its way.** Its 2 s
-  end before any spoken word can arrive (3.2 s after the sound ends, at the
-  median), so `_wait_for_stop` waits past them while a sentence that BEGAN
-  before they ended has not been judged, for at most `STOP_HOLD_S` from its
-  onset (`_held_for`). `run()` publishes the sentence it is hearing or
+- **By voice a question's window is held for a sentence on its way.** The
+  AMBER 2 s end before any spoken word can arrive (3.2 s after the sound ends,
+  at the median), and a "yes" begun in the last seconds of a RED "Confirm?"
+  arrived after its 20 s; so `_wait_for_stop` and `_wait_for_answer` wait past
+  them while a sentence that BEGAN before they ended has not been judged, for
+  at most `ANSWER_HOLD_S` from its onset (`_held_for`). An unclear answer to
+  "Confirm?" gets the question again in full and the whole window again
+  (`_ask_again`) - not "was that a yes or a no?", whose own echo is " no ".
+  `run()` publishes the sentence it is hearing or
   transcribing (`_hearing_since`; every drop path is cleared by the next idle
   frame) and adds it to `_judging` *before* starting its turn; `process()`
   lets go (`_judged`) right after `_take_as_answer`, after the answer is on
   its queue. A new way to hand a sentence on that skips `_judging` closes the
   window on a "stop" in flight, and every test of the 2 s still passes.
-  `tests/test_saying_stop_stops_it.py`.
+  `tests/test_saying_stop_stops_it.py`, `tests/test_a_late_yes_is_still_a_yes.py`.
 - **A tap is an answer, never an instruction.** In `--telegram` mode a question
   goes out with Yes/No (a "Confirm?") or Stop (an AMBER announcement) under it
   (`Jalen._put_the_question`, `telegram_bot.prompt_keyboard`). A tap reaches

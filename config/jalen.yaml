@@ -472,7 +472,7 @@ safety:
   # By voice that is shorter than a spoken "stop" takes to arrive - 3.2s after
   # the sound ends at the median (the 1.4s endpoint, then 1.8s of transcription)
   # - so a sentence he BEGAN before it ran out is waited for until process()
-  # has judged it, at most app.STOP_HOLD_S (12s) from when it began. Silence
+  # has judged it, at most app.ANSWER_HOLD_S (12s) from when it began. Silence
   # still goes at 2s. See Jalen._held_for.
   # The same, when "stop" has to be TYPED or TAPPED (run.py --text, the Telegram
   # bot). Two seconds is shorter than the time it takes to read the message, so
@@ -490,6 +490,16 @@ safety:
   # brain's tool hook is given a timeout derived from this (agent.py
   # Brain._hook_timeout_s); the SDK would otherwise cut it off at 60 seconds.
   confirm_timeout_typed_s: 300
+  # AN ANSWER TO "Confirm?" THE RULES CANNOT READ ("yeah so basically what I
+  # want is for you to just do it") is read by this model on Groq, under the
+  # GROQ_API_KEY transcription already uses, before he is asked again. Only
+  # what the rules left unclear ever reaches it: a yes, a no or a correction
+  # they read is final, so it can never turn a refusal into approval. ""
+  # turns it off. See jalen/answer_reader.py. NOT MEASURED: the model and the
+  # 2.5 s are a fast model's ordinary latency, not a timing taken on his line;
+  # a slower answer is treated as unclear and he is asked again, as before.
+  answer_reader_model: "llama-3.3-70b-versatile"
+  answer_reader_timeout_s: 2.5
   # F47 "both" — hotkey and voice. The listener is scripts/hotkeys.py, a
   # separate process installed by scripts/install_autostart.py.
   #

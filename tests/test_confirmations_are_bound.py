@@ -218,7 +218,9 @@ def test_an_unreadable_answer_is_asked_about_once_instead_of_starting_a_second_t
     _say(j, "hmm let me think about it")
     assert j._answer_q.empty()
     assert not j.routed
-    assert any("yes or a no" in s.lower() for s in j.said), j.said
+    # Asked again IN FULL since 2026-10-23 (Jalen._ask_again): "...a yes or a
+    # no?" coming back through the microphone was itself read as " no ".
+    assert j.said == ["Sorry, I missed that. close app: notepad. Confirm?"], j.said
 
     # Asked once. A second unreadable thing is his to say: it goes on to be
     # handled as a new instruction, as it did before, rather than trapping

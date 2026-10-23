@@ -146,23 +146,29 @@ def test_a_hard_limit_is_refused_by_the_router_without_a_question(jalen):
 
 
 def test_a_red_action_past_a_limit_is_asked_about_once_naming_the_action_and_the_limit(jalen):
-    """One question, not two: it names the action, so his yes is the action's approval."""
+    """
+    The limit's question names the action, so his yes to it stands in for the
+    plain "Confirm?" - never for the consequence question a dangerous action
+    asks after it (`consequences:` in safety.yaml; deleting a file is one).
+    """
     jalen.safety.governor.record("delete_file")
-    jalen.answers = [YES]
+    jalen.answers = [YES, YES]
     jalen.handle_local(Intent(tool="delete_file", args={"path": "C:/tmp/doesnotmatter.txt"}),
                        his_own_words=True)
-    (question,) = jalen.asked
-    assert question.startswith("delete file: C:/tmp/doesnotmatter.txt")
-    assert "deletions" in question and question.endswith("Confirm?")
+    limit_question, consequence = jalen.asked
+    assert limit_question.startswith("delete file: C:/tmp/doesnotmatter.txt")
+    assert "deletions" in limit_question and limit_question.endswith("Confirm?")
+    assert "deleted for good" in consequence and consequence.endswith("Confirm?")
     assert [t for t, _ in jalen.ran] == ["delete_file"]
 
 
 def test_under_the_limit_a_red_action_still_gets_its_own_question(jalen):
-    jalen.answers = [YES]
+    jalen.answers = [YES, YES]
     jalen.handle_local(Intent(tool="delete_file", args={"path": "C:/tmp/doesnotmatter.txt"}),
                        his_own_words=True)
-    (question,) = jalen.asked
+    question, consequence = jalen.asked
     assert question == "delete file: C:/tmp/doesnotmatter.txt. Confirm?"
+    assert "deleted for good" in consequence
     assert [t for t, _ in jalen.ran] == ["delete_file"]
 
 
@@ -395,18 +401,22 @@ def test_the_hook_denies_in_lockdown_and_lets_a_read_through(brain):
 
 
 def test_a_red_action_past_a_limit_is_asked_about_once_by_the_hook(brain):
+    """The limit's yes stands in for "Confirm?", not for the consequence question."""
     brain.safety.governor.record("delete_file")
-    brain.script.answers = [YES]
+    brain.script.answers = [YES, YES]
     assert hook_call(brain, "delete_file", {"path": "C:/tmp/x.txt"}) == {}
-    (question,) = brain.script.questions
-    assert question.startswith("delete file: C:/tmp/x.txt") and "deletions" in question
+    limit_question, consequence = brain.script.questions
+    assert limit_question.startswith("delete file: C:/tmp/x.txt") and "deletions" in limit_question
+    assert "deleted for good" in consequence
     assert brain.safety.governor.usage()[1]["used"] == 2
 
 
 def test_under_the_limit_the_hooks_red_question_is_still_asked(brain):
-    brain.script.answers = [YES]
+    brain.script.answers = [YES, YES]
     assert hook_call(brain, "delete_file", {"path": "C:/tmp/x.txt"}) == {}
-    assert brain.script.questions == ["delete file: C:/tmp/x.txt. Confirm?"]
+    question, consequence = brain.script.questions
+    assert question == "delete file: C:/tmp/x.txt. Confirm?"
+    assert "deleted for good" in consequence
 
 
 def test_an_amber_action_past_a_limit_is_asked_once_and_not_announced_by_the_hook():

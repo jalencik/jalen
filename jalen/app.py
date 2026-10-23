@@ -337,40 +337,47 @@ ANSWER_STT_SLACK_S = 5.0
 # instead. It is the whole tail for a caller that does not say.
 ECHO_REACHES_THE_GATE_S = ECHO_TAIL_S + 4.0 + ANSWER_STT_SLACK_S
 
-# HOW LONG AN AMBER ANNOUNCEMENT WAITS FOR A SENTENCE OF HIS ON ITS WAY.
+# HOW LONG A QUESTION WAITS FOR AN ANSWER OF HIS THAT IS ON ITS WAY.
 # See Jalen._held_for.
 #
-# "... Say stop if you don't want that." waits safety.undo_window_s - 2s as
-# shipped - and then the action runs. By voice the window had shut before any
-# answer could reach it: a sentence reaches process() 3.2s after the sound
-# ENDS at the median (1.4s of endpoint silence, 1.8s of transcription; see
-# ECHO_TAIL_S), so "stop" said the instant the announcement finished arrived
-# more than a second after the action had already gone ahead. The spoken stop
-# the announcement offers almost never stopped anything.
+# Both of Jalen's questions have a window, and both were judged by when his
+# words ARRIVED, which is late: a sentence reaches process() 3.2s after the
+# sound ENDS at the median (1.4s of endpoint silence, 1.8s of transcription;
+# see ECHO_TAIL_S).
+#
+#   "... Say stop if you don't want that." waits safety.undo_window_s - 2s as
+#   shipped - so "stop" said the instant the announcement finished arrived more
+#   than a second after the action had gone ahead. The spoken stop almost
+#   never stopped anything.
+#
+#   "... Confirm?" waits safety.confirm_timeout_s, 20s, so a "yes" begun in
+#   its last three seconds or so arrived after it had shut: "No answer, so
+#   I've cancelled it." to a man who had just said yes.
 #
 # So a sentence that BEGAN before the window closed - including one already
 # being heard when it opened, which is "stop" said over the announcement -
 # holds the window until process() has judged it, and at most this long from
 # when it began:
 #
-#     3.0   saying it. NOT MEASURED: "stop", "no, don't" and "wait, hold on"
-#           are well inside it, and a sentence that runs longer is not a
-#           refusal of what was just announced
+#     3.0   saying it. NOT MEASURED: "stop", "yes, do it" and "wait, hold on"
+#           are well inside it, and a sentence that runs longer is no longer
+#           a quick answer to the question
 #   + 4.0   the longest endpoint silence, the patient one (vad.silence_ms)
 #   + 5.0   transcription: 4.4s at p95 (ANSWER_STT_SLACK_S)
 #   = 12.0
 #
-# Silence holds nothing - an announcement nobody answers still goes after 2s -
-# and a sentence that began after the window closed is not an answer to it.
-# stop_hold_s() recomputes it from the shipped vad.silence_ms, for Jalen and
-# for the brain's hook timeout, which has to outlive the longest hold.
-SAYING_A_REFUSAL_S = 3.0
-STOP_HOLD_S = SAYING_A_REFUSAL_S + 4.0 + ANSWER_STT_SLACK_S
+# Silence holds nothing - an announcement nobody answers still goes after 2s,
+# a question nobody answers is still cancelled after 20 - and a sentence that
+# began after the window closed is not an answer to it. answer_hold_s()
+# recomputes it from the shipped vad.silence_ms, for Jalen and for the brain's
+# hook timeout, which has to outlive the longest hold.
+SAYING_AN_ANSWER_S = 3.0
+ANSWER_HOLD_S = SAYING_AN_ANSWER_S + 4.0 + ANSWER_STT_SLACK_S
 
 
-def stop_hold_s(cfg) -> float:
-    """STOP_HOLD_S with this config's patient endpoint (vad.silence_ms)."""
-    return (SAYING_A_REFUSAL_S
+def answer_hold_s(cfg) -> float:
+    """ANSWER_HOLD_S with this config's patient endpoint (vad.silence_ms)."""
+    return (SAYING_AN_ANSWER_S
             + float(cfg.get_path("vad.silence_ms", 4000)) / 1000.0
             + ANSWER_STT_SLACK_S)
 
@@ -419,6 +426,48 @@ _PLAIN_ANSWER_WORDS = frozenset({
 # parser pads the sentence the same way.
 _CORRECTION_MARKERS = (" instead ", " actually ", " rather ", " but ",
                        " first ", " change ")
+
+# HE CORRECTED HIMSELF (Jalen._his_last_word): the words after the last of
+# these are his answer, when they are nothing but an answer. Padded like the
+# sentence they are searched in.
+_SELF_CORRECTIONS = (" i mean ", " i meant ", " actually ", " on second thought ",
+                     " on second thoughts ", " wait ", " hold on ", " hang on ",
+                     " scratch that ", " scrap that ", " never mind ", " nevermind ",
+                     " sorry ")
+# What "nothing but an answer" is made of: yes and no words, the action said
+# back ("do it", "send it"), fillers, and how he talks to Jalen ("yes brother,
+# do it"). A word outside this - "Rodion", "check", "first" - makes it more
+# than an answer, and the whole sentence is read instead.
+_DECISION_WORDS = frozenset("""
+    yes yeah yep yup ya yea yeh yah aye ok okay alright fine sure please go ahead
+    do it that for proceed confirm confirmed of course absolutely definitely
+    certainly carry on continue let's lets now then just right send delete close
+    empty run post submit them this no nope nah don't dont not cancel stop abort
+    never mind forget leave skip i i'm it's that's mean meant so well oh um uh
+    hmm thanks thank you sir boss man bro brother dude jalen
+""".split())
+# A yes strong enough to be what he finished on after a correction. Not a
+# bare "okay" or "fine": "wait, okay?" asks him to wait as easily as it agrees.
+_STRONG_YES = (" yes ", " yeah ", " yep ", " yup ", " go ahead ", " do it ",
+               " go for it ", " proceed ", " confirm ", " confirmed ", " of course ",
+               " absolutely ", " definitely ", " certainly ", " let's do it ",
+               " lets do it ", " carry on ", " send it ", " delete it ")
+# An explicit yes, beside which a courtesy built from a negative word is not the
+# answer: "yes, no problem". See BESIDE A PLAIN YES in _read_decision.
+_EXPLICIT_YES = (" yes ", " yeah ", " yep ", " yup ", " sure ", " okay ", " ok ",
+                 " of course ", " absolutely ", " definitely ", " certainly ",
+                 " go ahead ", " do it ", " alright ", " all right ")
+_COURTESIES_WITH_A_NEGATIVE = (" no problem ", " no problems ", " not a problem ",
+                               " no worries ", " don't worry ", " dont worry ",
+                               " no doubt ")
+# A yes or a no only as the WHOLE answer.
+_WHOLE_YES = frozenset({
+    "go", "go go", "go now", "please", "bet", "say less", "let's go", "lets go",
+    "totally", "obviously", "naturally", "indeed", "for sure", "you bet", "roger",
+    "affirm", "100", "100 percent", "hundred percent", "a hundred percent",
+    "send", "delete", "close", "post", "submit", "yes yes", "yes yes yes",
+})
+_WHOLE_NO = frozenset({"pass", "nope nope", "no no", "no no no"})
 
 # A whole answer made of these, typed on a phone, is a yes or a no - see
 # Jalen._parse_yes_no. No is checked first, like every other negative there.
@@ -614,6 +663,11 @@ class Jalen:
         self._confirm_question = ""
         self._confirm_asked_at = 0.0
         self._confirm_reasked = False
+        # The model that reads an answer to "Confirm?" the rules could not
+        # (_read_unclear_answer); "" is off.
+        self._answer_reader_model = str(cfg.get_path("safety.answer_reader_model", "") or "")
+        self._answer_reader_timeout_s = float(
+            cfg.get_path("safety.answer_reader_timeout_s", 2.5))
         # "after the work has been done, it should ask the user, Hey boss,
         # How do you rate my work out of 10". Holds the context of the job
         # being rated, or None. Deliberately NOT reusing _awaiting_reply:
@@ -648,14 +702,17 @@ class Jalen:
             ECHO_TAIL_S
             + float(cfg.get_path("vad.silence_ms", 4000)) / 1000.0
             + ANSWER_STT_SLACK_S)
-        # How long an AMBER announcement waits for a sentence of his that is on
-        # its way (STOP_HOLD_S), and what is on its way: the onset of the
-        # sentence the microphone is hearing or transcribing now (run() writes
-        # it), and of each one handed to process() that _take_as_answer has not
-        # judged yet. Read by _held_for, on the thread waiting for "stop".
-        self._stop_hold_s = stop_hold_s(cfg)
+        # How long a question - "say stop", "Confirm?" - waits for a sentence of
+        # his that is on its way (ANSWER_HOLD_S), and what is on its way: the
+        # onset of the sentence the microphone is hearing or transcribing now
+        # (run() writes it), and of each one handed to process() that
+        # _take_as_answer has not judged yet. Read by _held_for, on the thread
+        # waiting for the answer.
+        self._answer_hold_s = answer_hold_s(cfg)
         self._hearing_since: float | None = None
         self._judging: set[float] = set()
+        # Until when a "Confirm?" asked again stays open - see _ask_again.
+        self._reask_until = 0.0
         # How long past the end of an answer window a sentence that BEGAN
         # inside it can still arrive: the longest one utterance can run, plus
         # the time to transcribe it. See ANSWER_STT_SLACK_S.
@@ -1144,6 +1201,7 @@ class Jalen:
             self._confirm_question = question
             self._confirm_asked_at = time.monotonic()
             self._confirm_reasked = False
+            self._reask_until = 0.0          # nothing asked again yet (_ask_again)
             self._awaiting_confirmation = True
             self._drain_answers()
             try:
@@ -1172,6 +1230,7 @@ class Jalen:
             # Its own words, so process() can tell the announcement coming back
             # through the speakers from his answer to it (_echoes_the_announcement).
             self._stop_question = text
+            self._reask_until = 0.0          # a "Confirm?" asked again is over
             self._awaiting_stop = True
             self._drain_answers()
             try:
@@ -1388,7 +1447,10 @@ class Jalen:
             return answer
 
     def _wait_for_answer(self, timeout: float) -> Optional[bool]:
-        return self._wait_for(timeout)
+        # Held past `timeout` while a sentence of his is on its way (_held_for):
+        # a "yes" begun in the last seconds of the twenty used to arrive after
+        # the question had shut, and he was told it was cancelled.
+        return self._wait_for(timeout, hold=self._held_for)
 
     def _wait_for_stop(self, window: float) -> bool:
         # False is "stop" (a kill phrase, a refusal, the Stop button); True is
@@ -1398,28 +1460,97 @@ class Jalen:
 
     def _held_for(self, closes: float) -> float:
         """
-        Until when an AMBER window that would close at `closes` waits for a
-        sentence of his on its way to process(); 0.0 when nothing holds it.
+        Until when a question's window - an AMBER "say stop", a RED "Confirm?" -
+        that would close at `closes` waits for a sentence of his on its way to
+        process(); 0.0 when nothing holds it.
 
-        By voice the window shut before any answer to it could arrive (see
-        STOP_HOLD_S): "stop" said the instant the announcement ended reached
-        process() more than a second after the action had run. So a sentence
-        holds the window if its sound BEGAN before `closes` - every window here
-        is judged by when he began to speak - and _take_as_answer has not judged
-        it yet: the microphone is still hearing it or transcribing it
-        (`_hearing_since`), or has handed it on (`_judging`). It holds until it
-        has been judged, and never longer than STOP_HOLD_S from when it began.
+        By voice both windows were judged by when his words ARRIVED (see
+        ANSWER_HOLD_S): "stop" said the instant an announcement ended reached
+        process() more than a second after the action had run, and a "yes"
+        begun at the end of a "Confirm?" arrived after it had been cancelled.
+        So a sentence holds the window if its sound BEGAN before `closes` -
+        every window here is judged by when he began to speak - and
+        _take_as_answer has not judged it yet: the microphone is still hearing
+        it or transcribing it (`_hearing_since`), or has handed it on
+        (`_judging`). It holds until it has been judged, and never longer than
+        ANSWER_HOLD_S from when it began.
 
         Only the microphone loop puts anything here, so a typed door, which
-        has its own longer window (undo_window_typed_s), is never held.
+        has its own longer windows (undo_window_typed_s,
+        confirm_timeout_typed_s), is never held.
         """
+        # A "Confirm?" he was asked again (_ask_again) is open for a whole
+        # window from then, and a sentence he began inside THAT is his answer.
+        reasked = getattr(self, "_reask_until", 0.0)
+        closes = max(closes, reasked)
         # A copy: process() takes onsets out of it on another thread.
         on_its_way = list(getattr(self, "_judging", ()))
         hearing = getattr(self, "_hearing_since", None)
         if hearing is not None:
             on_its_way.append(hearing)
-        hold_s = getattr(self, "_stop_hold_s", STOP_HOLD_S)
-        return max((began + hold_s for began in on_its_way if began < closes), default=0.0)
+        hold_s = getattr(self, "_answer_hold_s", ANSWER_HOLD_S)
+        return max([began + hold_s for began in on_its_way if began < closes] + [reasked])
+
+    def _read_unclear_answer(self, text: str) -> Optional[bool]:
+        """
+        His answer to "... Confirm?" that _parse_yes_no could not read, read by
+        a fast model (jalen/answer_reader.py): True, False, or None to ask him
+        again. Off when no model is configured or there is no Groq key.
+
+        Two answers it is never allowed to give, whatever it says: a YES to a
+        question ("ok so what does it say?") or to a sentence spoken to another
+        assistant ("okay Google"). Both stay unclear, as they were.
+        """
+        model = getattr(self, "_answer_reader_model", "")
+        key = getattr(getattr(self, "secrets", None), "groq_api_key", "") or ""
+        if not (model and key):
+            return None
+        low = " " + re.sub(r"[^a-z0-9' ]", " ", (text or "").lower()) + " "
+        if any(name in low for name in (" google ", " alexa ", " siri ", " cortana ")):
+            return None
+        from . import answer_reader
+
+        answer = answer_reader.read(getattr(self, "_confirm_question", ""), text, key=key,
+                                    model=model,
+                                    timeout_s=getattr(self, "_answer_reader_timeout_s", 2.5))
+        if answer is True and (text or "").rstrip().endswith("?"):
+            answer = None
+        if answer is not None:
+            self.audit.write("system", summary="an unclear answer was read by the model",
+                             detail={"heard": (text or "")[:200],
+                                     "read_as": "yes" if answer else "no"})
+        return answer
+
+    def _ask_again(self) -> None:
+        """
+        His answer to a "Confirm?" was neither yes nor no: ask once more, IN
+        FULL, and give him the whole window again.
+
+        THREE THINGS "Sorry - was that a yes or a no?" GOT WRONG
+        --------------------------------------------------------
+        The window went on running: an unclear answer near its end - and with
+        the hold (_held_for) one can arrive after it - was asked about and then
+        cancelled in the same breath, "No answer, so I've cancelled it."
+
+        Its own echo was an answer. "...a yes or a no?" coming back through the
+        microphone is " no " to _parse_yes_no, and the echo test only knew the
+        first question - so the question asked again could cancel itself.
+        Asked as the question again ("Sorry, I missed that. <question>"), its
+        echo is made of the question's words, which _echoes_the_confirmation
+        throws away, and "yes" and "no" are not among them, so his answer
+        cannot be mistaken for it.
+
+        And it was said with say(), on a thread that waits behind a reply still
+        streaming, so the question could be heard after the window it opened;
+        say_blocking() is how the first question is asked (see Speaker.say_now).
+        """
+        again = f"Sorry, I missed that. {getattr(self, '_confirm_question', '')}".strip()
+        self.say_blocking(again)
+        # As for the first question: stamped after it has been said, so the
+        # echo window measures its tail coming back.
+        self._confirm_question = again
+        self._confirm_asked_at = time.monotonic()
+        self._reask_until = time.monotonic() + self._confirm_timeout_s()
 
     def _judged(self, sound_began_at: float | None) -> None:
         """
@@ -1443,7 +1574,12 @@ class Jalen:
         for curly in ("’", "ʼ", "‘", "`"):
             flattened = flattened.replace(curly, "'")
         low = " " + re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", flattened)) + " "
-        return any(marker in low for marker in _CORRECTION_MARKERS)
+        if not any(marker in low for marker in _CORRECTION_MARKERS):
+            return False
+        # "No - actually, yes" is not what to do instead: it is the answer, and
+        # he changed it. What he finished on is nothing but a decision
+        # (_his_last_word), so it goes to _parse_yes_no as one.
+        return Jalen._his_last_word(low, text) is None
 
     @staticmethod
     def _parse_yes_no(text: str) -> Optional[bool]:
@@ -1494,6 +1630,59 @@ class Jalen:
         if not low.strip():
             return None
 
+        # HE CORRECTED HIMSELF. "No no, I mean yes", "wait - yes, go ahead",
+        # "cancel... on second thought, do it": what he says after the LAST
+        # self-correction is his answer, when it is nothing but an answer.
+        # How narrowly that is read is in _his_last_word.
+        last = Jalen._his_last_word(low, text)
+        if last is not None:
+            return last
+        return Jalen._read_decision(low)
+
+    @staticmethod
+    def _his_last_word(low: str, said: str) -> Optional[bool]:
+        """
+        The answer after his last self-correction, or None to read the whole.
+
+        "He should understand the explanation, even rambling, and come up with
+        the most logical answer." People change their minds out loud: "no no, I
+        mean yes", "wait... yeah, go ahead", "cancel - actually, do it". Read
+        whole, each of those contains a refusal word, and a refusal word always
+        won: the answer he finished on was thrown away and the action cancelled.
+
+        So the words after the LAST marker of a self-correction decide - but
+        only when they are NOTHING BUT an answer (every word in
+        _DECISION_WORDS). "actually, send it to Rodion" is a correction, not a
+        yes, and goes on to be read as one; so does "hang on, let me check".
+        Toward YES it is narrower still: what he finished on must hold a strong
+        yes ("yes", "go ahead", "do it" - not a bare "okay", which follows
+        "wait" in "wait, okay?" as easily as in "wait... okay, go"), and the
+        sentence must not end in a question mark. Toward NO it is as broad as
+        everywhere else here: a refusal he finished on is a refusal.
+        """
+        best_end, best_at = -1, -1
+        for marker in _SELF_CORRECTIONS:
+            at = low.rfind(marker)
+            if at >= 0 and at + len(marker) > best_end:
+                best_end, best_at = at + len(marker), at
+        if best_at < 0:
+            return None
+        tail = " " + low[best_end:].strip() + " "
+        words = tail.split()
+        if not words or not all(word in _DECISION_WORDS for word in words):
+            return None
+        answer = Jalen._read_decision(tail)
+        if answer is True and ((said or "").rstrip().endswith("?")
+                               or not any(yes in tail for yes in _STRONG_YES)):
+            return None
+        return answer
+
+    @staticmethod
+    def _read_decision(low: str) -> Optional[bool]:
+        """
+        _parse_yes_no on a sentence already flattened and padded with spaces:
+        the rules, in their order. Negatives first, always.
+        """
         # --- ONE AGREEMENT THAT IS SPELLED WITH A NEGATIVE WORD ---
         #
         # Neutralised BEFORE either list is searched, because the bare-negation
@@ -1517,11 +1706,23 @@ class Jalen:
         # buying with six other phrases that are not agreement at all — so all
         # seven go back to what they did before, which is refuse.
         #
-        # The cost is the false NO, stated rather than hidden: "yes, no
-        # problem" reads as a refusal. That is unchanged from before this
-        # function was touched, it costs him a sentence, and it is the
-        # direction that cannot send anything.
+        # The cost was the false NO: "yes, no problem" read as a refusal. It is
+        # paid back below for the one case that is not a guess - see BESIDE A
+        # PLAIN YES. On their own, all seven still refuse.
         low = low.replace(" why not ", " yes ")
+        # "I don't mind" is permission, said with a negative: "do you mind if
+        # I...", "I don't mind". Before the bare-negation rule, or n't eats it.
+        for permission in (" i don't mind ", " i dont mind ", " i do not mind "):
+            low = low.replace(permission, " yes ")
+        # BESIDE A PLAIN YES, "no problem" is the yes said twice: "yes, no
+        # problem", "sure, no worries", "okay, not a problem". What the review
+        # above measured was these idioms ALONE becoming approvals ("no rush" is
+        # not permission); next to an explicit yes they are not the answer, the
+        # yes is. Only these, and never "no rush": "yes, no rush" can mean "yes,
+        # but not now". Anything else negative in the sentence still refuses.
+        if any(yes in low for yes in _EXPLICIT_YES):
+            for idiom in _COURTESIES_WITH_A_NEGATIVE:
+                low = low.replace(idiom, " ")
 
         # --- A BARE NEGATION, which the phrase list below never had ---
         #
@@ -1561,9 +1762,25 @@ class Jalen:
             # catch: "I'm good" is "no thanks", and " good " is a YES word.
             # Reproduced as approvals by an independent audit.
             " i'm good ", " im good ", " i'm busy ", " im busy ",
+            # NOT NOW IS NO. "Do it later" contains " do it " and was read as
+            # a yes: the action ran now, which is exactly what he put off. A
+            # RED action is approved for now or not at all, so a deferral is a
+            # refusal and he asks again when the time comes.
+            " later ", " tomorrow ", " tonight ", " another time ",
+            " some other time ", " next time ", " in a minute ", " in a bit ",
+            " in a while ",
+            # Refusals and retractions that are not built from "no" or "not".
+            " no way ", " uh uh ", " nuh uh ", " scratch that ", " scrap that ",
+            " changed my mind ", " change my mind ", " drop it ", " i'll pass ",
+            " ill pass ", " hold it ", " hold up ", " hold off ", " back off ",
+            # "that's wrong" refuses; " wrong " is in no agreement, and
+            # "totally" and "right" beside it otherwise approve.
+            " wrong ",
         ):
             if phrase in low:
                 return False
+        if low.strip() in _WHOLE_NO:
+            return False
 
         # --- NOT AN ANSWER: a correction, a question, somebody else's assistant ---
         #
@@ -1602,9 +1819,22 @@ class Jalen:
             " all right ", " why not ", " i agree ", " agreed ", " approve ",
             " approved ", " sounds good ", " perfect ", " great ", " good ",
             " let's do it ", " lets do it ", " make it happen ", " yes please ",
+            # How people actually say it, none of which was here. Each one
+            # checked against the NO list and the corrections above, which
+            # still run first.
+            " uh huh ", " mm hmm ", " mmhmm ", " mhm ", " mm hm ", " yes sir ",
+            " yea ", " yeh ", " yah ", " copy that ", " sounds great ",
+            " sounds fine ", " works for me ", " fine by me ", " that works ",
+            " do that ", " green light ", " greenlight ", " permission granted ",
+            " i confirm ", " delete it ", " close it ", " empty it ", " post it ",
+            " submit it ", " run it ",
         ):
             if phrase in low:
                 return True
+        # Words that are a yes only as the WHOLE answer: "go" is one, "go home"
+        # is not; "please" is one, "please read it first" is not.
+        if low.strip() in _WHOLE_YES:
+            return True
         return None
 
     # ---------------------------------------------------------------- handling
@@ -1987,6 +2217,13 @@ class Jalen:
         if verdict.tier is Tier.RED:
             approved = admission.approved_action or self._run_coro(
                 self.confirm(f"{verdict.summary}. Confirm?"))
+            # DANGEROUS ENOUGH TO ASK TWICE (`consequences:` in safety.yaml):
+            # after his yes, what it does that cannot be taken back, and the
+            # question again. A limit's yes stood in for the first question,
+            # never for this one. The brain's hook asks it the same way.
+            second = getattr(verdict, "second_question", "")
+            if approved and second:
+                approved = self._run_coro(self.confirm(second))
             self.audit.action(verdict, "executed" if approved else "cancelled")
             if not approved:
                 return "Cancelled."
@@ -2495,6 +2732,10 @@ class Jalen:
                 self._answer_q.put(ConfirmAnswer("correction", text))
                 return "Got it - passing that on instead."
             answer = self._parse_yes_no(text)
+            if answer is None:
+                # Neither, by rule: a model reads the whole sentence before he is
+                # asked again. Only here, after the rules - see answer_reader.
+                answer = self._read_unclear_answer(text)
             if answer is not None:
                 self.audit.utterance(text, who="user")
                 self._answer_q.put(ConfirmAnswer("yes" if answer else "no", text))
@@ -2507,7 +2748,7 @@ class Jalen:
             if not getattr(self, "_confirm_reasked", False):
                 self._confirm_reasked = True
                 self.audit.utterance(text, who="user")
-                self.say("Sorry - was that a yes or a no?")
+                self._ask_again()
                 return "Sorry - was that a yes or a no?"
 
         # AN AMBER ANNOUNCEMENT IS WAITING FOR "STOP" ("... Say stop if you

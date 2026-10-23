@@ -20,7 +20,7 @@ TWO THINGS THAT MADE ASKING FEEL BROKEN WHERE AN ANSWER IS TYPED
    while Jalen is still asking it, and his answer goes to a call that was
    already refused. The timeout is now sized so it never happens, including
    for an AMBER announcement held for a sentence of his on its way
-   (app.STOP_HOLD_S).
+   (app.ANSWER_HOLD_S).
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jalen.app import STOP_HOLD_S, ConfirmAnswer, Jalen, stop_hold_s
+from jalen.app import ANSWER_HOLD_S, ConfirmAnswer, Jalen, answer_hold_s
 from jalen.audit import AuditLog
 from jalen.brain.agent import Brain
 from jalen.config import CONFIG, Cfg
@@ -146,13 +146,21 @@ def a_brain(cfg=CONFIG) -> Brain:
                  confirm=confirm, announce=announce)
 
 
-def test_the_hook_timeout_covers_three_questions_each_with_its_full_wait_and_speech():
-    brain = a_brain()
-    longest_wait = max(float(CONFIG.get_path("safety.confirm_timeout_s")),
-                       float(CONFIG.get_path("safety.confirm_timeout_typed_s")),
-                       float(CONFIG.get_path("safety.undo_window_s")) + stop_hold_s(CONFIG),
-                       float(CONFIG.get_path("safety.undo_window_typed_s")))
-    assert brain._hook_timeout_s() == 3 * (longest_wait + Brain._QUESTION_SPEECH_S) + 10.0
+def longest_question(cfg):
+    """What one question can take at its longest, as the brain is told to size it."""
+    hold = answer_hold_s(cfg)
+    confirm = 2 * (max(float(cfg.get_path("safety.confirm_timeout_s", 20)) + hold,
+                       float(cfg.get_path("safety.confirm_timeout_typed_s", 300)))
+                   + Brain._QUESTION_SPEECH_S)
+    announced = (max(float(cfg.get_path("safety.undo_window_s", 4)) + hold,
+                     float(cfg.get_path("safety.undo_window_typed_s", 10)))
+                 + Brain._QUESTION_SPEECH_S)
+    return max(confirm, announced)
+
+
+def test_the_hook_timeout_covers_every_question_each_at_its_longest():
+    assert Brain._QUESTIONS_PER_CALL == 4      # limit, leash, "Confirm?", consequence
+    assert a_brain()._hook_timeout_s() == 4 * longest_question(CONFIG) + 10.0
 
 
 def test_the_hook_timeout_is_far_past_the_sdks_default_of_sixty_seconds():
@@ -171,30 +179,44 @@ def test_one_slow_question_alone_would_already_have_been_close_to_the_default():
 def test_the_hook_timeout_follows_config():
     # Announcements kept short here (1 s, and a 9 s hold from a 1 s endpoint),
     # so that the confirmations are the longest wait and the number moves with them.
-    brain = a_brain(Cfg({"safety": {"confirm_timeout_s": 10, "confirm_timeout_typed_s": 10,
-                                    "undo_window_s": 1, "undo_window_typed_s": 5},
-                         "vad": {"silence_ms": 1000}}))
-    assert brain._hook_timeout_s() == 3 * (10 + Brain._QUESTION_SPEECH_S) + 10.0
+    cfg = Cfg({"safety": {"confirm_timeout_s": 10, "confirm_timeout_typed_s": 10,
+                          "undo_window_s": 1, "undo_window_typed_s": 5},
+               "vad": {"silence_ms": 1000}})
+    # A "Confirm?" by voice: 10 s, held 9 s, and asked again in full once.
+    assert a_brain(cfg)._hook_timeout_s() == 4 * (2 * (10 + 9 + Brain._QUESTION_SPEECH_S)) + 10.0
+
+
+def test_a_confirm_asked_again_and_held_both_times_still_finishes_inside_the_hook():
+    """
+    By voice a "Confirm?" waits its 20 s, held up to 12 s for an answer on its
+    way, and - when the answer was neither yes nor no - is asked once more in
+    full with the whole window again. Sized for one window, the hook was cut
+    off in the middle of the question asked again.
+    """
+    cfg = Cfg({"safety": {"confirm_timeout_s": 20, "confirm_timeout_typed_s": 20,
+                          "undo_window_s": 2, "undo_window_typed_s": 5}})
+    one_call = 4 * 2 * (20 + ANSWER_HOLD_S + Brain._QUESTION_SPEECH_S)
+    assert one_call < a_brain(cfg)._hook_timeout_s()
 
 
 def test_an_announcement_held_for_his_answer_still_finishes_inside_the_hook():
     """
     By voice an AMBER announcement now waits its window AND a sentence of his on
-    its way (STOP_HOLD_S): 2 + 12 s as shipped. With confirmations configured
+    its way (ANSWER_HOLD_S): 2 + 12 s as shipped. With confirmations configured
     shorter than that, sizing the hook by the confirmations alone cut a held
     announcement off - three of them did not fit.
     """
     cfg = Cfg({"safety": {"confirm_timeout_s": 5, "confirm_timeout_typed_s": 5,
                           "undo_window_s": 2, "undo_window_typed_s": 5}})
-    held = 2 + stop_hold_s(cfg)
-    assert held == 2 + STOP_HOLD_S
-    assert 3 * (held + Brain._QUESTION_SPEECH_S) < a_brain(cfg)._hook_timeout_s()
+    held = 2 + answer_hold_s(cfg)
+    assert held == 2 + ANSWER_HOLD_S
+    assert 4 * (held + Brain._QUESTION_SPEECH_S) < a_brain(cfg)._hook_timeout_s()
 
 
 def test_a_typed_announcement_window_longer_than_any_confirmation_is_covered_too():
     cfg = Cfg({"safety": {"confirm_timeout_s": 5, "confirm_timeout_typed_s": 5,
                           "undo_window_s": 2, "undo_window_typed_s": 90}})
-    assert 3 * (90 + Brain._QUESTION_SPEECH_S) < a_brain(cfg)._hook_timeout_s()
+    assert 4 * (90 + Brain._QUESTION_SPEECH_S) < a_brain(cfg)._hook_timeout_s()
 
 
 def test_the_matcher_carries_the_timeout():
@@ -241,5 +263,6 @@ def test_brain_start_passes_the_timeout_on(monkeypatch):
 def test_a_question_that_waits_the_whole_typed_window_still_finishes_inside_the_hook():
     brain = a_brain()
     typed = float(CONFIG.get_path("safety.confirm_timeout_typed_s"))
-    # limit question, leash question, then the action's own "Confirm?"
-    assert 3 * (typed + Brain._QUESTION_SPEECH_S) < brain._hook_timeout_s()
+    # limit question, leash question, the action's own "Confirm?" and its
+    # consequence - each of them asked again once, typed answers all the way
+    assert 4 * 2 * (typed + Brain._QUESTION_SPEECH_S) < brain._hook_timeout_s()
