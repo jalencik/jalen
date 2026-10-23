@@ -85,6 +85,8 @@ After installing hotkeys, **Ctrl+Alt+J** wakes Jalen and **Ctrl+Alt+K** stops it
 
 **The microphone reopens itself.** If it stops delivering sound (unplugged headset, driver reset, another app taking it), Jalen reopens it after ten seconds, trying the default device if yours is gone, and tells you whether it's back or still dead.
 
+**It doesn't go silent on a long task.** After "Give me a second.", a turn that is still working without saying anything gets "Still working on it." at 20 seconds, then at 45 and 90. It never talks over a question it is waiting on you to answer.
+
 **Memory.** Jalen stores lasting facts you tell it (people, preferences, how you like things done) in its long-term memory, which survives restarts, and looks them up before work they matter to. Nothing it only *read* is stored, and nothing that looks like a password.
 
 Run one Jalen instance at a time. Stop it before checking or reconnecting a personal Telegram session, because only one client may use that session at once.

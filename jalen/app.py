@@ -2581,6 +2581,40 @@ class Jalen:
             self.audit.write("system", summary="brain signed out at startup")
             self.say(self._brain_down_sentence("authentication_failed", "", first=True))
 
+    # WHAT HE HEARS WHILE A LONG TURN WORKS IN SILENCE, and after how many
+    # seconds of it. Measured in data/audit.jsonl (Brain.ask): a brain turn
+    # takes 3.0 s at the median, 8.0 s at p75 and 23.0 s at p90, so a first
+    # line at 20 s is heard on roughly the slowest tenth of turns and never on
+    # an ordinary one. The later two are NOT MEASURED: spaced out so a long
+    # job is accompanied, not narrated. Three at most, and never while a
+    # question of his is open or anything else is being said.
+    STILL_WORKING = ((20.0, "Still working on it."),
+                     (45.0, "Still on it. This one is taking a while."),
+                     (90.0, "Still going. I'll tell you the moment it's done."))
+
+    def _keep_him_company(self, state: dict, push, done: threading.Event,
+                          look_every_s: float = 0.5) -> None:
+        """
+        Say a STILL_WORKING line whenever a brain turn has been silent that
+        long - no words of the answer since the last thing he heard. The quiet
+        is counted from the last sound: words streaming in, Jalen speaking, or
+        a question of his being open (a "Confirm?" is not silence, and a line
+        said over it would be the worst moment for one).
+        """
+        heard_chars, quiet_since, said = state["chars"], time.monotonic(), 0
+        while said < len(self.STILL_WORKING) and not done.wait(look_every_s):
+            busy = (getattr(self, "_awaiting_confirmation", False)
+                    or getattr(self, "_awaiting_stop", False)
+                    or getattr(self, "_awaiting_reply", False)
+                    or getattr(self.speaker, "speaking", False))
+            if state["chars"] != heard_chars or busy:
+                heard_chars, quiet_since = state["chars"], time.monotonic()
+                continue
+            after, line = self.STILL_WORKING[said]
+            if time.monotonic() - quiet_since >= after:
+                push(line)
+                said += 1
+
     def speak_brain_reply(self, user_text: str) -> None:
         """
         Run a brain turn and speak the answer WHILE it is being written.
@@ -2701,10 +2735,19 @@ class Jalen:
         ack_timer.daemon = True
         ack_timer.start()
 
+        # AND AFTER THAT, NOT SILENCE. "When I tell it the task it should not
+        # go silent" (2026-10-23). One "Give me a second." and then nothing
+        # for however long the tools took - a minute and more for a delegated
+        # chat or a coding job. See STILL_WORKING for when and what.
+        done = threading.Event()
+        threading.Thread(target=self._keep_him_company, args=(state, push, done),
+                         name="jalen-still-working", daemon=True).start()
+
         try:
             reply = self._run_coro(self.handle_with_brain(user_text, on_text=on_text))
         finally:
             ack_timer.cancel()
+            done.set()
 
         if state["chars"] == 0:
             # Nothing streamed: a tool-only turn, or an SDK build that did
