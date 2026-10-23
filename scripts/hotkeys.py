@@ -139,9 +139,10 @@ def _python_for_background() -> Path:
     return sibling if sibling.exists() else Path(sys.executable)
 
 
-def launch_jalen() -> None:
+def launch_jalen(standby: bool = False) -> None:
     """
-    Start Jalen unmuted, detached from this process.
+    Start Jalen unmuted, detached from this process - or, with `standby`,
+    loaded and waiting with the microphone closed for the wake key.
 
     Unmuted specifically: pressing the wake key is an unambiguous request to
     be listened to, and starting muted in response to it would be an
@@ -156,12 +157,16 @@ def launch_jalen() -> None:
     if sys.platform == "win32":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
     subprocess.Popen(
-        [str(_python_for_background()), str(ROOT / "run.py"), "--unmuted"],
+        [str(_python_for_background()), str(ROOT / "run.py"),
+         "--standby" if standby else "--unmuted"],
         cwd=str(ROOT),
         creationflags=creationflags,
         close_fds=True,
     )
-    log("wake pressed — Jalen was not running, launched him")
+    if standby:
+        log("a fresh Jalen is loading in standby - the wake key will open the microphone")
+    else:
+        log("wake pressed — Jalen was not running, launched him")
 
 
 def on_wake() -> None:
@@ -172,9 +177,33 @@ def on_wake() -> None:
         runtime.send_signal("toggle")
 
 
+# How long the kill key lets him stop cleanly before forcing it. Shorter than
+# runtime.STOP_GRACE_S (8 s, which `run.py --stop` still uses): he is silenced
+# the instant the key is pressed (Jalen.watch_for_the_kill_key) and the brain's
+# goodbye is bounded (app.BRAIN_STOP_TIMEOUT_S, 3 s), so anything still alive
+# after this is stuck. NOT MEASURED on his machine.
+KILL_GRACE_S = 4.0
+
+
 def on_kill() -> None:
-    """The kill switch. Stops him cleanly, or forcefully if he won't."""
-    log("kill pressed — " + runtime.stop_running_instance())
+    """
+    The kill switch: he is stopped - cleanly, or forcefully if he won't.
+
+    And then, unless it was a standby instance that was stopped, a fresh one
+    is started in STANDBY (run.py --standby): loaded, warm, microphone closed,
+    nothing on screen. "As soon as I tap Ctrl+Alt+J the mic should start
+    instantly" (2026-10-23) - it took about a minute because the kill key had
+    ended the process and the wake key had to start Python and load every
+    model again. A process that is killed still stops everything it was doing;
+    the next one simply waits, ready. Pressing the kill key on a standby
+    instance ends it for good, and startup.standby_after_kill turns the whole
+    thing off.
+    """
+    info = runtime.running_instance()
+    log("kill pressed — " + runtime.stop_running_instance(timeout=KILL_GRACE_S))
+    if (info is not None and info.mode == "voice"
+            and CONFIG.get_path("startup.standby_after_kill", True)):
+        launch_jalen(standby=True)
 
 
 def _claim_single_instance() -> bool:

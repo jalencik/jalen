@@ -374,6 +374,13 @@ ECHO_REACHES_THE_GATE_S = ECHO_TAIL_S + 4.0 + ANSWER_STT_SLACK_S
 SAYING_AN_ANSWER_S = 3.0
 ANSWER_HOLD_S = SAYING_AN_ANSWER_S + 4.0 + ANSWER_STT_SLACK_S
 
+# How long shutdown waits for the brain's Claude Code child to say goodbye.
+# NOT MEASURED: a clean disconnect is a message and an exit; three seconds is
+# room for that on a slow machine, and the child is ended with the process
+# anyway. It used to be unbounded: a child that did not answer held shutdown
+# until the kill key's eight-second grace ran out and it was force-killed.
+BRAIN_STOP_TIMEOUT_S = 3.0
+
 
 def answer_hold_s(cfg) -> float:
     """ANSWER_HOLD_S with this config's patient endpoint (vad.silence_ms)."""
@@ -926,16 +933,17 @@ class Jalen:
         self._loop_thread.start()
         ready.wait()
 
-    def _run_coro(self, coro):
+    def _run_coro(self, coro, timeout: float | None = None):
         """
         Submit a coroutine to the persistent loop from any other thread and
         block until it finishes. This is the only way async work (brain
         turns, confirmations, announces) should run — never asyncio.run().
+        `timeout` is for shutdown only: a turn waits as long as it takes.
         """
         if self._loop is None:
             raise RuntimeError("Jalen's event loop isn't running")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result()
+        return future.result(timeout=timeout)
 
     def _stop_loop(self) -> None:
         if self._loop is None:
@@ -3010,9 +3018,85 @@ class Jalen:
         return f"{len(events)} thing{'s' if len(events) != 1 else ''} on today: {head}{more}."
 
     # -------------------------------------------------------------------- loop
-    def run(self) -> None:
+    # How often standby looks for the wake key, and the stop watcher for the
+    # kill key. NOT MEASURED: a twentieth of a second is under anything he
+    # could notice after pressing a key, and a stat() at that rate costs nothing.
+    KEY_POLL_S = 0.05
+
+    def _wait_in_standby(self) -> bool:
+        """
+        Standby (run.py --standby): everything loaded and warmed - the models,
+        the brain, speech - with the microphone CLOSED and nothing on screen,
+        until the wake key. True when the key was pressed; False when a stop
+        or a quit came first.
+
+        WHY. "Starting the microphone takes at least a minute" (2026-10-23): the
+        kill key ended the process, so the next wake key had to start Python
+        and load every model again. The kill key now ends the process and
+        starts a fresh one in standby (scripts/hotkeys.py on_kill), so the
+        next wake key only has to open the microphone.
+        """
+        self.audit.write("system", summary="standby: loaded, microphone closed until the wake key")
+        while True:
+            if self._quit.is_set():
+                self._exit_reason = "quit-requested"
+                return False
+            if runtime.stop_requested():
+                self._exit_reason = "stop-file"
+                return False
+            if runtime.take_signal() in ("wake", "toggle", "unmute"):
+                self._woken_at = time.monotonic()
+                runtime.set_mode("voice")
+                return True
+            time.sleep(self.KEY_POLL_S)
+
+    def _note_the_microphone_opened(self) -> None:
+        """
+        One row in the audit log: how long after the process started - and,
+        from standby, after the wake key - the microphone was open. "It takes
+        a minute" had no number behind it anywhere in data/; this is it.
+        """
+        detail = {}
+        try:
+            import psutil
+
+            detail["since_process_start_s"] = round(time.time() - psutil.Process().create_time(), 1)
+        except Exception:  # noqa: BLE001 - a measurement must never stop the microphone
+            pass
+        woken = getattr(self, "_woken_at", None)
+        if woken is not None:
+            detail["since_wake_key_s"] = round(time.monotonic() - woken, 2)
+        self.audit.write("system", summary="microphone open", detail=detail)
+
+    def watch_for_the_kill_key(self) -> None:
+        """
+        The kill key stops a running Jalen by asking it to (runtime.request_stop)
+        and the microphone loop sees that at its next frame - unless it is
+        inside a transcription, which can take seconds. This watcher does not
+        wait for the loop: the moment the stop is asked for, the voice stops
+        and the orb goes. The process then ends as it always did. Started by
+        run.py for voice mode; a daemon, so it ends with the process.
+        """
+        def watch() -> None:
+            while not runtime.stop_requested():
+                time.sleep(self.KEY_POLL_S)
+            for step in (self.speaker.stop, self.orb.stop):
+                try:
+                    step()
+                except Exception:  # noqa: BLE001 - shutdown() does the rest
+                    pass
+
+        threading.Thread(target=watch, name="jalen-kill-key", daemon=True).start()
+
+    def run(self, *, standby: bool = False) -> None:
+        """
+        The microphone loop. `standby` (run.py --standby) loads everything
+        and then waits with the microphone CLOSED and no orb on screen until
+        the wake key - see _wait_in_standby.
+        """
         self.running.set()
-        self.orb.start()
+        if not standby:
+            self.orb.start()
         self.orb.set_state("muted" if self.muted else "idle")
 
         self.wake.load()
@@ -3059,8 +3143,11 @@ class Jalen:
         barge_fired = False
 
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
-        for note in self.startup_notes():
-            self.say(note)
+        if not standby:
+            # In standby nothing is said until he asks for Jalen: the notes are
+            # said when the wake key opens the microphone, below.
+            for note in self.startup_notes():
+                self.say(note)
 
         def dispatch_turn(text: str, turn_id: int, timer: TurnTimer,
                           from_him: bool = True, door: str = "",
@@ -3151,8 +3238,26 @@ class Jalen:
 
         self.prewarm()
 
+        if standby:
+            # STANDBY: everything is loaded and warming, and nothing listens.
+            # The wake key is the wake word (the hotkey branch below does the
+            # same): the microphone opens straight into a window for him.
+            if not self._wait_in_standby():
+                return
+            self.muted = False
+            self.orb.start()
+            listening = True
+            wake_initiated = True
+            opened_by = "wake"
+            vouched_by = None
+            sound_began_at = time.monotonic()
+            self.orb.set_state("listening")
+            for note in self.startup_notes():
+                self.say(note)
+
         frames_seen = 0
         with self.mic:
+            self._note_the_microphone_opened()
             for frame in self.mic.frames():
                 # `python run.py --stop` (and the spoken "quit") set this. We
                 # check it here, in the loop that owns the microphone, so the
@@ -4656,7 +4761,11 @@ class Jalen:
 
         if self.brain is not None and self._loop is not None:
             try:
-                self._run_coro(self.brain.stop())
+                # Bounded: the brain is a Claude Code child process, and one
+                # that does not answer used to hold the whole shutdown - and
+                # the kill key - until the hotkey's grace ran out and it was
+                # force-killed. The child dies with this process either way.
+                self._run_coro(self.brain.stop(), timeout=BRAIN_STOP_TIMEOUT_S)
             except Exception:
                 pass
         try:

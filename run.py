@@ -30,6 +30,9 @@ def main() -> int:
     parser.add_argument("--status", action="store_true", help="say whether Jalen is running, and exit")
     parser.add_argument("--why", action="store_true", help="why did Jalen stop last time? prints the exit record and recent crashes")
     parser.add_argument("--restart", action="store_true", help="stop the running Jalen, then start fresh")
+    parser.add_argument("--standby", action="store_true",
+                        help="load everything, keep the microphone closed, and start listening "
+                             "the moment the wake key (Ctrl+Alt+J) is pressed")
     args = parser.parse_args()
 
     if args.check:
@@ -66,7 +69,10 @@ def main() -> int:
     # on the same devices — which is what "I saw two Jalen instances" and
     # the doubled/competing replies actually were.
     mode = "telegram" if args.telegram else "text" if args.text else "voice"
-    already = runtime.acquire(mode)
+    # A standby instance says so in the lock until the wake key makes it a
+    # voice one (Jalen._wait_in_standby): the kill key ends a standby instance
+    # for good, and replaces a voice one with a fresh standby (scripts/hotkeys.py).
+    already = runtime.acquire("standby" if (args.standby and mode == "voice") else mode)
     if already is not None:
         print(f"Jalen is already running (pid {already.pid}, mode {already.mode}).")
         print("  stop it:     python run.py --stop")
@@ -247,8 +253,11 @@ def _serve(args) -> int:
     print(f"  stop:     say \"{name}, quit\"  ·  Ctrl+C  ·  python run.py --stop")
     print(f"  pause:    say \"{name}, pause\" (stops listening, stays running)")
     print("  status:   python run.py --status\n")
+    # The kill key silences him the moment it is pressed, not when the
+    # microphone loop next looks (Jalen.watch_for_the_kill_key).
+    jalen.watch_for_the_kill_key()
     try:
-        jalen.run()
+        jalen.run(standby=args.standby)
     except KeyboardInterrupt:
         jalen._exit_reason = "keyboard-interrupt"
         print("\nStopping…")

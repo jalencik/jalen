@@ -97,6 +97,15 @@ def test_text_and_telegram_modes_print_the_startup_notes(branch):
 
 
 def test_voice_mode_says_them_once_when_it_starts():
-    source = (ROOT / "jalen" / "app.py").read_text(encoding="utf-8")
-    started = source.index('summary=f"Jalen started (session {self.session_id})"')
-    assert "for note in self.startup_notes():" in source[started:started + 200]
+    import inspect
+
+    from jalen.app import Jalen
+
+    run = inspect.getsource(Jalen.run)
+    started = run.index('summary=f"Jalen started (session {self.session_id})"')
+    # At once - or, in standby (run.py --standby), when the wake key opens the
+    # microphone: a standby Jalen says nothing until he asks for it.
+    assert run.count("for note in self.startup_notes():") == 2
+    assert "if not standby:" in run[started:started + 120]
+    woken = run.index("if not self._wait_in_standby():")
+    assert woken < run.index("for note in self.startup_notes():", woken) < run.index("with self.mic:")

@@ -77,6 +77,8 @@ See [SETUP.md](SETUP.md) for the full walkthrough, including PowerShell script p
 
 After installing hotkeys, **Ctrl+Alt+J** wakes Jalen and **Ctrl+Alt+K** stops it. Say **"Jalen, quit"** to exit voice mode.
 
+**Ctrl+Alt+K** silences Jalen the moment you press it and ends everything it was doing. A fresh Jalen then loads in the background in standby: microphone closed, nothing on screen. The next **Ctrl+Alt+J** only has to open the microphone and you can talk straight away, with no "Hey Jalen" needed. Before this, K ended the process, so J had to start everything from cold, which took about a minute. Press **Ctrl+Alt+K** again while Jalen is in standby to end it completely. `startup.standby_after_kill: false` in `config/jalen.yaml` brings back the old behaviour. The first start after logging in, or after K twice, still loads from cold. Each start writes a "microphone open" row to the audit log with how long it took.
+
 Run one Jalen instance at a time. Stop it before checking or reconnecting a personal Telegram session, because only one client may use that session at once.
 
 ## Configuration and privacy

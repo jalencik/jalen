@@ -107,6 +107,18 @@ def acquire(mode: str) -> InstanceInfo | None:
     return None
 
 
+def set_mode(mode: str) -> None:
+    """
+    Rewrite the mode in OUR lock: a standby instance woken by the key is a
+    voice instance from then on, and the kill key treats the two differently
+    (scripts/hotkeys.py on_kill).
+    """
+    info = _read_lock()
+    if info is None or info.pid != os.getpid():
+        return
+    LOCK_PATH.write_text(f"{info.pid}\n{info.started_at}\n{mode}\n", encoding="utf-8")
+
+
 def release() -> None:
     """Drop ownership — only if the lock is actually ours."""
     info = _read_lock()

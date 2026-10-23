@@ -16,6 +16,7 @@ the packages. `jalen.ps1` resolves the interpreter from its own location.
 .\jalen.ps1 check      # environment + credential diagnostic, run this first
 .\jalen.ps1 todo       # what is actually outstanding
 python run.py --why    # why the last run stopped
+python run.py --standby  # loaded, mic CLOSED until Ctrl+Alt+J (what the kill key leaves behind)
 ```
 
 ## Tests
