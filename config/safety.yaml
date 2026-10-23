@@ -5,8 +5,9 @@
 #
 #  GREEN  -> just do it, log it.
 #  AMBER  -> say what you're about to do, wait `undo_window_s`, then do it
-#            unless he says "stop". (When paranoid_first_week is on, AMBER
-#            behaves like RED.)
+#            unless he says "stop". By voice, a sentence he began inside
+#            the window is waited for (app.STOP_HOLD_S). (When
+#            paranoid_first_week is on, AMBER behaves like RED.)
 #  RED    -> stop, describe the action, wait for an explicit spoken "yes"
 #            (or a tap in Telegram). No answer in time = cancelled.
 #  BLACK  -> refuse. Always. Not configurable by voice, not overridable by

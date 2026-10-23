@@ -984,10 +984,20 @@ class Brain:
         a call that was already refused, and the RED path logged it "executed"
         if he said yes. Sized so that it never happens: three questions, each
         with its full wait and its longest speech, and ten seconds over.
+
+        The longest wait is a "Confirm?" as shipped, but an AMBER announcement
+        is a question too, and by voice it now waits out its window AND a
+        sentence of his on its way to it (app.STOP_HOLD_S, 12 s) - so it is in
+        the comparison, and a config with short confirmations cannot leave it
+        uncovered.
         """
+        from ..app import stop_hold_s       # app builds the brain; not the reverse
+
         spoken = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
         typed = float(self.cfg.get_path("safety.confirm_timeout_typed_s", 300))
-        return 3 * (max(spoken, typed) + self._QUESTION_SPEECH_S) + 10.0
+        announced = max(float(self.cfg.get_path("safety.undo_window_s", 4)) + stop_hold_s(self.cfg),
+                        float(self.cfg.get_path("safety.undo_window_typed_s", 10)))
+        return 3 * (max(spoken, typed, announced) + self._QUESTION_SPEECH_S) + 10.0
 
     def _hook_matcher(self, matcher_class):
         """The PreToolUse matcher, given its timeout where the SDK has one."""

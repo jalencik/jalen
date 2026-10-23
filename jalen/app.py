@@ -337,6 +337,43 @@ ANSWER_STT_SLACK_S = 5.0
 # instead. It is the whole tail for a caller that does not say.
 ECHO_REACHES_THE_GATE_S = ECHO_TAIL_S + 4.0 + ANSWER_STT_SLACK_S
 
+# HOW LONG AN AMBER ANNOUNCEMENT WAITS FOR A SENTENCE OF HIS ON ITS WAY.
+# See Jalen._held_for.
+#
+# "... Say stop if you don't want that." waits safety.undo_window_s - 2s as
+# shipped - and then the action runs. By voice the window had shut before any
+# answer could reach it: a sentence reaches process() 3.2s after the sound
+# ENDS at the median (1.4s of endpoint silence, 1.8s of transcription; see
+# ECHO_TAIL_S), so "stop" said the instant the announcement finished arrived
+# more than a second after the action had already gone ahead. The spoken stop
+# the announcement offers almost never stopped anything.
+#
+# So a sentence that BEGAN before the window closed - including one already
+# being heard when it opened, which is "stop" said over the announcement -
+# holds the window until process() has judged it, and at most this long from
+# when it began:
+#
+#     3.0   saying it. NOT MEASURED: "stop", "no, don't" and "wait, hold on"
+#           are well inside it, and a sentence that runs longer is not a
+#           refusal of what was just announced
+#   + 4.0   the longest endpoint silence, the patient one (vad.silence_ms)
+#   + 5.0   transcription: 4.4s at p95 (ANSWER_STT_SLACK_S)
+#   = 12.0
+#
+# Silence holds nothing - an announcement nobody answers still goes after 2s -
+# and a sentence that began after the window closed is not an answer to it.
+# stop_hold_s() recomputes it from the shipped vad.silence_ms, for Jalen and
+# for the brain's hook timeout, which has to outlive the longest hold.
+SAYING_A_REFUSAL_S = 3.0
+STOP_HOLD_S = SAYING_A_REFUSAL_S + 4.0 + ANSWER_STT_SLACK_S
+
+
+def stop_hold_s(cfg) -> float:
+    """STOP_HOLD_S with this config's patient endpoint (vad.silence_ms)."""
+    return (SAYING_A_REFUSAL_S
+            + float(cfg.get_path("vad.silence_ms", 4000)) / 1000.0
+            + ANSWER_STT_SLACK_S)
+
 # THE LEAKY ECHO RULE, FOR AN ANSWER TO "...Confirm?". Four or more words of
 # which 80% are words of the question: the rule _sounds_like_its_own_voice
 # measured on the whole corpus (0 of 853 real utterances refused, 725 of 725
@@ -611,6 +648,14 @@ class Jalen:
             ECHO_TAIL_S
             + float(cfg.get_path("vad.silence_ms", 4000)) / 1000.0
             + ANSWER_STT_SLACK_S)
+        # How long an AMBER announcement waits for a sentence of his that is on
+        # its way (STOP_HOLD_S), and what is on its way: the onset of the
+        # sentence the microphone is hearing or transcribing now (run() writes
+        # it), and of each one handed to process() that _take_as_answer has not
+        # judged yet. Read by _held_for, on the thread waiting for "stop".
+        self._stop_hold_s = stop_hold_s(cfg)
+        self._hearing_since: float | None = None
+        self._judging: set[float] = set()
         # How long past the end of an answer window a sentence that BEGAN
         # inside it can still arrive: the longest one utterance can run, plus
         # the time to transcribe it. See ANSWER_STT_SLACK_S.
@@ -1278,8 +1323,14 @@ class Jalen:
     # once - so this costs no latency. NOT MEASURED: half a second is far
     # inside the shortest window (the 2 s AMBER one).
     _ABANDONED_CHECK_S = 0.5
+    # How often a wait HELD past its window for a sentence on its way looks
+    # again (_held_for), so that once the sentence turns out to answer nothing
+    # the action goes at once rather than at the end of the hold. NOT MEASURED:
+    # a twentieth of a second is under anything he could notice, and a hold
+    # lasts seconds at most.
+    _HELD_CHECK_S = 0.05
 
-    def _wait_for(self, timeout: float):
+    def _wait_for(self, timeout: float, hold=None):
         """
         The next answer to the question that is open NOW, or None when its time
         runs out. The one wait behind confirm() and announce().
@@ -1300,11 +1351,22 @@ class Jalen:
         _prompt_seq when it is put and again when it is over, so an abandoned
         wait notices within _ABANDONED_CHECK_S, and an answer it took that
         belongs to a later question is put back.
+
+        AND A WINDOW CAN BE HELD. `hold` - the AMBER window passes _held_for -
+        is asked, once `timeout` has run out, until when a sentence of his that
+        is on its way keeps the window open. The deadline moves out to that
+        moment and comes back as soon as the sentence has been judged: an
+        answer wakes the wait as it always did, and a sentence that answered
+        nothing lets it end at the next look (_HELD_CHECK_S).
         """
         mine = getattr(self, "_prompt_seq", 0)
-        deadline = time.monotonic() + timeout
+        closes = time.monotonic() + timeout
         while True:
-            remaining = deadline - time.monotonic()
+            now = time.monotonic()
+            deadline = closes
+            if hold is not None and now >= closes:
+                deadline = max(closes, hold(closes))
+            remaining = deadline - now
             if remaining <= 0:
                 with _TAP_LOCK:
                     if getattr(self, "_prompt_seq", 0) == mine:
@@ -1313,8 +1375,9 @@ class Jalen:
                         return self._answer_q.get_nowait()
                     except queue.Empty:
                         return None
+            look = self._ABANDONED_CHECK_S if now < closes else self._HELD_CHECK_S
             try:
-                answer = self._answer_q.get(timeout=min(remaining, self._ABANDONED_CHECK_S))
+                answer = self._answer_q.get(timeout=min(remaining, look))
             except queue.Empty:
                 if getattr(self, "_prompt_seq", 0) != mine:
                     return None
@@ -1330,7 +1393,43 @@ class Jalen:
     def _wait_for_stop(self, window: float) -> bool:
         # False is "stop" (a kill phrase, a refusal, the Stop button); True is
         # "go ahead now", which ends the wait early without stopping anything.
-        return self._wait_for(window) is False
+        # Held past `window` while a sentence of his is on its way (_held_for).
+        return self._wait_for(window, hold=self._held_for) is False
+
+    def _held_for(self, closes: float) -> float:
+        """
+        Until when an AMBER window that would close at `closes` waits for a
+        sentence of his on its way to process(); 0.0 when nothing holds it.
+
+        By voice the window shut before any answer to it could arrive (see
+        STOP_HOLD_S): "stop" said the instant the announcement ended reached
+        process() more than a second after the action had run. So a sentence
+        holds the window if its sound BEGAN before `closes` - every window here
+        is judged by when he began to speak - and _take_as_answer has not judged
+        it yet: the microphone is still hearing it or transcribing it
+        (`_hearing_since`), or has handed it on (`_judging`). It holds until it
+        has been judged, and never longer than STOP_HOLD_S from when it began.
+
+        Only the microphone loop puts anything here, so a typed door, which
+        has its own longer window (undo_window_typed_s), is never held.
+        """
+        # A copy: process() takes onsets out of it on another thread.
+        on_its_way = list(getattr(self, "_judging", ()))
+        hearing = getattr(self, "_hearing_since", None)
+        if hearing is not None:
+            on_its_way.append(hearing)
+        hold_s = getattr(self, "_stop_hold_s", STOP_HOLD_S)
+        return max((began + hold_s for began in on_its_way if began < closes), default=0.0)
+
+    def _judged(self, sound_began_at: float | None) -> None:
+        """
+        _take_as_answer has judged the sentence whose sound began at
+        `sound_began_at`: an AMBER window holding for it (_held_for) can close.
+        After the answer is on its queue, never before, or the window could
+        close in the gap and the action run on a "stop" already given.
+        """
+        if sound_began_at is not None:
+            getattr(self, "_judging", set()).discard(sound_began_at)
 
     @staticmethod
     def _is_correction(text: str) -> bool:
@@ -2432,7 +2531,8 @@ class Jalen:
 
         return ""
 
-    def process(self, text: str, *, from_him: bool = True, door: str = "") -> None:
+    def process(self, text: str, *, from_him: bool = True, door: str = "",
+                sound_began_at: float | None = None) -> None:
         """
         Handle one utterance.
 
@@ -2442,6 +2542,10 @@ class Jalen:
         continuation - because that may be the television. Every other front
         door (text mode, the Telegram bot, the extension's chat panel) is
         text he typed, so the default is True.
+
+        `sound_began_at` is when the sentence's sound began, for speech from
+        the microphone; an AMBER window may be holding for it (_held_for), and
+        is let go once it has been judged below.
         """
         text = (text or "").strip()
         if not text:
@@ -2452,7 +2556,9 @@ class Jalen:
         # Answers first - the kill switch, a rating, an open question, a
         # "Confirm?", an AMBER stop window. An answer is not an instruction;
         # see _take_as_answer for why each comes before everything below.
-        if self._take_as_answer(text, heard=self._hears_its_own_speakers()):
+        taken = self._take_as_answer(text, heard=self._hears_its_own_speakers())
+        self._judged(sound_began_at)
+        if taken:
             return
 
         # ------------------------------------------------------------------
@@ -2716,7 +2822,8 @@ class Jalen:
             self.say(note)
 
         def dispatch_turn(text: str, turn_id: int, timer: TurnTimer,
-                          from_him: bool = True, door: str = "") -> None:
+                          from_him: bool = True, door: str = "",
+                          sound_began_at: float | None = None) -> None:
             """
             Run process() on its own thread so this loop keeps reading mic
             frames while a turn is in flight — including while it's stuck
@@ -2742,13 +2849,19 @@ class Jalen:
             task_id = conversation.start_task(text[:80], conversation.THINKING)
             try:
                 with systools.com_initialized():
-                    self.process(text, from_him=from_him, door=door or "")
+                    self.process(text, from_him=from_him, door=door or "",
+                                 sound_began_at=sound_began_at)
                 conversation.update_task(task_id, state=conversation.COMPLETED)
             except BaseException as exc:      # noqa: BLE001
                 conversation.update_task(task_id, state=conversation.FAILED,
                                          error=f"{type(exc).__name__}: {exc}")
                 raise
             finally:
+                # process() lets go of an AMBER window holding for this
+                # sentence as soon as it has judged it; this is for the turn
+                # that never got that far (it raised first, or the text was
+                # blank), which would otherwise hold it to the end of its cap.
+                self._judged(sound_began_at)
                 self._await_playback()
                 self._finish_timing(timer)
                 with self._turn_lock:
@@ -2857,6 +2970,10 @@ class Jalen:
                     # brings it back. Deafening it entirely would make the
                     # spoken "resume" impossible to hear, which is how you
                     # end up with an assistant you can't turn back on.
+                    #
+                    # Nothing is being heard while paused, so nothing is on
+                    # its way for an AMBER window to wait for (_held_for).
+                    self._hearing_since = None
                     if self.wake.feed(frame):
                         self.paused = False
                         listening = True
@@ -3036,9 +3153,20 @@ class Jalen:
                         if self.mic.queued_seconds() > STALE_AUDIO_S:
                             self.mic.drain()
                         self.collector._reset()
+                    # WHAT IS ON ITS WAY, for an AMBER window deciding whether
+                    # to wait for it (_held_for): the sentence a window has
+                    # just opened for, from its very first frame - or, when
+                    # none opened, nothing, because whatever was being heard
+                    # has by now been dropped or handed on to process().
+                    self._hearing_since = sound_began_at if listening else None
                     continue
 
                 self.orb.set_level(float(np.abs(frame).mean() * 12))
+                # Still on its way - and the first word of it for a window the
+                # barge-in or the hotkey opened above. Stays set through the
+                # transcription and the gate below; cleared, or handed on to
+                # _judging, when the sentence leaves this thread.
+                self._hearing_since = sound_began_at
                 utterance = self.collector.feed(frame)
                 if utterance is None:
                     continue
@@ -3276,9 +3404,14 @@ class Jalen:
                 # Overlapping turns overwrite it deliberately: the newest
                 # turn is the one whose silence he is currently sitting in.
                 self._turn_timer = timer
+                # Handed on: an AMBER window waiting for this sentence keeps
+                # waiting until process() has judged it. Added BEFORE the next
+                # frame clears _hearing_since, so there is no moment at which
+                # the sentence is on its way and neither says so.
+                self._judging.add(sound_began_at)
                 threading.Thread(
-                    target=dispatch_turn, args=(text, turn_id, timer, from_him, door), daemon=True,
-                    name=f"jalen-turn-{turn_id}",
+                    target=dispatch_turn, args=(text, turn_id, timer, from_him, door, sound_began_at),
+                    daemon=True, name=f"jalen-turn-{turn_id}",
                 ).start()
 
         # Falling out of the loop without a reason means the mic generator

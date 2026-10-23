@@ -15,9 +15,12 @@ TWO THINGS THAT MADE ASKING FEEL BROKEN WHERE AN ANSWER IS TYPED
    told otherwise. Jalen never told it. One spoken question fits; a limit he is
    asked about followed by the action's own "Confirm?" (jalen/limits.py) does
    not fit with any margin, and a five-minute typed answer cannot fit at all.
-   The CLI rethrows a PreToolUse callback that runs out of time instead of
-   answering for it, so what a timeout does to the tool call under it is not
-   the gate's to decide. The timeout is now sized so it never happens.
+   When a hook runs out of time the CLI stops the tool call and hands the
+   model an error, so nothing runs unapproved - but the question is cut off
+   while Jalen is still asking it, and his answer goes to a call that was
+   already refused. The timeout is now sized so it never happens, including
+   for an AMBER announcement held for a sentence of his on its way
+   (app.STOP_HOLD_S).
 """
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jalen.app import ConfirmAnswer, Jalen
+from jalen.app import STOP_HOLD_S, ConfirmAnswer, Jalen, stop_hold_s
 from jalen.audit import AuditLog
 from jalen.brain.agent import Brain
 from jalen.config import CONFIG, Cfg
@@ -146,7 +149,9 @@ def a_brain(cfg=CONFIG) -> Brain:
 def test_the_hook_timeout_covers_three_questions_each_with_its_full_wait_and_speech():
     brain = a_brain()
     longest_wait = max(float(CONFIG.get_path("safety.confirm_timeout_s")),
-                       float(CONFIG.get_path("safety.confirm_timeout_typed_s")))
+                       float(CONFIG.get_path("safety.confirm_timeout_typed_s")),
+                       float(CONFIG.get_path("safety.undo_window_s")) + stop_hold_s(CONFIG),
+                       float(CONFIG.get_path("safety.undo_window_typed_s")))
     assert brain._hook_timeout_s() == 3 * (longest_wait + Brain._QUESTION_SPEECH_S) + 10.0
 
 
@@ -164,8 +169,32 @@ def test_one_slow_question_alone_would_already_have_been_close_to_the_default():
 
 
 def test_the_hook_timeout_follows_config():
-    brain = a_brain(Cfg({"safety": {"confirm_timeout_s": 10, "confirm_timeout_typed_s": 10}}))
+    # Announcements kept short here (1 s, and a 9 s hold from a 1 s endpoint),
+    # so that the confirmations are the longest wait and the number moves with them.
+    brain = a_brain(Cfg({"safety": {"confirm_timeout_s": 10, "confirm_timeout_typed_s": 10,
+                                    "undo_window_s": 1, "undo_window_typed_s": 5},
+                         "vad": {"silence_ms": 1000}}))
     assert brain._hook_timeout_s() == 3 * (10 + Brain._QUESTION_SPEECH_S) + 10.0
+
+
+def test_an_announcement_held_for_his_answer_still_finishes_inside_the_hook():
+    """
+    By voice an AMBER announcement now waits its window AND a sentence of his on
+    its way (STOP_HOLD_S): 2 + 12 s as shipped. With confirmations configured
+    shorter than that, sizing the hook by the confirmations alone cut a held
+    announcement off - three of them did not fit.
+    """
+    cfg = Cfg({"safety": {"confirm_timeout_s": 5, "confirm_timeout_typed_s": 5,
+                          "undo_window_s": 2, "undo_window_typed_s": 5}})
+    held = 2 + stop_hold_s(cfg)
+    assert held == 2 + STOP_HOLD_S
+    assert 3 * (held + Brain._QUESTION_SPEECH_S) < a_brain(cfg)._hook_timeout_s()
+
+
+def test_a_typed_announcement_window_longer_than_any_confirmation_is_covered_too():
+    cfg = Cfg({"safety": {"confirm_timeout_s": 5, "confirm_timeout_typed_s": 5,
+                          "undo_window_s": 2, "undo_window_typed_s": 90}})
+    assert 3 * (90 + Brain._QUESTION_SPEECH_S) < a_brain(cfg)._hook_timeout_s()
 
 
 def test_the_matcher_carries_the_timeout():

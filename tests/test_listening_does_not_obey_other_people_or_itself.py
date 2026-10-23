@@ -639,6 +639,8 @@ class Room:
         jalen._turn_lock = _t.Lock()
         jalen._turn_seq = 0
         jalen._active_turns = set()
+        jalen._hearing_since = None
+        jalen._judging = set()
         jalen._awaiting_confirmation = False
         jalen._awaiting_stop = False
         jalen._awaiting_reply = False
@@ -654,8 +656,8 @@ class Room:
         jalen._follow_up_s = float(CONFIG.get_path("conversation.follow_up_timeout_s", 12))
         jalen.kill_phrases = set(CONFIG.get_path("safety.kill_phrases"))
         if sync_turns:
-            jalen.process = lambda text, from_him=True, door="": self.processed.append(
-                (text, from_him, door))
+            jalen.process = lambda text, from_him=True, door="", sound_began_at=None: \
+                self.processed.append((text, from_him, door))
             jalen._await_playback = lambda *a, **k: None
             jalen._finish_timing = lambda *a, **k: None
             jalen._check_the_plan = lambda *a, **k: None

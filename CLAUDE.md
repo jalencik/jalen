@@ -140,8 +140,9 @@ There is no linter, no type checker, no CI and no git remote.
   the question Jalen was asking is cut off mid-wait: an answer after the
   cut-off goes to a call that was already refused, and a yes was logged
   "executed". `Brain._hook_timeout_s()` sizes it for three questions in a row
-  at the longest wait; change `safety.confirm_timeout_s` or
-  `confirm_timeout_typed_s` and it follows.
+  at the longest wait, a held AMBER announcement included; change
+  `safety.confirm_timeout_s`, `confirm_timeout_typed_s`, `undo_window_s`,
+  `undo_window_typed_s` or `vad.silence_ms` and it follows.
   `tests/test_confirmation_windows.py` pins it.
 - **Past a limit, one question, not two.** The governor's question names the
   action and ends "Confirm?", so `Admission.approved_action` makes the RED
@@ -162,6 +163,17 @@ There is no linter, no type checker, no CI and no git remote.
   ignores only an exact tail of the announcement (`_echoes_the_announcement`) -
   narrower than the confirm echo test on purpose, because here a missed echo
   can only stop an action.
+- **By voice the AMBER window is held for a sentence on its way.** Its 2 s
+  end before any spoken word can arrive (3.2 s after the sound ends, at the
+  median), so `_wait_for_stop` waits past them while a sentence that BEGAN
+  before they ended has not been judged, for at most `STOP_HOLD_S` from its
+  onset (`_held_for`). `run()` publishes the sentence it is hearing or
+  transcribing (`_hearing_since`; every drop path is cleared by the next idle
+  frame) and adds it to `_judging` *before* starting its turn; `process()`
+  lets go (`_judged`) right after `_take_as_answer`, after the answer is on
+  its queue. A new way to hand a sentence on that skips `_judging` closes the
+  window on a "stop" in flight, and every test of the 2 s still passes.
+  `tests/test_saying_stop_stops_it.py`.
 - **A tap is an answer, never an instruction.** In `--telegram` mode a question
   goes out with Yes/No (a "Confirm?") or Stop (an AMBER announcement) under it
   (`Jalen._put_the_question`, `telegram_bot.prompt_keyboard`). A tap reaches

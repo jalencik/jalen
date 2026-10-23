@@ -105,7 +105,7 @@ You are the final commander. The tiers say what *kind* of action is allowed; the
 - **Hands off.** Say **"Jalen, hands off"** (or "lock down", "freeze") and Jalen only reads and answers until you say **"Jalen, end the lockdown"**, with its name. It survives a restart, and `.\jalen.ps1 check` says when it is on. Coding jobs already running are not stopped by it; say "cancel the job" for those.
 - **What has been used.** Ask "what are my limits?"
 - **On your phone.** In Telegram mode a question arrives with Yes and No buttons (Go ahead and Stop under an announcement), and has minutes to be answered rather than seconds.
-- **"Say stop if you don't want that."** Any refusal works, not only the word "stop": "no", "don't", "wait". "Go ahead" lets the action run straight away instead of after the pause. Over a limit you are asked once, with the action and the limit in the same question.
+- **"Say stop if you don't want that."** Any refusal works, not only the word "stop": "no", "don't", "wait". "Go ahead" lets the action run straight away instead of after the pause. If you start speaking before the pause is over, Jalen waits for your words before acting (up to 12 seconds); before, a spoken "stop" reached Jalen only after the two-second pause had already run out. Silence still means it goes after two seconds. Over a limit you are asked once, with the action and the limit in the same question.
 
 ## Development
 

@@ -469,6 +469,11 @@ safety:
                                    # Set false once you trust it. This is the one dial
                                    # to turn when confirmations get annoying.
   undo_window_s: 2                 # AMBER actions announce, then wait this long for "stop"
+  # By voice that is shorter than a spoken "stop" takes to arrive - 3.2s after
+  # the sound ends at the median (the 1.4s endpoint, then 1.8s of transcription)
+  # - so a sentence he BEGAN before it ran out is waited for until process()
+  # has judged it, at most app.STOP_HOLD_S (12s) from when it began. Silence
+  # still goes at 2s. See Jalen._held_for.
   # The same, when "stop" has to be TYPED or TAPPED (run.py --text, the Telegram
   # bot). Two seconds is shorter than the time it takes to read the message, so
   # the stop window existed on paper and the action simply ran. NOT MEASURED:
