@@ -321,7 +321,7 @@ Close the browser Jalen was using for delegation. The conversation is lost when 
 
 ### `delegate_task`   — AMBER
 
-Hand a task to another AI: gemini, or chatgpt (needs an API key). The `brief` must be a FULL engineered brief - context, objective, what success looks like, constraints, what to do if something is unclear, and the output format. A thin brief is REFUSED and you will be told which part is missing. Always pass `expectation`: what HE actually wants, in his words, so the answer can be judged later against his request rather than against its own summary.
+Hand a task to another AI: gemini, chatgpt (needs an OpenAI key), or hermes - Nous Research's Hermes 4, a genuinely different model for a second opinion on a hard problem, reached through OpenRouter (needs an OpenRouter key). When he says 'ask Hermes', this is it. The `brief` must be a FULL engineered brief - context, objective, what success looks like, constraints, what to do if something is unclear, and the output format. A thin brief is REFUSED and you will be told which part is missing. Always pass `expectation`: what HE actually wants, in his words, so the answer can be judged later against his request rather than against its own summary.
 
 Needs: `agent`, `brief`
 

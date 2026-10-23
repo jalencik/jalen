@@ -103,15 +103,7 @@ def main() -> int:
     try:
         from jalen.config import SECRETS
 
-        checks = [
-            ("GROQ_API_KEY", SECRETS.groq_api_key, True, "speech recognition"),
-            ("TELEGRAM_BOT_TOKEN", SECRETS.telegram_bot_token, False, "Telegram control"),
-            ("GEMINI_API_KEY", SECRETS.gemini_api_key, False, "free-tier offload"),
-            ("TELEGRAM_API_ID", SECRETS.telegram_api_id, False, "reading your own chats"),
-            ("GITHUB_TOKEN", SECRETS.github_token, False, "GitHub"),
-            ("NOTION_TOKEN", SECRETS.notion_token, False, "Notion"),
-        ]
-        for name, value, required, why in checks:
+        for name, value, required, why in _credential_checks(SECRETS):
             if value:
                 print(f"{OK}{name} set")
             else:
@@ -222,6 +214,32 @@ def main() -> int:
     print("\n" + ("All good — start it with:  .\\jalen.ps1" if problems == 0
                   else f"{problems} blocking problem(s) above."))
     return 1 if problems else 0
+
+
+def _credential_checks(secrets) -> list[tuple[str, str, bool, str]]:
+    """
+    (what, its value, required, what it is for) for every key Jalen can use.
+    Only "set" or "missing" is ever printed, never a value.
+
+    The two delegation keys were missing, so "make sure Hermes has been
+    working" (2026-10-23) had nothing to look at: the one place he is told
+    to run first said nothing about whether Hermes - or ChatGPT - could be
+    reached. agents.py reads both from the environment, as here.
+    """
+    import os
+
+    return [
+        ("GROQ_API_KEY", secrets.groq_api_key, True, "speech recognition"),
+        ("TELEGRAM_BOT_TOKEN", secrets.telegram_bot_token, False, "Telegram control"),
+        ("GEMINI_API_KEY", secrets.gemini_api_key, False, "free-tier offload"),
+        ("TELEGRAM_API_ID", secrets.telegram_api_id, False, "reading your own chats"),
+        ("GITHUB_TOKEN", secrets.github_token, False, "GitHub"),
+        ("NOTION_TOKEN", secrets.notion_token, False, "Notion"),
+        ("HERMES_API_KEY or OPENROUTER_API_KEY",
+         os.getenv("HERMES_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", ""),
+         False, "asking Hermes"),
+        ("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""), False, "asking ChatGPT"),
+    ]
 
 
 def _check_limits(engine) -> int:

@@ -44,7 +44,7 @@ _Gemini, ChatGPT, Hermes, Claude Code, the desktop app._
 
 - [ ] * **ask_claude_code** - Open Claude Code in a folder and start it working on a prompt  [tells you first, you can say stop]
 - [ ] * **claude_code_status** - Check whether the Claude Code CLI is installed and where
-- [ ]   **delegate_task** - Hand a task to another AI: gemini, or chatgpt (needs an API key)  [tells you first, you can say stop]
+- [ ]   **delegate_task** - Hand a task to another AI: gemini, chatgpt (needs an OpenAI key), or hermes - Nous Research's Hermes 4, a genuinely different model for a second op...  [tells you first, you can say stop]
 - [ ]   **follow_up_task** - Reply into an existing delegated conversation - the other AI keeps its own context, so name only what needs fixing rather than restating the whole ...  [tells you first, you can say stop]
 - [ ]   **hand_off_to_code** - Start Claude Code on a fully written brief, in a project folder  [tells you first, you can say stop]
 - [ ]   **hand_off_to_cowork** - Open the Claude desktop app with a fully written brief on the clipboard  [tells you first, you can say stop]
