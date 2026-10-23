@@ -1,6 +1,6 @@
 # What Jalen can do
 
-**170 tools.** Generated from the running code by
+**171 tools.** Generated from the running code by
 `scripts/abilities.py`, so it cannot promise something that no longer
 exists. Every quoted phrase is one the test suite already asserts.
 
@@ -1070,6 +1070,10 @@ The time in another city or country, and how many hours ahead of or behind him i
 
 Attach a real file to the form's file input - a CV, a PDF, an image. Give the full path. If the page has several upload boxes, also give the field label. Only on the page inspect_form last read.
 
+### `usage_report` — GREEN
+
+How much of each usage limit has been used (emails, messages, deletions, coding jobs, thinking turns...) and whether he has put you in lockdown. Use for 'what are my limits' or 'how many messages have you sent'. You can only read it: raising a limit or ending a lockdown is his, by voice or by editing config/safety.yaml.
+
 ### `what_are_you_doing` — GREEN
 
 Everything Jalen is currently working on and how far along it is. For 'what are you doing', 'how far are you', 'are you still going'.
@@ -1100,4 +1104,4 @@ Look up one of his own details from the personal-info folder - 'what's my school
 - Reach Gemini or ChatGPT over their APIs on this machine - the Gemini key is 403'd and there is no OpenAI key. The browser route works instead.
 - Undo a sent email or a deleted file. That is why those ask first.
 
-**170 tools** — 24 amber, 130 green, 16 red
+**171 tools** — 24 amber, 131 green, 16 red

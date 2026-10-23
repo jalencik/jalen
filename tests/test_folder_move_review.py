@@ -1123,6 +1123,12 @@ def test_the_never_touch_list_is_exactly_what_it_was(engine):
         "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", ".env", "*.kdbx", "*credential*", "*password*",
         "*.session", "*.session-journal", "*token*.json", "client_secret*", ".env*", "*.env", "vault.json",
         "*.ovpn", "*.ppk", "*secret*",
+        # ADDED 2026-10-23, on purpose, and only ever in this direction: the two
+        # files that hold a lockdown and the usage counts (jalen/limits.py). A
+        # file tool that could move or delete them could lift a lockdown or hand
+        # a budget back. tests/test_limits_are_enforced_on_both_paths.py pins
+        # that every file tool is refused for them.
+        "jalen-usage.json", "jalen-lockdown.json",
     ]
     assert list(engine._never_patterns) == expected_patterns
     for path in ("c:/windows", "c:/program files/windowsapps", "c:/programdata/microsoft/windows defender"):

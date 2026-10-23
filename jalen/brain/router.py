@@ -1070,6 +1070,35 @@ def _rules() -> list[Rule]:
          "jalen_resume", n, "Listening again."),
         (R(r"^(restart|reboot|reload)( " + _NAME + r"| yourself)?$", re.I),
          "jalen_restart", n, "Restarting."),
+        # ---- hands off, and what has been used (jalen/limits.py) -------------
+        # LOCKDOWN stops every acting tool until he lifts it; reading goes on.
+        # Generous on the way IN, because the one phrase he needs when
+        # something is going wrong must not depend on remembering a wording.
+        # "stop" alone is not here: it is the kill phrase and stops speech.
+        (R(r"^(?:lock ?down|go into (?:a )?lock ?down|lock ?down mode|hands off"
+           r"|freeze|freeze everything|freeze all actions|stop acting"
+           r"|don'?t touch anything|do not touch anything)"
+           r"( " + _NAME + r")?$", re.I),
+         "jalen_lockdown", n, None),
+        # ...and strict on the way OUT. These only reach the lift when the
+        # sentence is his word for word and was said with his name
+        # (Jalen._lockdown_off), so a phrase added here widens what he may
+        # say, never who may say it.
+        (R(r"^(?:(?:end|lift|finish|remove|cancel|turn off|disable)(?: the| your| this)? "
+           r"lock ?down|lock ?down (?:off|over|ended|is over)|hands on|unfreeze"
+           r"(?: everything)?|act again|start acting again)"
+           r"( " + _NAME + r")?$", re.I),
+         "jalen_lift_lockdown", n, None),
+        # "my limits", not "your limits": he also asks Jalen about its own
+        # limits in the sense of what it cannot do, and that is the brain's.
+        (R(r"^(?:what(?:'?s| are| is)|show(?: me)?|tell me|read(?: out)?|give me)"
+           r"(?: all)?(?: of)? (?:my |the )?(?:usage )?limits"
+           r"(?: so far| used| status| usage)?\??$"
+           r"|^(?:usage report|limits? report|limits? status|usage status|usage)\??$"
+           r"|^how (?:much|many things) (?:have|did) you (?:used?|done|do|taken)"
+           r"(?: so far| today| this hour)?\??$"
+           r"|^what have you used(?: so far| today)?\??$", re.I),
+         "usage_report", n, None),
         # A bare name with nothing after it. STT produces this constantly:
         # the wake word fires, he starts to speak, and the endpointer closes
         # on just "Jalen". Without a rule it is a full LLM round-trip to

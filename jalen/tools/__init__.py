@@ -33,7 +33,7 @@ from . import (
     handoff,
     interaction,
     launcher, memory, messaging, otp, profile, repairs, research, selfcontrol, selfeval, stickers,
-    sysinfo, system, technician, vault, voice, web,
+    sysinfo, system, technician, usage, vault, voice, web,
 )
 
 
@@ -74,6 +74,7 @@ for _module in (
     technician, repairs, vault, interaction, browsertabs, attachments,
     bulkmail, autofill, drafting, devwork, selfcontrol, agents,
     webagent, feedback, webforms, tasks, profile, otp, browser_ext, stickers, foldermove,
+    usage,
 ):
     _collisions = set(REGISTRY) & set(_module.REGISTRY)
     if _collisions:

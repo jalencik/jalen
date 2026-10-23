@@ -470,6 +470,15 @@ safety:
                                    # to turn when confirmations get annoying.
   undo_window_s: 2                 # AMBER actions announce, then wait this long for "stop"
   confirm_timeout_s: 20            # RED actions cancel if you don't answer in time
+  # The same, when the answer is TYPED (run.py --text, the Telegram bot). A
+  # question that arrives as a phone notification is read when the phone is
+  # picked up and answered with a thumb; twenty seconds cancelled it before it
+  # could have been seen. NOT MEASURED: five minutes is a guess at "a phone
+  # left on a desk", and the first month of data/audit.jsonl "No answer" rows
+  # in telegram mode is where it should be revised. Voice is unchanged. The
+  # brain's tool hook is given a timeout derived from this (agent.py
+  # Brain._hook_timeout_s); the SDK would otherwise cut it off at 60 seconds.
+  confirm_timeout_typed_s: 300
   # F47 "both" — hotkey and voice. The listener is scripts/hotkeys.py, a
   # separate process installed by scripts/install_autostart.py.
   #

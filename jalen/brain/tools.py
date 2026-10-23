@@ -1124,6 +1124,14 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "full version for the screen.",
         {},
     ),
+    "usage_report": (
+        "How much of each usage limit has been used (emails, messages, deletions, "
+        "coding jobs, thinking turns...) and whether he has put you in lockdown. "
+        "Use for 'what are my limits' or 'how many messages have you sent'. You "
+        "can only read it: raising a limit or ending a lockdown is his, by voice "
+        "or by editing config/safety.yaml.",
+        {},
+    ),
     "open_own_project": ("Open Jalen's own source code in VS Code.", {}),
     # --- handing real work to a coding agent, and being there at the end ---
     "start_coding_job": (

@@ -37,6 +37,11 @@ green:
     - run_own_tests
     - self_diagnose
     - own_health
+    # Counts of what has been used against each limit and whether he put me in
+    # lockdown (jalen/limits.py). Read-only and has no argument that could set
+    # anything, so it is not on refuse_from_content: asking "what are my
+    # limits" costs no confirmation, or he stops asking.
+    - usage_report
     - review_coding_job
     - project_status
     - search_files
@@ -54,6 +59,14 @@ green:
     - jalen_unmute
     - jalen_sleep
     - jalen_ack            # answering to his own name
+    # Hands off, and its end (jalen/limits.py). Router-only: the brain has no
+    # tool for either, so neither can be reached by anything Jalen reads. They
+    # are handled before the gate in handle_local, because a lockdown that had
+    # to pass the gate it is about to close would refuse itself; lifting it
+    # additionally requires that the sentence be his own, word for word, said
+    # with his name (Jalen._lockdown_off).
+    - jalen_lockdown
+    - jalen_lift_lockdown
     - jalen_timing         # reads its own stopwatch; touches nothing
     - list_web_chats       # reads a local json file
     - read_web_result      # reads what already came back
@@ -576,6 +589,12 @@ never_touch:
     - "*.ovpn"
     - "*.ppk"
     - "*secret*"
+    # Jalen's own usage counts and the lockdown record (jalen/limits.py). A
+    # tool that could move or delete either could hand a budget back or lift
+    # a lockdown - the one thing only he may do. Exact names, chosen to be
+    # distinctive, so nothing of his is refused by accident.
+    - "jalen-usage.json"
+    - "jalen-lockdown.json"
   apps:
     - "1Password"
     - "Bitwarden"
@@ -732,3 +751,152 @@ injection_guard:
     # nothing. Add them the day they reach TOOL_SPECS: archiving hides the
     # security alert that warned him.)
     - create_calendar_event
+
+# ---------------------------------------------------------------------------
+# LIMITS  - how MANY, where the tiers above say what KIND  (jalen/limits.py)
+# ---------------------------------------------------------------------------
+# Nothing in this file used to cap a COUNT. A looping model, a Telegram flood
+# or a microphone that heard its own voice could send fifty messages, close
+# every window or start a dozen coding agents, each one "allowed", and nothing
+# noticed the total (grep of jalen/ for per_hour / rate_limit / max_per /
+# quota / budget, 2026-10-23: only the brain's 30-turn guard and a coding
+# job's one-hour timeout).
+#
+# HE IS THE FINAL COMMANDER. At a cap the action is not quietly refused and
+# not quietly allowed: Jalen asks him, out loud, with the same "Confirm?"
+# question and echo defence a RED action gets, and his yes lets THAT ONE
+# action through. It does not raise the cap - the next one asks again. A "no"
+# (or silence) ends the asking until he speaks again, so a model that retries
+# cannot turn a limit into a stream of questions. Nothing the model can call
+# raises a limit or lifts the lockdown; raising a number is an edit to THIS
+# FILE, in daylight, like the never-touch list.
+#
+# on_limit: ask     the default - he decides, one action at a time
+# on_limit: refuse  no question; only editing this file allows more
+# max: 0            the tools in the rule never run (with refuse) - the way to
+#                   switch a whole kind of action off
+#
+# LOCKDOWN ("hands off", "end the lockdown") is not a number: it refuses every
+# acting tool until he lifts it, survives a restart, and is not touched by
+# this block. Reading still works.
+#
+# Every number below rests on report.md section 6, the only measurement of
+# what he actually does: 565 real tool actions across 88 tools in 13.7 days
+# (537 executed, 27 cancelled, 1 blocked). Caps are sized at 10x or more what
+# he has ever done in the window, so ordinary use cannot reach them and a
+# runaway reaches them within minutes. Where no measurement exists the line
+# says NOT MEASURED, and the number is a guess to be revised after a month of
+# data/audit.jsonl - an audit_digest "stopped" line is where a cap that was
+# set too low will show up first.
+limits:
+  enabled: true
+
+  # Acting tools that still run during a lockdown because all they do is STOP
+  # work. "Hands off" and then "cancel the job" must not be answered "I'm in
+  # lockdown". cancel_task kills a coding job's process tree and nothing else.
+  lockdown:
+    still_allowed: [cancel_task]
+
+  # No more than this many ACTING calls (anything AMBER or RED, plus the GREEN
+  # tools on refuse_from_content - SafetyEngine.is_acting) for one instruction
+  # of his. His next sentence starts a new request; his yes at the question
+  # buys another batch. NOT MEASURED: brain.max_turns_per_request is 30 model
+  # turns, so one request rarely holds more than that many sequential calls;
+  # 40 sits above it and trips on parallel bursts and on router loops, which
+  # the turn cap does not see.
+  leash:
+    max_actions: 40
+
+  # How often the model is asked to think. NOT MEASURED per hour. In the one
+  # sample there is (409 real utterances in data/audit.jsonl, app.py's
+  # endpointing note, of which the router answers 20-27%, report.md section 1)
+  # a day holds a few dozen turns. A turn every ten seconds - what a
+  # self-triggering loop looks like - reaches 120 in twenty minutes.
+  brain_turns:
+    max: 120
+    window_s: 3600
+    on_limit: ask
+
+  rules:
+    # send_email: 0 executed in 13.7 days (2 asked for, both cancelled).
+    - name: emails
+      noun: "emails"
+      tools: [send_email]
+      max: 10
+      window_s: 3600
+    # send_telegram_message: 13 in 13.7 days, the rest of the family under 8
+    # each (and the voice and sticker tools post-date the measurement).
+    - name: messages
+      noun: "messages"
+      tools: [send_telegram_message, send_telegram_file, send_sticker,
+              send_voice_message, send_whatsapp_message]
+      max: 30
+      window_s: 3600
+    # One send_posts call is a whole batch (each post is still checked for its
+    # destination), so this counts batches, not posts. No measurement.
+    - name: post_batches
+      noun: "batches of channel posts"
+      tools: [send_posts]
+      max: 6
+      window_s: 3600
+    # delete_file: 4 in 13.7 days, all temp paths; empty_recycle_bin 1.
+    - name: deletions
+      noun: "deletions"
+      tools: [delete_file, delete_email, delete_message, clear_temp_files,
+              empty_recycle_bin, uninstall_software]
+      max: 10
+      window_s: 3600
+    # close_app: 21 in 13.7 days. "Close everything" is ten in a minute and is
+    # allowed; a loop that keeps closing is not.
+    - name: closing
+      noun: "windows and apps closed"
+      tools: [close_app, close_browser, close_browser_tab, sign_out]
+      max: 20
+      window_s: 600
+    # web_delegate 9 in 13.7 days; the coding-agent tools post-date the
+    # measurement. Each of these spends allowance, and a coding job can run
+    # for an hour.
+    - name: delegations
+      noun: "delegations and coding jobs"
+      tools: [web_delegate, web_follow_up, delegate_task, follow_up_task,
+              start_coding_job, ask_claude_code, hand_off_to_cowork,
+              hand_off_to_code]
+      max: 12
+      window_s: 86400
+    # None of these has ever run (report.md: 131 of 208 declared tools never
+    # invoked). Every one is already RED, so each asks anyway; this caps the
+    # total in a run of "yes".
+    - name: system_changes
+      noun: "system changes"
+      tools: [run_powershell, run_terminal_command, install_software,
+              modify_system_setting, change_account_setting,
+              fix_wifi_power_saving]
+      max: 15
+      window_s: 3600
+    # create_file, move_file, rename_file, copy_file: under 8 each in 13.7
+    # days (none in the top twenty). Moving a whole folder is ONE call
+    # (move_folder), so a bulk tidy does not need this raised.
+    - name: file_changes
+      noun: "file changes"
+      tools: [create_file, create_folder, copy_file, move_file, rename_file,
+              edit_file]
+      max: 60
+      window_s: 600
+    # Things other people can see, or that change shared code. No measurement:
+    # none appear in the 13.7 days.
+    - name: public_actions
+      noun: "public posts and code pushes"
+      tools: [post_public, git_push, git_force_push, merge_pull_request,
+              create_github_issue, write_notion_page]
+      max: 10
+      window_s: 3600
+    # The money note above: Jalen takes him to the final button and he presses
+    # it. spend_money is RED, so each one asks; this is the ceiling on a day of
+    # yeses, and it REFUSES rather than asks - raising it is an edit to this
+    # file, which is the point.
+    - name: money
+      noun: "purchases"
+      tools: [spend_money]
+      max: 3
+      window_s: 86400
+      on_limit: refuse

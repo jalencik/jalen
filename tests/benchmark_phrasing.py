@@ -225,6 +225,7 @@ APP_LEVEL_INTENTS = {
     "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_quit", "jalen_pause",
     "jalen_resume", "jalen_restart", "private_mode", "set_posture", "morning_brief",
     "audit_digest", "cancel", "acknowledge", "greet", "reload_config",
+    "jalen_lockdown", "jalen_lift_lockdown",
 }
 
 # Router-only tools (never touch a live machine when this file runs) get an

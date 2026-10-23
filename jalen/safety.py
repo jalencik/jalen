@@ -450,6 +450,16 @@ class SafetyEngine:
             for h in (guard.get("allow_unseen_urls_on_hosts", []) or []) if str(h).strip())
         self._acts_on_the_world = frozenset(guard.get("refuse_from_content", []) or [])
 
+        # HOW MANY, as opposed to what kind (jalen/limits.py). It lives on the
+        # engine for the reason the engine is the gate at all: the router path
+        # and the brain's hook already share this ONE object, so a limit that
+        # hangs off it cannot be enforced on one path and forgotten on the
+        # other. In memory only until Jalen.__init__ attaches a file, so
+        # building an engine in a test or a script writes nothing.
+        from .limits import Governor
+
+        self.governor = Governor.from_config(tiers.get("limits"), acting=self.is_acting)
+
         self.posture = cfg.get_path("safety.posture", "irreversible_only")
         self.paranoid = bool(cfg.get_path("safety.paranoid_first_week", True))
 
@@ -460,6 +470,21 @@ class SafetyEngine:
             _simplify(name)
             for name in (cfg.get_path("telegram.personal.send_without_asking_to", []) or [])
         ]
+
+    def is_acting(self, tool: str) -> bool:
+        """
+        Does this tool CHANGE something or reach somebody, as opposed to
+        reading? The set the injection guard already curated: everything
+        listed AMBER or RED, the GREEN tools on refuse_from_content, and any
+        tool nobody has classified (unclassified-AMBER is not read-only).
+        Judged from the tier in the file, not the posture: "autonomous" turns
+        AMBER into GREEN, and it does not make closing a window a read.
+        Used by the governor for the leash and for lockdown.
+        """
+        base = self._tier_map.get(tool)
+        if base is Tier.BLACK:
+            return False        # never runs, so there is nothing to hold back
+        return base is None or base in (Tier.AMBER, Tier.RED) or tool in self._acts_on_the_world
 
     # ------------------------------------------------------------------ utils
     @staticmethod

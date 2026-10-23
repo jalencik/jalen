@@ -1,5 +1,5 @@
 
-# What Jalen can do  (183 things)
+# What Jalen can do  (189 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -167,7 +167,7 @@ _Windows, windows, volume, media, screenshots._
 
 - [ ]   **click_element** - Click a labelled control inside a window
 - [ ] * **close_app** - Close a running app's window by (partial) title
-- [ ] * **disk_report** - Report free space per drive, plus the biggest folders and files in the user's Desktop, Documents, Downloads and Temp folders
+- [ ] * **disk_report** - Report free space on every drive, then the five biggest places on the system drive (or the drive named), counted from the drive's root, with sizes
 - [ ] * **empty_recycle_bin** - Permanently empty the Recycle Bin  [stops and waits for you to say yes]
 - [ ] * **focus_window** - Bring a window to the foreground by (partial) title
 - [ ]   **forget_site_decision** - Undo a standing decision, so the site is asked about again  [stops and waits for you to say yes]
@@ -175,14 +175,16 @@ _Windows, windows, volume, media, screenshots._
 - [ ] * **get_date** - Current date
 - [ ] * **get_system_status** - CPU, memory and disk usage
 - [ ] * **get_time** - Current time
-- [ ] * **get_window_list** - List currently visible top-level windows
+- [ ]   **get_timezone** - This computer's own time zone: its name, its offset from UTC and the time there
+- [ ]   **get_uptime** - How long this computer has been on, and since when
+- [ ] * **get_window_list** - The windows open on screen, which one is in front and which program each belongs to
 - [ ] * **keyboard_shortcut** - Send a keyboard shortcut
 - [ ]   **lock_vault** - Forget the unlocked secrets immediately
 - [ ] * **lock_workstation** - Lock the screen
 - [ ] * **media_next** - Skip to the next track
 - [ ] * **media_play_pause** - Play or pause whatever media player currently has focus
 - [ ] * **media_previous** - Go back to the previous track
-- [ ]   **memory_report** - Report overall RAM usage and the top processes by memory use
+- [ ] * **memory_report** - Report overall RAM usage and the top processes by memory use
 - [ ] * **open_app** - Launch an application by name
 - [ ] * **open_windows_security** - Show Windows Security / Defender
 - [ ] * **open_windows_update** - Show the Windows Update page
@@ -242,23 +244,27 @@ _The vault, and typing into forms._
 - [ ]   **ext_form_fields** - List the form fields on his real current tab via the extension, so you can fill what you know and ask for the rest
 - [ ]   **ext_page_state** - Read the page on the tab HE is actually looking at, through the Chrome extension - title, url, headings, form-field count
 - [ ]   **ext_status** - Whether Jalen's Chrome extension is connected - i.e
+- [ ]   **foreground_app** - Which program is in front right now, the one he is using
 - [ ]   **form_errors** - What the form is complaining about right now
 - [ ]   **inspect_form** - List every field on the form currently open in Jalen's browser: its label, type, whether it is required, and whether it is already filled
 - [ ]   **next_field** - Press Tab to move to the next field
 - [ ]   **open_storage_settings** - Show where the disk space went
 - [ ] * **play_media** - Play something he named without saying where: a local media file if one matches, YouTube otherwise
 - [ ]   **read_browser_page** - Read the visible text of the page currently open in Jalen's own Chrome - what a page says, or, AFTER submit_form, whether it went through
+- [ ]   **running_programs** - The programs running now, by name, with the ones that have a window open first and each one's memory
 - [ ]   **send_voice_message** - Send a Telegram VOICE MESSAGE AS HIM to a person, in a DM or a group  [stops and waits for you to say yes]
 - [ ]   **submit_form** - Submit the form and report what the page said back, including any validation errors  [stops and waits for you to say yes]
+- [ ]   **time_in** - The time in another city or country, and how many hours ahead of or behind him it is
 - [ ]   **transcribe_voice_note** - Turn ONE Telegram voice note into words  [tells you first, you can say stop]
 - [ ]   **upload_to_form** - Attach a real file to the form's file input - a CV, a PDF, an image  [tells you first, you can say stop]
+- [ ] * **usage_report** - How much of each usage limit has been used (emails, messages, deletions, coding jobs, thinking turns...) and whether he has put you in lockdown
 - [ ] * **what_are_you_doing** - Everything Jalen is currently working on and how far along it is
 - [ ]   **whats_my** - Look up one of his own details from the personal-info folder - 'what's my school', 'what email do I use'
 
 ---
 
-165 tools: 24 amber, 125 green, 16 red
-92 of them also answer to a spoken phrase, for free.
+171 tools: 24 amber, 131 green, 16 red
+96 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
   - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S

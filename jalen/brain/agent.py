@@ -956,6 +956,46 @@ class Brain:
         return self.cfg.get_path("brain.model_default", "claude-sonnet-5")
 
     # -------------------------------------------------------------- safety hook
+    # Seconds of SPEECH one question may take when the hook's timeout is sized.
+    # The longest is send_voice_message, whose question reads out the exact
+    # words - up to 600 characters (safety._voice_message_summary) - at 22.4
+    # characters a second (measured: app.speak_brain_reply), which is 27
+    # seconds, plus synthesis. 40 leaves room for that and nothing longer.
+    _QUESTION_SPEECH_S = 40.0
+
+    def _hook_timeout_s(self) -> float:
+        """
+        How long the SDK may wait for the PreToolUse callback before cutting
+        it off. It is the callback that ASKS him, so it has to outlive every
+        question it can ask in a row.
+
+        The SDK's default is 60 seconds (HookMatcher.timeout, "default: 60"),
+        which Jalen never overrode. One spoken question fits: 20 s of waiting
+        plus a few of speaking. It stopped fitting the moment a second question
+        could precede the first - a limit he is asked about (jalen/limits.py),
+        then the leash, then the action's own "Confirm?" - and it never fit
+        an answer typed on a phone (safety.confirm_timeout_typed_s, 300 s). In
+        the CLI a PreToolUse callback that runs out of time is rethrown rather
+        than answered (the Stop and SessionStart callbacks are the ones it
+        shrugs off and carries on without), so what a timeout does to the
+        tool call under it is the CLI's to decide, not the gate's. Sized so
+        that it never happens instead: three questions, each with its full
+        wait and its longest speech, and ten seconds over.
+        """
+        spoken = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
+        typed = float(self.cfg.get_path("safety.confirm_timeout_typed_s", 300))
+        return 3 * (max(spoken, typed) + self._QUESTION_SPEECH_S) + 10.0
+
+    def _hook_matcher(self, matcher_class):
+        """The PreToolUse matcher, given its timeout where the SDK has one."""
+        hook = self._make_hook()
+        try:
+            return matcher_class(matcher=None, hooks=[hook], timeout=self._hook_timeout_s())
+        except TypeError:
+            # An SDK from before HookMatcher.timeout existed: the default
+            # stands, as it always did, rather than the brain not starting.
+            return matcher_class(matcher=None, hooks=[hook])
+
     def _make_hook(self):
         async def pre_tool_use(input_data: dict, tool_use_id: str, context: Any):
             raw_tool = input_data.get("tool_name") or input_data.get("name") or "unknown"
@@ -985,6 +1025,34 @@ class Brain:
                     }
                 }
 
+            # HOW MANY, and lockdown (jalen/limits.py): the same governor, on
+            # the same engine, that the router path asks in app.handle_local.
+            # After the kind-of-thing gate and before its question, so an
+            # action past a limit asks about the limit first and a refused
+            # one never reaches the RED "Confirm?" below.
+            governor = getattr(self.safety, "governor", None)
+            if governor is not None:
+                admission = await governor.admit(verdict, self.confirm)
+                if not admission.allowed:
+                    self.audit.action(
+                        verdict,
+                        "blocked" if admission.outcome in ("locked", "refused") else "cancelled",
+                        f"limit: {admission.outcome}")
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": admission.for_model,
+                        }
+                    }
+
+            def allowed_to_run() -> dict:
+                # Counted here, after every question that could still say no,
+                # so a cancelled action does not use up a limit.
+                if governor is not None:
+                    governor.record(tool)
+                return {}
+
             if verdict.tier is Tier.RED:
                 template = (
                     self.cfg.get_path("safety_tiers.red.confirm_template", "{summary}. Confirm?")
@@ -999,7 +1067,7 @@ class Brain:
                             "permissionDecisionReason": _deny_reason(approved),
                         }
                     }
-                return {}
+                return allowed_to_run()
 
             if verdict.tier is Tier.AMBER:
                 template = self.cfg.get_path(
@@ -1023,10 +1091,10 @@ class Brain:
                         }
                     }
                 self.audit.action(verdict, "executed")
-                return {}
+                return allowed_to_run()
 
             self.audit.action(verdict, "executed")
-            return {}
+            return allowed_to_run()
 
         return pre_tool_use
 
@@ -1120,7 +1188,7 @@ class Brain:
             permission_mode="bypassPermissions",
             max_turns=int(self.cfg.get_path("brain.max_turns_per_request", 12)),
             mcp_servers=self._mcp_servers(),
-            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self._make_hook()])]},
+            hooks={"PreToolUse": [self._hook_matcher(HookMatcher)]},
             # Emit token deltas as they are produced instead of only whole
             # messages. This is what lets ask() start SPEAKING sentence one
             # while the model is still writing sentence three -- see the

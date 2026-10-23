@@ -117,6 +117,30 @@ There is no linter, no type checker, no CI and no git remote.
   the room would give. The four original labels in the audit line
   (heard/thought/wait/spoke) are load-bearing for a month of history —
   add, never re-anchor.
+- **Limits are one governor on the one engine, asked on both paths.**
+  `jalen/limits.py` counts how MANY (`limits:` in `config/safety.yaml`), where
+  the tiers say what KIND. It hangs off `SafetyEngine.governor`, and both the
+  router (`Jalen.handle_local`) and the brain's hook (`Brain._make_hook`) call
+  `admit()` after `classify()` and before the tier's own question, and
+  `record()` only at the moment the action is allowed to run — a cancelled
+  action must not use up a limit. Add a third path and it has no limits;
+  `tests/test_limits_are_enforced_on_both_paths.py` compares source order.
+  **Only he lifts one.** At a cap he is asked (`Jalen.confirm`, so the echo
+  defence applies) and his yes lets that one action through; nothing the model
+  can call raises a limit or ends a lockdown: there is no tool for either,
+  `jalen/tools/usage.py` may only call `limits.current()`, and
+  `data/jalen-usage.json` and `data/jalen-lockdown.json` are on the never-touch
+  list (otherwise `move_file`, which is GREEN, could rename the lock away).
+  The lockdown is a file whose *presence* means locked, so a corrupt one fails
+  closed; lifting it needs `his_own_words and from_him` (`Jalen._lockdown_off`).
+  Numbers are changed in `safety.yaml` only, never by voice.
+- **The brain's PreToolUse hook must outlive the questions it asks.** The SDK
+  cuts a hook off at 60 s (`HookMatcher.timeout`) unless told otherwise, and
+  the CLI rethrows a `PreToolUse` callback that times out instead of
+  answering for it. `Brain._hook_timeout_s()` sizes it for three questions in a
+  row at the longest wait; change `safety.confirm_timeout_s` or
+  `confirm_timeout_typed_s` and it follows.
+  `tests/test_confirmation_windows.py` pins it.
 - **Never pass user text as an argument to a `.cmd`.** `shutil.which
   ("claude")` returns npm's `claude.CMD`, Windows runs it through cmd.exe,
   and cmd.exe truncates at the first newline, flattens em dashes, strips
@@ -160,6 +184,7 @@ There is no linter, no type checker, no CI and no git remote.
 | Change what the model is told | `Brain.system_prompt()` — agent.py:119-397 |
 | Add a free spoken command | `_rules()` — router.py:403-1150, 136 rules, first match wins |
 | Change a tier or the never-touch list | `config/safety.yaml` only; tool docstrings are stale |
+| Change how many of something he allows | `limits:` in `config/safety.yaml` — `jalen/limits.py` is the mechanism, the file is the policy |
 | Make it faster | `vad.fast_silence_ms`/`silence_ms`, `stt.groq_timeout_s`, the TTS cache — tune together |
 | Understand why a design is what it is | `config/jalen.yaml` comments first (683 lines, they *are* the design record), then `report.md` |
 | See the real current state | `report.md` — supersedes every committed doc's numbers, and is currently untracked |

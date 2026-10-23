@@ -34,7 +34,7 @@ from .audio.tts import Speaker
 from .audio.vad import VAD, UtteranceCollector
 from .audio.wake import WakeWord
 from .audit import AuditLog
-from . import conversation, habits, plan as planning
+from . import conversation, habits, limits, plan as planning
 from . import taint
 from .brain.router import (
     Intent, IntentRouter, NAME_ACK, addressed_to_jalen, is_kill_phrase,
@@ -47,6 +47,21 @@ from .safety import SafetyEngine, Tier
 from .timing import TimingLog, TurnTimer
 from . import tools as systools
 from .ui.orb import Orb, TranscriptWindow
+
+def _governor_of(app):
+    """
+    The usage governor (jalen/limits.py) of this app, or None when it has none:
+    a test that builds a Jalen with Jalen.__new__ and sets only what it needs
+    has no engine at all, and a stub engine has no governor. No governor means
+    no limits and no lockdown, exactly as before they existed; the
+    kind-of-thing gate is a separate object and is not affected.
+
+    A function and not a method, because tests borrow methods like
+    Jalen.handle_with_brain onto bare objects, and a method would have to be
+    borrowed along with them.
+    """
+    return getattr(getattr(app, "safety", None), "governor", None)
+
 
 # Queued mic audio older than this predates the wake word, so it can't be part
 # of the command and is dropped. Anything under it is the tail of the phrase
@@ -473,6 +488,7 @@ class Jalen:
         )
 
         self.safety = SafetyEngine(cfg)
+        self._attach_limits()
         self.router = IntentRouter(cfg)
 
         self.mic = Microphone(cfg)
@@ -640,6 +656,120 @@ class Jalen:
             bridge.start()
         except Exception as exc:  # noqa: BLE001
             self.audit.error("bridge.start", exc)
+
+    # ------------------------------------------------------------------ limits
+    def _attach_limits(self) -> None:
+        """
+        Let the governor remember (jalen/limits.py): what has been used in each
+        window, and whether he left a lockdown on. Done here and not in the
+        engine so that only a real Jalen writes data/jalen-usage.json and
+        data/jalen-lockdown.json - building an engine in a test or a script
+        does not.
+
+        A rule that could not be read is logged as a failed system line and
+        said once at startup (see _say_what_is_unusual_at_startup), never
+        dropped silently: a limit that quietly isn't there reads as one that is.
+        """
+        governor = _governor_of(self)
+        if governor is None:
+            return
+        governor.attach(on_error=lambda exc: self.audit.error("limits", exc))
+        limits.install(governor)
+        for problem in governor.problems:
+            self.audit.write("system", summary=f"limits: {problem}", outcome="failed")
+
+    def _admit(self, verdict):
+        """
+        The governor's answer for this action: may it go ahead, or is it past
+        a limit or in lockdown? The ONE place the router path asks; the brain's
+        hook asks the same governor through the same engine. Cheap when nothing
+        is near a limit - the answer is decided without leaving this thread -
+        and only a question to him goes through the event loop.
+        """
+        governor = _governor_of(self)
+        if governor is None:
+            return limits.OK
+        answer = governor.quick(verdict)
+        if answer is not None:
+            return answer
+        return self._run_coro(governor.admit(verdict, self.confirm))
+
+    def _lockdown_on(self) -> str:
+        """
+        "Hands off." Every acting tool is refused until he lifts it; reading
+        and answering go on. Written down, so a restart does not forget it -
+        and if it could not be written down, he is told, because a lockdown he
+        thinks survives a restart and does not is the dangerous version.
+        """
+        governor = _governor_of(self)
+        if governor is None:
+            return "I don't have a limits engine loaded, so I can't lock down."
+        was_locked = governor.locked
+        on_disk = governor.lock(reason="he said hands off")
+        self.audit.write("system", summary="lockdown on", detail={"on_disk": on_disk})
+        said = ("Still in lockdown." if was_locked else
+                "Hands off. I'll only read and answer until you say end the lockdown.")
+        if not on_disk:
+            said += " I couldn't write that down, so a restart would forget it."
+        return said + self._running_jobs_sentence()
+
+    def _lockdown_off(self, from_him: bool) -> str:
+        """
+        End the lockdown - ONLY for a sentence that is his: the router rule
+        matched what he said word for word (not text expanded from something
+        read, not a misheard-name door) AND the microphone admitted it with
+        his name. The brain has no tool that does this, and nothing Jalen reads
+        reaches this branch, because a page can put words in front of the
+        model but not into this comparison.
+        """
+        governor = _governor_of(self)
+        if governor is None or not governor.locked:
+            return "I wasn't in lockdown."
+        if not from_him:
+            return ("I don't lift a lockdown on a guess. Say it with my name, in one "
+                    "go: Jalen, end the lockdown.")
+        if not governor.unlock():
+            return ("I couldn't clear the lockdown record, so I'm staying locked rather "
+                    "than guess. Delete data/jalen-lockdown.json yourself to lift it.")
+        self.audit.write("system", summary="lockdown off")
+        return "Lockdown over. I'm acting again."
+
+    def _running_jobs_sentence(self) -> str:
+        """Coding jobs already running are NOT stopped by a lockdown: say so."""
+        try:
+            from .tools import devwork
+
+            running = len(devwork.live_jobs())
+        except Exception:  # noqa: BLE001 - a note about jobs must not break the lock
+            return ""
+        if not running:
+            return ""
+        if running == 1:
+            return " One coding job is still running; say cancel the job if you want it stopped."
+        return (f" {running} coding jobs are still running; say cancel the jobs if you want "
+                "them stopped.")
+
+    def startup_notes(self) -> list[str]:
+        """
+        Two things he must not have to discover by asking: that a lockdown he
+        set is still on after a restart, and that a limit in safety.yaml could
+        not be read. Silence about either reads as "all fine". Spoken by
+        run() (and so only when he has unmuted me - a muted Jalen stays
+        muted), printed by the text mode.
+        """
+        governor = _governor_of(self)
+        notes: list[str] = []
+        if governor is None:
+            return notes
+        if governor.locked:
+            notes.append("I'm still in lockdown from before, so I'm only reading. "
+                         "Say end the lockdown when you want me acting again.")
+        if governor.problems:
+            first = governor.problems[0]
+            more = f", and {len(governor.problems) - 1} more" if len(governor.problems) > 1 else ""
+            notes.append(f"One of your limits in safety.yaml couldn't be read: {first}{more}. "
+                         "The rest are in force.")
+        return notes
 
     # -------------------------------------------------------------- event loop
     def _start_loop(self) -> None:
@@ -812,9 +942,29 @@ class Jalen:
             self._confirm_lock = asyncio.Lock()
         return self._confirm_lock
 
+    def _confirm_timeout_s(self) -> float:
+        """
+        How long a question waits for his answer: the spoken window by voice,
+        a longer one when he answers by TYPING (text mode, the Telegram bot).
+
+        Twenty seconds is the window for a sentence said aloud into a room he
+        is standing in. A question that arrives as a Telegram notification on a
+        phone is read when the phone is picked up, then typed with a thumb, and
+        the same twenty seconds cancelled it ("No answer, so I've cancelled
+        it.") before he could have seen it - the cancellation looks like the
+        asking was broken. `mode` is how this knows which kind of room it is;
+        a Jalen built without it is a voice one. The brain's PreToolUse hook is
+        given a timeout that covers this (Brain._hook_timeout_s), because the
+        SDK cuts a hook off at 60 seconds unless told otherwise.
+        """
+        spoken = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
+        if getattr(self, "mode", "voice") in ("text", "telegram"):
+            return max(spoken, float(self.cfg.get_path("safety.confirm_timeout_typed_s", 300)))
+        return spoken
+
     async def confirm(self, question: str) -> "ConfirmAnswer":
         """RED tier: ask out loud and wait for a real yes (spec F45/F46)."""
-        timeout = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
+        timeout = self._confirm_timeout_s()
         async with self._prompt_lock():
             self.orb.set_state("blocked")
             self.say_blocking(question)
@@ -1185,6 +1335,9 @@ class Jalen:
 
     def _answer_panel(self, text: str) -> None:
         from .bridge.server import get_server, BridgeError
+        governor = _governor_of(self)
+        if governor is not None:
+            governor.new_instruction()      # typed by him: a new request, like process()
         try:
             reply = self._run_coro(self.handle_with_brain(text))
         except Exception as exc:  # noqa: BLE001
@@ -1306,13 +1459,18 @@ class Jalen:
             return True
         return False
 
-    def handle_local(self, intent, *, his_own_words: bool = False) -> Optional[str]:
+    def handle_local(self, intent, *, his_own_words: bool = False,
+                     from_him: bool = True) -> Optional[str]:
         """
         Router hit — execute without ever touching an LLM.
 
         `his_own_words` is True only for a rule that matched what he SAID,
         word for word (process() passes it; nothing else does): see the
         origin note at the classify call below.
+
+        `from_him` is False for speech the microphone admitted WITHOUT his name
+        (the question window, a stitched continuation), which may be the
+        television. It matters to exactly one thing: lifting a lockdown.
         """
         tool = intent.tool
 
@@ -1384,6 +1542,15 @@ class Jalen:
             self.safety.posture = intent.args.get("posture", "irreversible_only")
             self.safety.paranoid = self.safety.posture == "paranoid"
             return intent.reply
+        # Handled before the gate, like the controls above: they are Jalen's
+        # own state, and a lockdown that had to pass the gate it is about to
+        # close would be refused by itself. Locking is always safe, so any
+        # source may do it; LIFTING it is the one command here that needs the
+        # sentence to be his - see _lockdown_off.
+        if tool == "jalen_lockdown":
+            return self._lockdown_on()
+        if tool == "jalen_lift_lockdown":
+            return self._lockdown_off(his_own_words and from_him)
         if tool == "morning_brief":
             # This rule existed with reply=None and no implementation, so
             # "brief me" produced total silence — indistinguishable from
@@ -1455,6 +1622,19 @@ class Jalen:
         if verdict.tier is Tier.BLACK:
             self.audit.action(verdict, "blocked")
             return f"I won't do that — {verdict.reason}."
+
+        # HOW MANY, and lockdown (jalen/limits.py). After the kind-of-thing
+        # gate above and before its question: an action past a limit asks him
+        # about the limit first, and a refused one never reaches the RED
+        # "Confirm?" below. The brain's hook makes the same call on the same
+        # governor (tests/test_limits_are_enforced_on_both_paths.py).
+        admission = self._admit(verdict)
+        if not admission.allowed:
+            self.audit.action(
+                verdict, "blocked" if admission.outcome in ("locked", "refused") else "cancelled",
+                f"limit: {admission.outcome}")
+            return admission.why
+
         if verdict.tier is Tier.RED:
             approved = self._run_coro(self.confirm(f"{verdict.summary}. Confirm?"))
             self.audit.action(verdict, "executed" if approved else "cancelled")
@@ -1476,6 +1656,12 @@ class Jalen:
             except RuntimeError:
                 self.audit.action(verdict, "cancelled")
                 return "Cancelled."
+
+        # Allowed to run: count it. Counted here, after every question that
+        # could still have said no, so a cancelled action does not use up a limit.
+        governor = _governor_of(self)
+        if governor is not None:
+            governor.record(tool)
 
         try:
             result = systools.call(tool, intent.args)
@@ -1606,6 +1792,21 @@ class Jalen:
             # Known down, and nothing has changed: answer from memory rather
             # than paying a round-trip to be told the same thing again.
             return self._brain_down_sentence(down, self._brain_down_detail, first=False)
+
+        # HOW OFTEN THE MODEL IS ASKED TO THINK (jalen/limits.py). Past the cap
+        # he is asked, like any other limit, and his yes buys this one turn.
+        # Here and not in process() because this is the one place every brain
+        # turn passes - the voice loop, the text and Telegram front doors, the
+        # extension's chat panel and "go on" - and a cap on a door is a cap on
+        # that door only.
+        governor = _governor_of(self)
+        if governor is not None:
+            admission = await governor.admit_brain_turn(self.confirm)
+            if not admission.allowed:
+                self.audit.write("system", summary=f"brain turn not taken: {admission.outcome}",
+                                 outcome="cancelled")
+                return admission.why
+            governor.record_brain_turn()
 
         if self.brain is None:
             try:
@@ -1997,6 +2198,12 @@ class Jalen:
         fresh = from_him and not self._another_turn_in_flight()
         if fresh:
             taint.he_asked_again()
+            # A new request of his: the leash starts again and a limit he said
+            # no to is asked about afresh - the same moment taint clears, for
+            # the same reason (only his own sentence is a new instruction).
+            governor = _governor_of(self)
+            if governor is not None:
+                governor.new_instruction()
 
         # WHAT "IT" MEANS. Expanded before anything routes, because "send it
         # to Saved Messages" reaching the router as literally "it" is how a
@@ -2067,7 +2274,7 @@ class Jalen:
         if self._turn_timer is not None:
             self._turn_timer.route = "router" if intent is not None else "brain"
         if intent is not None:
-            reply = self.handle_local(intent, his_own_words=his_own_words)
+            reply = self.handle_local(intent, his_own_words=his_own_words, from_him=from_him)
             if reply is not None:
                 self.say(reply)
             if intent.tool != "cancel":
@@ -2207,6 +2414,8 @@ class Jalen:
         barge_fired = False
 
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
+        for note in self.startup_notes():
+            self.say(note)
 
         def dispatch_turn(text: str, turn_id: int, timer: TurnTimer,
                           from_him: bool = True, door: str = "") -> None:
