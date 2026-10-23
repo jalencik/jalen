@@ -59,6 +59,24 @@ def looks_like_a_secret(text: str) -> bool:
     return any(p.search(text) for p in _SECRET_PATTERNS)
 
 
+# PRIVATE MODE MEANS NOTHING IS REMEMBERED. Jalen says so - "Private mode on.
+# Nothing is being logged or remembered." - and remember() never asked: the
+# audit log stopped writing, memory went on storing, including what the brain
+# now stores on its own when he says something lasting (agent.py, MEMORY).
+# The app sets this with the audit log's own switch, at start and whenever
+# private mode changes (Jalen.__init__, the private_mode command). Process-
+# wide, like the mode it mirrors. Reading memory writes nothing and stays on.
+_PRIVATE = threading.Event()
+
+
+def set_private(on: bool) -> None:
+    """Private mode on: remember() stores nothing, and says so."""
+    if on:
+        _PRIVATE.set()
+    else:
+        _PRIVATE.clear()
+
+
 class MemoryStore:
     def __init__(self, cfg) -> None:
         self.enabled = bool(cfg.get_path("memory.enabled", True))
@@ -108,6 +126,9 @@ class MemoryStore:
             return "There's nothing there to remember."
         if not self.enabled:
             return "Memory is off right now."
+        if _PRIVATE.is_set():
+            return ("Private mode is on, so I'm not storing anything. Say \"private "
+                    "mode off\" and tell me again.")
         if looks_like_a_secret(text):
             return "That looks like it might be a credential — I'm not storing that."
 

@@ -125,6 +125,21 @@ def _every_test_starts_with_no_conversation_to_resume():
 
 
 @pytest.fixture(autouse=True)
+def _every_test_starts_out_of_private_mode():
+    """
+    Memory's private switch (memory.set_private) is process-wide like taint,
+    and every real Jalen() sets it from its audit log: one test that turned
+    private mode on would make memory refuse to store anything in every test
+    after it, by file order.
+    """
+    from jalen.tools import memory
+
+    memory.set_private(False)
+    yield
+    memory.set_private(False)
+
+
+@pytest.fixture(autouse=True)
 def _every_test_starts_with_no_form_read():
     """
     The form inspect_form last read (webforms._FORM_READ) is process-wide,

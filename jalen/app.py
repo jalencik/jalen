@@ -588,6 +588,12 @@ class Jalen:
         self.session_id = uuid.uuid4().hex[:12]
 
         self.audit = AuditLog(cfg, self.session_id)
+        # Memory keeps private mode's promise too (memory.set_private): the
+        # audit log's switch is the one switch, and it may start on
+        # (memory.private_mode_default).
+        from .tools import memory as memory_tools
+
+        memory_tools.set_private(self.audit.private)
 
         # Before anything overwrites it: how did the LAST run end?
         #
@@ -2129,6 +2135,10 @@ class Jalen:
         if tool == "private_mode":
             on = bool(intent.args.get("on"))
             self.audit.set_private_mode(on)
+            # "Nothing is being logged or remembered": memory too.
+            from .tools import memory as memory_tools
+
+            memory_tools.set_private(on)
             return intent.reply
         if tool == "new_conversation":
             # His own conversation, like private mode: Jalen's state, not the

@@ -230,8 +230,8 @@ _The vault, and typing into forms._
 
 ## Remembering
 
-- [ ]   **recall_memory** - Search remembered facts and preferences by meaning, not exact wording
-- [ ]   **remember** - Store a fact or preference for later recall
+- [ ] * **recall_memory** - Search remembered facts and preferences by meaning, not exact wording
+- [ ] * **remember** - Store a fact or preference for later recall
 
 ## Writing as you
 
@@ -269,7 +269,7 @@ _The vault, and typing into forms._
 ---
 
 176 tools: 26 amber, 131 green, 19 red
-97 of them also answer to a spoken phrase, for free.
+100 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
   - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S

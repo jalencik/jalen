@@ -1582,6 +1582,27 @@ def _rules() -> list[Rule]:
          lambda m: {"on": True}, "Private mode on. Nothing is being logged or remembered."),
         (R(r"^(private mode off|end private mode|resume logging)$", re.I),
          "private_mode", lambda m: {"on": False}, "Private mode off."),
+
+        # ---- memory ("constant memory", 2026-10-23) ------------------------
+        # A fact he asks Jalen to remember is stored in his own words, at
+        # once and for nothing; until now only the brain could store one,
+        # when it chose to (report.md: the memory table had never held a
+        # row). Not "remember to ..." - a reminder, not a fact - and not
+        # "remember this/that/it" or "remember when": what those mean is in
+        # the conversation, which only the brain has.
+        (R(r"^(?:please )?remember(?: that)? (?!to |this$|that$|it$|me$|when )(.{4,}?)[.!]?$",
+           re.I),
+         "remember", lambda m: {"text": m.group(1).strip()}, None),
+        # About HIM: the facts are in his words ("my sister is ..."), so the
+        # search is for those, not for the word "me". Before the rule below,
+        # which would take "about me" as a search for "me".
+        (R(r"^what do you (?:remember|know) about me\??$", re.I),
+         "recall_memory", lambda m: {"query": "about me: my life, my work, the people "
+                                              "I know and what I like"}, None),
+        # "Remember" only: "what do you know about quantum computing" is a
+        # question for the brain, not a search of what he told Jalen.
+        (R(r"^(?:what do you remember about|do you remember) (?!when )(.{2,}?)\??$", re.I),
+         "recall_memory", lambda m: {"query": m.group(1).strip()}, None),
         (R(r"^(reload|refresh) (config|configuration|settings)$", re.I),
          "reload_config", n, "Config reloaded."),
         (R(r"^what did you do (today|yesterday)\??$", re.I),
