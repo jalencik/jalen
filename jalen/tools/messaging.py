@@ -1885,7 +1885,42 @@ def _found_in(message, searched=None) -> str:
 
 
 # --------------------------------------------------------------------- send
-def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "") -> str:
+def _house_handle() -> str:
+    """The sign-off handle of his channel posts (personal.channel_handle)."""
+    from . import post_format
+
+    try:
+        from ..config import CONFIG
+
+        return CONFIG.get_path("personal.channel_handle", "") or post_format.DEFAULT_HANDLE
+    except Exception:  # noqa: BLE001 - the default is his
+        return post_format.DEFAULT_HANDLE
+
+
+def _in_house_format(text: str, as_written: bool) -> tuple[str, str, str]:
+    """
+    A channel post checked against his format (post_format.py) before it
+    goes: (the text to send, a note of what was tidied or "", why it must not
+    go or ""). Anything that is not a house post - and anything he asked to
+    be sent as written - passes untouched.
+    """
+    from . import post_format
+
+    if as_written:
+        return text, "", ""
+    tidied, changes, wrong = post_format.check(
+        text, lambda markup: _formatted(markup).text, _house_handle())
+    if wrong:
+        return text, "", ("the post doesn't follow your channel's format yet: "
+                          + "; ".join(wrong)
+                          + ". Fix that and send it again (or send it as_written if he "
+                            "asked for a different layout)")
+    note = ("Tidied to the channel format: " + ", ".join(changes) + ".") if changes else ""
+    return tidied, note, ""
+
+
+def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "",
+                          as_written: bool = False) -> str:
     """
     Send a Telegram message as him. RED tier — asks out loud first.
 
@@ -1897,8 +1932,16 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
     Neither widens anything: the gate decides on `to` alone, a reply is no
     more pre-approved than the message it answers, and a message or topic
     that cannot be found, or fits two, sends nothing and asks which.
+
+    A post in his channel's format is checked against it first
+    (_in_house_format): typing slips are put right and said, a structural
+    mistake sends nothing and says what to fix. `as_written` sends it exactly
+    as written, for when he asked for a different layout.
     """
     _enabled()
+    text, tidied, off_format = _in_house_format(text, as_written)
+    if off_format:
+        return f"Nothing sent — {off_format}."
 
     async def work(client):
         entity = await _resolve(client, to)
@@ -1951,17 +1994,20 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
         # tags are how the post is formatted, not what it says. It starts
         # "Sent to" whenever the post went out, and only then: that opening
         # is what drafting.send_posts reads, never the quoted post.
+        # What the house-format check put right, said after the post: it is
+        # what went out, and he should know it is not word for word.
+        also = f" {tidied}" if tidied else ""
         if note.startswith(PREMIUM_DROPPED):
             return (
                 f"Sent to {name}{thread.where}, but the premium emoji went as ordinary emoji "
-                f"— {note}. The rest of the formatting is intact. {message!r}"
+                f"— {note}. The rest of the formatting is intact. {message!r}{also}"
             )
         if note:
             return (
                 f"Sent to {name}{thread.where}, but WITHOUT formatting — {note}. "
-                f"Worth checking it: {message!r}"
+                f"Worth checking it: {message!r}{also}"
             )
-        return f"Sent to {name}{thread.where}: {message!r}{check}"
+        return f"Sent to {name}{thread.where}: {message!r}{check}{also}"
 
     attempted = _Attempt()
     return _run_send(work, to, attempted)

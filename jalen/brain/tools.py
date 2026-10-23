@@ -536,11 +536,18 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "shows it) or a few of its words; a message that cannot be found, or "
         "fits two, sends nothing and says so. In a forum group, topic names "
         "the topic. For a DM he has not seen drafted first, use "
-        "save_telegram_draft and send only after he says yes.",
+        "save_telegram_draft and send only after he says yes. A post in his "
+        "channel's format is checked against it before it goes: bullets, "
+        "bold and the Q&A block are put right and the reply says so; a "
+        "missing section, wrong questions or a changed sign-off sends nothing "
+        "and the reply says exactly what to fix - fix it and send again. "
+        "as_written=true only when he asked for a different layout.",
         {"to": ("string", "chat name, @username, or 'Saved Messages'", True),
          "text": ("string", "the message to send", True),
          "reply_to": ("string", "the message being answered: its number, or a few of its words", False),
-         "topic": ("string", "in a forum group, the topic to post in", False)},
+         "topic": ("string", "in a forum group, the topic to post in", False),
+         "as_written": ("boolean", "send exactly as written, skipping the channel-format "
+                        "check - only when he asked for a different layout", False)},
     ),
     "send_voice_message": (
         "Send a Telegram VOICE MESSAGE AS HIM to a person, in a DM or a group. "

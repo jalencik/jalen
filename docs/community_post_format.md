@@ -210,6 +210,26 @@ random one.
 
 ---
 
+## What the send checks
+
+`send_telegram_message` checks a post in this format before it goes out
+(`jalen/tools/post_format.py`):
+
+- **Typing is put right, and the reply says so:** `-` or `*` bullets become
+  `•`, `**bold**` becomes `<b>bold</b>`, a Q&A `<blockquote>` becomes
+  `<blockquote expandable>`, "1." / "Question 1:" becomes `<b>1</b>`, and
+  bullets inside the Q&A become `—`.
+- **Structure is not guessed at:** a missing `Research Areas:` / `Project:`
+  or `Requirements:` section, questions that are not exactly the three
+  above, a missing `Students who are competent in:`, a missing
+  `Leave a reaction to this post`, a title that is not bold, or last two
+  lines that are not exactly the sign-off send NOTHING. The reply lists what
+  to fix; fix it and send again.
+- **When he asks for a different layout on purpose**, send it with
+  `as_written` set, and it goes exactly as written.
+
+---
+
 ## Telegram HTML: what is actually supported
 
 Only these tags, and every one of them arrives as formatting:

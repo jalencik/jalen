@@ -40,8 +40,15 @@ ROCKET, PIN, HAND = 5368324170671202286, 5368324170671202287, 536832417067120228
 
 POST = (
     '<b>Lab Opportunity for NLP students</b> <tg-emoji emoji-id="%d">\U0001f680</tg-emoji>\n\n'
+    "<b>Research Areas:</b>\n\n"
+    "• Multilingual datasets\n\n"
     '<b>Requirements:</b> <tg-emoji emoji-id="%d">\U0001f4cc</tg-emoji>\n\n'
-    "• Passion in NLP\n\n"
+    "• Passion in NLP\n"
+    "• Leave a reaction to this post\n\n"
+    "<blockquote expandable><b>Most Asked Questions</b>\n\n"
+    "<b>1</b> What will you get?\n— Real research experience\n\n"
+    "<b>2</b> Who should apply?\nStudents who are competent in:\n— NLP\n\n"
+    "<b>3</b> How are applicants selected?\nBy the challenge tasks.\n</blockquote>\n\n"
     "Interested? Don't hesitate to dm me <tg-emoji emoji-id=\"%d\">\U0001f447</tg-emoji>:\n"
     "@Iht_student"
 ) % (ROCKET, PIN, HAND)
