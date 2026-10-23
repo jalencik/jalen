@@ -11,7 +11,7 @@ Common commands run through a local intent router. More involved requests go to 
 - **Handle communication:** read Gmail, manage Calendar events, draft emails, and work with your personal Telegram account or a Telegram bot. On Telegram it reads, searches, drafts and sends, and acts on messages already sent: edit, delete, forward, pin and react.
 - **Help with writing and coding:** prepare drafts, start coding jobs, and hand work to other assistants.
 - **Diagnose Windows problems:** check disk space, startup apps, network settings, and system health.
-- **Remember useful information:** store notes and keep credentials in an encrypted vault with site-specific permissions.
+- **Remember useful information:** store notes and keep credentials in an encrypted vault with site-specific permissions. The conversation itself carries on after a restart (up to 12 hours later); say "new conversation" to let it go.
 
 Jalen is under active development. Run `.\jalen.ps1 can` for the current tool list and safety tiers.
 

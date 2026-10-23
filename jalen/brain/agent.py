@@ -16,8 +16,11 @@ SDK would otherwise auto-approve — which is why we use a hook rather than the
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -25,6 +28,46 @@ from ..safety import SafetyEngine, Tier
 
 ConfirmFn = Callable[[str], Awaitable[bool]]
 AnnounceFn = Callable[[str], Awaitable[None]]
+
+_REPO = Path(__file__).resolve().parents[2]
+
+# ---------------------------------------------------------------------------
+# THE CONVERSATION OUTLIVES A RESTART
+#
+# "Constant memory ... save up the conversation" (2026-10-23). Facts he tells
+# Jalen survive in memory.py, but the conversation did not: the SDK holds it
+# in the CLI child, so every restart - and every Ctrl+Alt+K, which ends the
+# process - began the next turn knowing nothing that had been said.
+#
+# So the session id of every turn that ended well is written down
+# (brain.session_path), and the next Brain resumes it with the SDK's own
+# `resume` - by that exact id, never `continue_conversation`, which picks up
+# the newest session in the working folder: his own Claude Code session on
+# this repo, if he was working on Jalen there.
+#
+# Never at the cost of the brain: a session that cannot be resumed - its
+# transcript gone, made from another folder - is forgotten and a fresh one
+# starts (Brain.start). Not in private mode: a session that had a private
+# turn is never written down, so a restart does not bring it back. "New
+# conversation" forgets it on purpose (Brain.forget_conversation).
+#
+# Only ids shaped like the CLI's (a UUID) are passed on: the value becomes a
+# command-line argument of the child.
+_SESSION_ID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+
+
+def saved_session_path(cfg) -> Path:
+    """Where the conversation to resume is written down (brain.session_path)."""
+    path = Path(str(cfg.get_path("brain.session_path", "data/brain-session.json")))
+    return path if path.is_absolute() else _REPO / path
+
+
+def forget_saved_conversation(path: Path) -> None:
+    """Never resume the conversation written down at `path`."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 MCP_SERVER_NAME = "jalen"
 # SDK MCP tools are reported to PreToolUse hooks as "mcp__<server>__<tool>",
@@ -454,6 +497,16 @@ SPOKEN_STYLE = (
 
 
 class Brain:
+    # The conversation-resume state, defaulted at class level so that a Brain
+    # built without __init__ (Brain.__new__, as several tests do) neither
+    # resumes anything nor writes anything down.
+    _session_path: Path | None = None
+    _resume_within_s = 0.0
+    _epoch = 0
+    _fresh = False
+    _private_sessions: frozenset[str] = frozenset()
+    resumed = ""
+
     def __init__(
         self,
         cfg,
@@ -473,6 +526,13 @@ class Brain:
         self._client = None
         self._lock = asyncio.Lock()
         self.model = cfg.get_path("brain.model_default", "claude-sonnet-5")
+        # The conversation, carried across a restart (see the note at the top).
+        self._session_path = saved_session_path(cfg)
+        self._resume_within_s = float(cfg.get_path("brain.resume_within_s", 43200) or 0)
+        self._epoch = 0                     # bumped by forget_conversation()
+        self._fresh = False                 # the next turn starts a new conversation
+        self._private_sessions = frozenset()  # sessions that had a private turn
+        self.resumed = ""                   # the session start() picked up, if any
 
     # ------------------------------------------------------------ system prompt
     def _preapproved_destinations_line(self) -> str:
@@ -1260,10 +1320,85 @@ class Brain:
             # comment on ask() for why that is the single biggest latency
             # win on this path.
             include_partial_messages=True,
+            # The conversation before the restart, when there is one to pick
+            # up (_session_to_resume); None - the SDK's default - otherwise.
+            resume=self._session_to_resume(),
             **self._speed_options(),
         )
         self._client = ClaudeSDKClient(options=options)
-        await self._client.__aenter__()
+        try:
+            await self._client.__aenter__()
+        except Exception:
+            if not options.resume:
+                raise
+            # A conversation that cannot be picked up again must never cost
+            # him the brain: forget it, and start a new one.
+            import dataclasses
+
+            failed, self._client = self._client, None
+            try:
+                await failed.__aexit__(None, None, None)
+            except Exception:  # noqa: BLE001 - it already failed once
+                pass
+            forget_saved_conversation(self._session_path)
+            options = dataclasses.replace(options, resume=None)
+            self._client = ClaudeSDKClient(options=options)
+            await self._client.__aenter__()
+        self.resumed = options.resume or ""
+
+    def _session_to_resume(self) -> str | None:
+        """
+        The conversation to pick up: the one the last good turn was in, when
+        that was within brain.resume_within_s. None when there is none, when
+        it is older, when he asked for a new conversation, and when the record
+        cannot be read - a guess here would resume something else.
+        """
+        if self._session_path is None or self._resume_within_s <= 0 or self._fresh:
+            return None
+        try:
+            saved = json.loads(self._session_path.read_text(encoding="utf-8"))
+            session, at = str(saved["session_id"]), float(saved["at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if not _SESSION_ID.fullmatch(session) or session in self._private_sessions:
+            return None
+        if not 0 <= time.time() - at <= self._resume_within_s:
+            return None
+        return session
+
+    def _remember_session(self, session_id: str, epoch: int) -> None:
+        """
+        Write down the conversation a turn that ended well was in, so the next
+        start picks it up. Not when "new conversation" was said while the turn
+        ran (`epoch`), and never a session that had a turn in private mode.
+        """
+        if (self._session_path is None or not session_id or epoch != self._epoch
+                or not _SESSION_ID.fullmatch(session_id)):
+            return
+        if getattr(self.audit, "private", False):
+            self._private_sessions = self._private_sessions | {session_id}
+        if session_id in self._private_sessions:
+            forget_saved_conversation(self._session_path)
+            return
+        try:
+            self._session_path.parent.mkdir(parents=True, exist_ok=True)
+            spare = self._session_path.with_suffix(".tmp")
+            spare.write_text(json.dumps({"session_id": session_id, "at": time.time()}),
+                             encoding="utf-8")
+            os.replace(spare, self._session_path)
+        except OSError:
+            pass
+
+    def forget_conversation(self) -> None:
+        """
+        "New conversation": the next turn starts one, and the one before is
+        never resumed. Safe from any thread - it only sets what the next turn
+        reads, and a turn still running is not recorded when it ends.
+        """
+        self._epoch += 1
+        self._fresh = True
+        if self._session_path is not None:
+            forget_saved_conversation(self._session_path)
 
     def _speed_options(self) -> dict:
         """
@@ -1346,11 +1481,10 @@ class Brain:
         that propagate would turn a recoverable reconnect into the same
         permanent failure it exists to fix.
 
-        The conversation itself does not survive. The SDK holds context in
-        the subprocess, so a new one starts fresh — the turn in flight is
-        answered correctly, but earlier turns are forgotten. That is worth
-        saying plainly rather than pretending nothing happened, and it is
-        still enormously better than every subsequent turn failing.
+        The conversation survives it when it can: the new child resumes the
+        session the last good turn was in (_session_to_resume), and only when
+        that fails does a new one start fresh, earlier turns forgotten. Either
+        is enormously better than every subsequent turn failing.
         """
         try:
             await self.stop()
@@ -1384,6 +1518,14 @@ class Brain:
         from claude_agent_sdk import AssistantMessage, ResultMessage
 
         async with self._lock:
+            # Read before the turn: a "new conversation" said while it runs
+            # must not be undone by this turn writing its session down.
+            epoch = self._epoch
+            if self._fresh:
+                # "New conversation". The client still holds the old one.
+                self._fresh = False
+                if self._client is not None:
+                    await self._restart_client()
             if self._client is None:
                 await self.start()
 
@@ -1475,6 +1617,8 @@ class Brain:
                     turns_used = getattr(message, "num_turns", 0) or 0
                     if subtype == "success" and not getattr(message, "is_error", False):
                         final = getattr(message, "result", "") or ""
+                        self._remember_session(
+                            str(getattr(message, "session_id", "") or ""), epoch)
                     elif subtype == "success":
                         # is_error with a "success" subtype is how the CLI
                         # reports an API failure it could not attribute to

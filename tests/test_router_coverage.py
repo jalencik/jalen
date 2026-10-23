@@ -372,6 +372,9 @@ def test_every_new_rule_targets_a_real_registered_tool(router):
         "jalen_lockdown", "jalen_lift_lockdown",
         # "What's wrong with you?" - read from this process's own state.
         "what_is_wrong",
+        # "New conversation" - lets go of the conversation the brain would
+        # otherwise resume after a restart (Brain.forget_conversation).
+        "new_conversation",
         # Hand-gesture orb resizing. App-level for the same reason
         # jalen_orb_size is: it needs the orb and the camera controller this
         # process owns, and a camera toggle must not depend on the network.

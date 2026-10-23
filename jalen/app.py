@@ -621,6 +621,11 @@ class Jalen:
         self.transcript = TranscriptWindow(cfg)
         self.brain = None  # started by prewarm(), or lazily on first real question
         self._brain_lock = asyncio.Lock()
+        # Where the conversation to resume is written down, for "new
+        # conversation" said before any brain exists (Brain.forget_conversation).
+        from .brain.agent import saved_session_path
+
+        self._brain_session_path = saved_session_path(cfg)
 
         # One persistent event loop, on its own thread, for the whole process
         # lifetime. Brain's ClaudeSDKClient (and anything else async) is
@@ -2124,6 +2129,17 @@ class Jalen:
         if tool == "private_mode":
             on = bool(intent.args.get("on"))
             self.audit.set_private_mode(on)
+            return intent.reply
+        if tool == "new_conversation":
+            # His own conversation, like private mode: Jalen's state, not the
+            # machine's. The next turn starts a new one; the one before is
+            # never resumed after a restart. memory.py's facts are untouched.
+            if self.brain is not None:
+                self.brain.forget_conversation()
+            else:
+                from .brain.agent import forget_saved_conversation
+
+                forget_saved_conversation(self._brain_session_path)
             return intent.reply
         if tool == "set_posture":
             self.safety.posture = intent.args.get("posture", "irreversible_only")

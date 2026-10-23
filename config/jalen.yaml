@@ -420,6 +420,20 @@ brain:
   # keeps its own conversation context, which is what actually applies.
   context_window_turns: 20         # how much conversation it keeps in working memory
 
+  # THE CONVERSATION OUTLIVES A RESTART ("constant memory ... save up the
+  # conversation", 2026-10-23). After every turn that ends well the SDK
+  # session id is written to session_path, and the next start resumes that
+  # session - so a restart, or Ctrl+Alt+K and Ctrl+Alt+J, picks up where the
+  # talk left off. A session that cannot be resumed is forgotten and a new
+  # one starts; a session that had a turn in private mode is never written
+  # down; "new conversation" forgets it on purpose. (jalen/brain/agent.py)
+  session_path: "data/brain-session.json"
+  # How old the last good turn may be and still be picked up. 12 hours: a
+  # restart the same day, or the next morning after a late evening, carries
+  # on; a conversation from two days ago does not come back uninvited.
+  # NOT MEASURED - chosen, not tuned. 0 turns resuming off.
+  resume_within_s: 43200
+
   # ---- LATENCY ----
   # Reasoning effort. Both effort and extended thinking buy accuracy with
   # time spent BEFORE the first token exists, and out loud that time is

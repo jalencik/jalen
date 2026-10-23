@@ -1027,6 +1027,17 @@ def _rules() -> list[Rule]:
         # work, the only remaining exit is killing the process by hand.
         (R(r"^(mute|be quiet|shut up|silence)( yourself)?$", re.I),
          "jalen_mute", n, "Muted."),
+        # The conversation now survives a restart (jalen/brain/agent.py), so
+        # there has to be a way to let it go. Up here because "start a new
+        # conversation" otherwise reaches open_target's "start X" and is
+        # opened as an app. Only sentences that say "conversation" or "chat":
+        # a bare "start over" is as often about the task in hand, and wiping
+        # the context that task needs would be the opposite of what he meant.
+        (R(r"^(?:let'?s )?(?:start )?(?:a )?(?:new|fresh) (?:conversation|chat)$"
+           r"|^(?:forget|clear|end) (?:this|our|the) (?:conversation|chat)$", re.I),
+         "new_conversation", n,
+         "New conversation. What I remember about you stays; what we were "
+         "just talking about is gone."),
         # "talk" is here because "you can talk" NEVER REACHED THIS RULE. The
         # politeness stripper above removes a leading "you can", so the rule's
         # own "you can talk" alternative was dead on arrival — normalisation

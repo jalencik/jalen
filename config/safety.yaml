@@ -110,6 +110,9 @@ green:
     - forget_habit         # deletes only its own learned shortcuts
     - jalen_read_all       # speaks text already on his screen
     - private_mode
+    # Lets go of the conversation he is in (it now outlives a restart). Only
+    # Jalen's own state; what memory.py holds about him is untouched.
+    - new_conversation
     - set_posture
     - reload_config
     - audit_digest

@@ -217,6 +217,14 @@ There is no linter, no type checker, no CI and no git remote.
   would hand its text to the model unmarked. And `unpin_message(entity, None)`
   unpins EVERY message in the chat, so an unpin always names one.
   `tests/test_any_action_in_telegram.py`.
+- **The conversation is resumed by the id Jalen wrote down, never by
+  `continue_conversation`.** `Brain` records the SDK session of every good turn
+  (`brain.session_path`) and passes it as `resume=` on start;
+  `continue_conversation=True` would resume the newest session in the working
+  folder - his own Claude Code session on this repo. A resume that fails starts
+  fresh rather than costing him the brain, a session with a private-mode turn
+  is never recorded, and only a UUID reaches the CLI's command line.
+  `tests/test_the_conversation_survives_a_restart.py`.
 - **Never pass user text as an argument to a `.cmd`.** `shutil.which
   ("claude")` returns npm's `claude.CMD`, Windows runs it through cmd.exe,
   and cmd.exe truncates at the first newline, flattens em dashes, strips
