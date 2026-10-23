@@ -157,6 +157,15 @@ There is no linter, no type checker, no CI and no git remote.
   answer word (`_PLAIN_ANSWER_WORDS`): its echo would answer the question, or
   his real "no" would be thrown away as its echo.
   `tests/test_dangerous_actions_ask_twice.py`.
+- **A question that reads out a message can be answered by its own echo.**
+  The send questions say the words (`_voice_message_summary`,
+  `_text_message_summary` in safety.py), so "sure, see you at six" puts an
+  answer word in the question. `_echoes_the_confirmation` treats a fragment
+  holding one of the MESSAGE's answer words, half or more of it the message's
+  own words (`_quoted_words`), as the echo, and reads "okay" and "ok" as one
+  word (`_ANSWER_FAMILY`). A new summary that quotes text must keep the
+  `saying "..."` / `starts "..."` / `saying: ...` shapes `_quoted_words` reads.
+  `tests/test_a_message_is_heard_before_it_is_sent.py`.
 - **The yes/no rules decide first, and nothing overrules them.**
   `_parse_yes_no` reads negatives first; a self-correction ("no no, I mean
   yes") counts only when what he finished on is nothing but an answer

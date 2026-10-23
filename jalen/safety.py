@@ -301,6 +301,47 @@ def _voice_note_summary(args: dict[str, Any]) -> str:
             "internet, to be turned into words")
 
 
+def _spoken_words(text: str, limit: int) -> str:
+    """Every line of a message as it will be READ ALOUD, joined, clipped at `limit`."""
+    import html as _html
+
+    plain = _html.unescape(_MARKUP.sub("", str(text or "")))
+    plain = _ADDRESS.sub("a link", plain)
+    words = " ".join(plain.split())
+    return words if len(words) <= limit else words[:limit].rsplit(" ", 1)[0] + " ... and more"
+
+
+def _text_message_summary(args: dict[str, Any], app: str) -> str:
+    """
+    The question before a text goes out as him: WHO and WHAT. "send telegram
+    message: Ali" named a person and said nothing about what would be said
+    in his name - so a message the brain had worded for him ("tell Ali I'll
+    be late, nicely") was approved without being heard. A voice message has
+    said its words since it was built (_voice_message_summary); a text now
+    says them too, as they will be read (tags out, a link said as "a link",
+    its host named after), up to 300 characters.
+    """
+    to = _said(args.get("to"), 90) or "someone"
+    head = f"send {to} a {app} message"
+    if str(args.get("reply_to") or "").strip():
+        head += " as a reply"
+    if topic := _said(args.get("topic"), 60):
+        head += f" in the topic {topic}"
+    words = _spoken_words(args.get("text"), 300)
+    if not words:
+        return head
+    hosts = _link_hosts(str(args.get("text") or ""))
+    links = f", with links to {', '.join(hosts[:3])}" if hosts else ""
+    return f'{head} saying "{words}"{links}'
+
+
+def _email_summary(args: dict[str, Any]) -> str:
+    """WHO and the subject - "send email: prof@uni.edu" said neither what nor why."""
+    to = _said(args.get("to"), 90) or "someone"
+    subject = _said(args.get("subject"), 120)
+    return f'send an email to {to}, subject "{subject}"' if subject else f"send an email to {to}"
+
+
 # How he names "the newest message" when he gives neither its number nor its
 # words - and leaving the message out means the same. One list for the
 # question he is asked and for the message the tool then acts on
@@ -367,6 +408,9 @@ def _reaction_summary(args: dict[str, Any]) -> str:
 _SUMMARIES = {
     "send_voice_message": _voice_message_summary,
     "transcribe_voice_note": _voice_note_summary,
+    "send_telegram_message": lambda args: _text_message_summary(args, "Telegram"),
+    "send_whatsapp_message": lambda args: _text_message_summary(args, "WhatsApp"),
+    "send_email": _email_summary,
     "edit_telegram_message": _edit_summary,
     "delete_message": _delete_message_summary,
     "forward_telegram_message": _forward_summary,

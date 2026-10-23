@@ -419,6 +419,42 @@ def answer_hold_s(cfg) -> float:
 # way to be wrong. [NOT MEASURED] how often he answers like that; none of the 20.
 _CONFIRM_ECHO_MIN_WORDS = 4
 _CONFIRM_ECHO_SHARE = 0.80
+# For a fragment holding a plain answer word the question itself contains
+# (see _echoes_the_confirmation). NOT MEASURED: a half is "sure see ya"
+# (two of three) and "sure ya" (one of two), the shortest mangled echoes of
+# a message read out in a question; only questions that quote an answer word
+# - a voice or text message's own words - can ever reach it.
+_CONFIRM_ECHO_SHARE_WITH_ITS_ANSWER = 0.5
+
+# One plain answer written two ways is one word to the echo test. Speech
+# recognition writes the speaker's "ok" back as "okay" as readily as "ok", and
+# "okay" - "a plain answer word the question does not contain" - settled a
+# mangled echo of a message that said "ok sounds good" as his answer.
+_ANSWER_FAMILY = {"okay": "ok", "yeah": "yes", "yep": "yes", "yup": "yes",
+                  "yea": "yes", "nope": "no", "nah": "no"}
+
+
+def _quoted_words(question: str) -> set[str]:
+    """
+    The words of the message a question reads out, or nothing: what follows
+    `saying "` or `starts "` up to the closing quote (a text message, a
+    channel post - safety._text_message_summary, _post_summary), or what
+    follows `saying: ` (a voice message, _voice_message_summary).
+    """
+    low = (question or "").lower()
+    part = ""
+    for opening in ('saying "', 'starts "'):
+        at = low.find(opening)
+        if at >= 0:
+            start = at + len(opening)
+            end = low.find('"', start)
+            part = low[start:end] if end > start else low[start:]
+            break
+    else:
+        at = low.find("saying: ")
+        if at >= 0:
+            part = low[at + len("saying: "):]
+    return {_ANSWER_FAMILY.get(w, w) for w in _SPOKEN_WORD.findall(part)}
 
 # Plain yes/no words. An echo of a confirmation question cannot contain one
 # that the question does not (see _echoes_the_confirmation), and a genuine
@@ -1307,10 +1343,11 @@ class Jalen:
         else:
             waited = began_at - asked_at
             window = ECHO_TAIL_S
-        heard = _SPOKEN_WORD.findall((text or "").lower())
+        heard = [_ANSWER_FAMILY.get(w, w) for w in _SPOKEN_WORD.findall((text or "").lower())]
         if not heard:
             return False
-        asked = _SPOKEN_WORD.findall((getattr(self, "_confirm_question", "") or "").lower())
+        asked = [_ANSWER_FAMILY.get(w, w) for w in
+                 _SPOKEN_WORD.findall((getattr(self, "_confirm_question", "") or "").lower())]
         vocabulary = set(asked)
 
         # AN ECHO OF THE QUESTION CANNOT CONTAIN A PLAIN YES OR NO THAT THE
@@ -1345,6 +1382,22 @@ class Jalen:
             # text contains; both time out and CANCEL, the safe way to fail.
             if all(word in vocabulary for word in heard):
                 return True
+            # A PLAIN ANSWER WORD FROM THE MESSAGE THE QUESTION READS OUT -
+            # "...saying "sure, see you at six". Confirm?" - is the one way an
+            # echo can bring back a word that answers it, and a short mangled
+            # fragment of that message ("sure see ya") was under the
+            # four-word floor below and approved the send. When half or more
+            # of what was heard is the MESSAGE's own words, it is the echo.
+            # Counted against the message, not the whole question: "yes send
+            # it" to a message that says "yes we are meeting" is one word of
+            # it in three, and him. Cost: his own answer made mostly of the
+            # message's words in these few seconds ("sure see you") is
+            # ignored, and the question times out and cancels - the safe way.
+            quoted = _quoted_words(getattr(self, "_confirm_question", "") or "")
+            if quoted and any(word in _PLAIN_ANSWER_WORDS and word in quoted for word in heard):
+                from_message = sum(1 for word in heard if word in quoted)
+                if from_message / len(heard) >= _CONFIRM_ECHO_SHARE_WITH_ITS_ANSWER:
+                    return True
             if len(heard) >= _CONFIRM_ECHO_MIN_WORDS:
                 hits = sum(1 for word in heard if word in vocabulary)
                 return hits / len(heard) >= _CONFIRM_ECHO_SHARE
