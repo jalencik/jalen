@@ -406,6 +406,11 @@ class Governor:
             except OSError:
                 pass
 
+    @property
+    def leash(self) -> int:
+        """Acting calls allowed per instruction of his; 0 means no leash."""
+        return self._leash_max
+
     # --------------------------------------------------------------- lockdown
     @property
     def locked(self) -> bool:

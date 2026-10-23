@@ -68,7 +68,7 @@ See [SETUP.md](SETUP.md) for the full walkthrough, including PowerShell script p
 | `.\jalen.ps1 status` / `stop` / `restart` | Manage the running instance |
 | `.\jalen.ps1 setup` | Run guided setup |
 | `.\jalen.ps1 todo` | Show remaining setup tasks |
-| `.\jalen.ps1 check` | Check dependencies, models, and connected accounts |
+| `.\jalen.ps1 check` | Check dependencies, models, connected accounts, limits, and lockdown |
 | `.\jalen.ps1 why` | Explain the last shutdown or crash |
 | `.\jalen.ps1 can` | List tools and safety tiers |
 | `.\jalen.ps1 hotkeys` | Install autostart and global shortcuts |
@@ -96,6 +96,15 @@ Restart Jalen after editing configuration. Account sessions, conversations, loca
 | **BLACK** | Refuses protected actions |
 
 Content read from emails, messages, or websites does not authorize actions. Vault secrets are passed to the code that uses them rather than returned as model-visible tool results.
+
+## Limits and "hands off"
+
+You are the final commander. The tiers say what *kind* of action is allowed; the limits say how *many*.
+
+- **Limits.** The `limits:` block of `config/safety.yaml` caps how many emails, messages, deletions, closed windows, delegations and similar Jalen may do in an hour or a day, how many actions it takes on a single request of yours, and how many times it thinks per hour. Past a cap Jalen asks you out loud (for example: "That's your limit on emails: 10 in the last hour. Confirm?"). Your yes lets that one action through and does not raise the cap, and a no stops it asking again until you say something new. A limit set to `on_limit: refuse` never asks. Numbers change in that file only; nothing Jalen can do, by voice or by tool, raises one.
+- **Hands off.** Say **"Jalen, hands off"** (or "lock down", "freeze") and Jalen only reads and answers until you say **"Jalen, end the lockdown"**, with its name. It survives a restart, and `.\jalen.ps1 check` says when it is on. Coding jobs already running are not stopped by it; say "cancel the job" for those.
+- **What has been used.** Ask "what are my limits?"
+- **On your phone.** In Telegram mode a question arrives with Yes and No buttons (Stop under an announcement), and has minutes to be answered rather than seconds.
 
 ## Development
 

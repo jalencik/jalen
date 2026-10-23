@@ -159,6 +159,10 @@ def _serve(args) -> int:
             except (AttributeError, ValueError):
                 pass  # not a real console (piped, redirected); nothing to fix
         print("Jalen — text mode. Ctrl+C to quit.\n")
+        # A lockdown he left on, or a limit that could not be read: said at
+        # the top, where he cannot miss it (voice mode says them by speaking).
+        for note in jalen.startup_notes():
+            print(f"jalen > {note}\n")
         jalen.muted = True
         jalen.orb.start()
         try:
@@ -220,6 +224,8 @@ def _serve(args) -> int:
         from jalen.integrations.telegram_bot import run_bot
 
         print("Jalen — Telegram mode. Ctrl+C to quit.\n")
+        for note in jalen.startup_notes():
+            print(f"jalen > {note}\n")
         jalen.muted = True
         jalen.orb.start()
         try:
