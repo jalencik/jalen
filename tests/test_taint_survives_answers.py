@@ -265,10 +265,18 @@ def test_there_is_still_exactly_one_caller():
 
 
 def test_the_clear_comes_after_every_answer_handoff():
-    source = inspect.getsource(Jalen.process)
-    clear = source.index("taint.he_asked_again()")
-    assert source.index("self._reply_q.put(") < clear
-    assert source.index("self._answer_q.put(ConfirmAnswer(") < clear
+    """
+    The handoffs moved into Jalen._take_as_answer (shared with the extension's
+    chat panel since 2026-10-23), so the rule is pinned in two halves: process()
+    asks it BEFORE the clear, and the answer handling never clears taint itself.
+    """
+    process = inspect.getsource(Jalen.process)
+    clear = process.index("taint.he_asked_again()")
+    assert process.index("self._take_as_answer(") < clear
+    answers = inspect.getsource(Jalen._take_as_answer)
+    assert "self._reply_q.put(" in answers
+    assert "self._answer_q.put(ConfirmAnswer(" in answers
+    assert "he_asked_again" not in answers
 
 
 def test_the_microphone_loop_says_whether_it_was_him():

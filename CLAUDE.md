@@ -147,6 +147,15 @@ There is no linter, no type checker, no CI and no git remote.
   action and ends "Confirm?", so `Admission.approved_action` makes the RED
   "Confirm?" (and the AMBER announcement) stand down for that action. Do not
   let a limit question that does NOT name the action set it.
+- **One answer path, and the echo tests are for the microphone only.** Every
+  front door hands a sentence to `Jalen._take_as_answer(text, heard=...)`
+  before treating it as an instruction: `process()` (voice, text, Telegram) and
+  the extension's chat panel (`_answer_panel`, which used to go straight to the
+  brain, so a typed "yes" to an open "Confirm?" started a second turn instead).
+  `heard` is True only for microphone speech (`_hears_its_own_speakers()`, voice
+  mode). The echo tests throw away what sounds like the question, so applied to
+  typing they dropped a typed "Confirm" in silence; never pass `heard=True` for
+  typed text. `tests/test_typed_answers_are_never_echo.py` pins both sides.
 - **The AMBER "say stop" window takes answers, not just the word.** While it
   is open the address gate admits speech without his name; `process()` turns a
   refusal ("no", "don't", "wait") into stop and agreement into "go now", and

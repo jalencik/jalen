@@ -58,7 +58,11 @@ def test_both_gates_use_the_one_matcher():
 
     from jalen.app import Jalen
 
-    assert "is_kill_phrase(" in inspect.getsource(Jalen.process)
+    # process() hands every sentence to _take_as_answer first (shared with the
+    # extension's chat panel since 2026-10-23), and the kill switch is the
+    # first thing that checks.
+    assert "self._take_as_answer(" in inspect.getsource(Jalen.process)
+    assert "is_kill_phrase(" in inspect.getsource(Jalen._take_as_answer)
     assert "is_kill_phrase(" in inspect.getsource(Jalen.should_act_on)
 
 

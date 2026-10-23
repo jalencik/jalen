@@ -1209,6 +1209,23 @@ class Jalen:
                 return hits / len(heard) >= _CONFIRM_ECHO_SHARE
         return False
 
+    def _hears_its_own_speakers(self) -> bool:
+        """
+        Can a sentence reaching process() be Jalen's own voice coming back?
+        Only in voice mode. Typed text - run.py --text, the Telegram bot - never
+        went near a microphone, so it is never an echo, whatever words it uses.
+
+        The echo tests were applied to typing anyway, and they are built to
+        throw away what sounds like the question: a typed "Confirm" - the
+        natural reply to "... Confirm?" in a chat - "Confirmed" or "confirm"
+        within about ten seconds of the question was dropped IN SILENCE. No
+        reply, no "was that a yes or a no?", and the question sat out its whole
+        window and cancelled. Reproduced against process() in text and Telegram
+        mode before this was written (tests/test_typed_answers_are_never_echo.py).
+        A Jalen built without a mode is a voice one, as everywhere else.
+        """
+        return getattr(self, "mode", "voice") == "voice"
+
     def _echoes_the_announcement(self, text: str) -> bool:
         """
         Is this the END of the open AMBER announcement coming back through the
@@ -1530,14 +1547,20 @@ class Jalen:
 
     def _answer_panel(self, text: str) -> None:
         from .bridge.server import get_server, BridgeError
-        governor = _governor_of(self)
-        if governor is not None:
-            governor.new_instruction()      # typed by him: a new request, like process()
-        try:
-            reply = self._run_coro(self.handle_with_brain(text))
-        except Exception as exc:  # noqa: BLE001
-            self.audit.error("panel.turn", exc)
-            reply = f"Something went wrong handling that: {type(exc).__name__}"
+        # TYPED IN THE PANEL WHILE JALEN IS ASKING SOMETHING is the answer, the
+        # way the same words typed into Telegram are - not a second brain turn
+        # queued behind the one that asked. heard=False: it was typed, so it is
+        # never Jalen's own voice coming back. The panel shows what was done.
+        reply = self._take_as_answer(text, heard=False)
+        if not reply:
+            governor = _governor_of(self)
+            if governor is not None:
+                governor.new_instruction()      # typed by him: a new request, like process()
+            try:
+                reply = self._run_coro(self.handle_with_brain(text))
+            except Exception as exc:  # noqa: BLE001
+                self.audit.error("panel.turn", exc)
+                reply = f"Something went wrong handling that: {type(exc).__name__}"
         try:
             get_server().send_command("show_message",
                                       {"role": "jalen", "text": reply}, timeout=10)
@@ -2268,23 +2291,22 @@ class Jalen:
         # still on air.
         self._voice_so_far = ""
 
-    def process(self, text: str, *, from_him: bool = True, door: str = "") -> None:
+    def _take_as_answer(self, text: str, *, heard: bool) -> str:
         """
-        Handle one utterance.
+        If this sentence ANSWERS something - the kill switch, a rating he was
+        asked for, an open ask_user question, a "Confirm?", an AMBER "say stop"
+        window - deliver it there and return what was done, in a few words a
+        door can show (the chat panel does). "" means it answers nothing:
+        it is a new instruction.
 
-        `from_him` says whether it is POSITIVELY his: spoken with his name or
-        the wake word, or typed. The microphone loop passes False for speech
-        it admitted without the name - the question window, a stitched
-        continuation - because that may be the television. Every other front
-        door (text mode, the Telegram bot, the extension's chat panel) is
-        text he typed, so the default is True.
+        One implementation for every front door. It was the body of process(),
+        and the extension's chat panel went straight to the brain past it, so a
+        "yes" typed in the panel to a "Confirm?" Jalen had just asked started a
+        second brain turn - which waited behind the first one's lock while the
+        question it was answering ran out of time. `heard` is True only for
+        speech from the microphone, the one place Jalen's own voice can come
+        back; typed text is never its echo (see _hears_its_own_speakers).
         """
-        text = (text or "").strip()
-        if not text:
-            return
-
-        low = text.lower().rstrip(".!?")
-
         # kill switch always wins - over a waiting question too. The same
         # matcher as the address gate's exemption; see is_kill_phrase.
         if is_kill_phrase(text, self.kill_phrases):
@@ -2292,7 +2314,7 @@ class Jalen:
             self.speaker.stop()
             self.kill.set()
             self._answer_q.put(False)
-            return
+            return "Stopped."
 
         # ANSWERS FIRST, and an answer is not an instruction.
         #
@@ -2319,7 +2341,7 @@ class Jalen:
                 self._pending_rating = None      # he moved on; so do we
             elif self._take_rating(text):
                 self.audit.utterance(text, who="user")
-                return
+                return "Thanks - noted."
 
         # A pending open QUESTION takes everything he says as the answer:
         # "open chrome" said in answer to "what's your phone number" is an
@@ -2328,15 +2350,16 @@ class Jalen:
         if self._awaiting_reply:
             self.audit.utterance(text, who="user")
             self._reply_q.put(text)
-            return
+            return "Got it."
 
         # a pending yes/no takes priority over everything else
         if self._awaiting_confirmation:
             # Jalen's own "...Confirm?" coming back through the microphone.
             # Ignored silently: it is not him, so it is neither an answer
-            # nor a new instruction.
-            if self._echoes_the_confirmation(text):
-                return
+            # nor a new instruction. Only for speech from the microphone
+            # (`heard`): typed text is never its echo.
+            if heard and self._echoes_the_confirmation(text):
+                return "(my own voice - ignored)"
             # "Send it to Rodion instead." Not a yes to what was asked - it
             # was approving the ORIGINAL action - and not a plain no either:
             # it is what he wants done. His words go back with it, so the
@@ -2345,12 +2368,12 @@ class Jalen:
             if self._is_correction(text):
                 self.audit.utterance(text, who="user")
                 self._answer_q.put(ConfirmAnswer("correction", text))
-                return
+                return "Got it - passing that on instead."
             answer = self._parse_yes_no(text)
             if answer is not None:
                 self.audit.utterance(text, who="user")
                 self._answer_q.put(ConfirmAnswer("yes" if answer else "no", text))
-                return
+                return "Got it."
             # Not readable as either. It used to fall straight through to
             # the router and the brain, starting a second turn while the
             # first was still waiting on him. Asked about ONCE; after that a
@@ -2360,7 +2383,7 @@ class Jalen:
                 self._confirm_reasked = True
                 self.audit.utterance(text, who="user")
                 self.say("Sorry - was that a yes or a no?")
-                return
+                return "Sorry - was that a yes or a no?"
 
         # AN AMBER ANNOUNCEMENT IS WAITING FOR "STOP" ("... Say stop if you
         # don't want that."). The kill phrases above catch the word itself. A
@@ -2373,13 +2396,38 @@ class Jalen:
         # now it lets the action go at once instead of after the window.
         # Anything that is neither still falls through, as before.
         if getattr(self, "_awaiting_stop", False):
-            if self._echoes_the_announcement(text):
-                return
+            if heard and self._echoes_the_announcement(text):
+                return "(my own voice - ignored)"
             answer = self._parse_yes_no(text)
             if answer is not None:
                 self.audit.utterance(text, who="user")
                 self._answer_q.put(answer)      # False stops it; True lets it go now
-                return
+                return "Got it."
+
+        return ""
+
+    def process(self, text: str, *, from_him: bool = True, door: str = "") -> None:
+        """
+        Handle one utterance.
+
+        `from_him` says whether it is POSITIVELY his: spoken with his name or
+        the wake word, or typed. The microphone loop passes False for speech
+        it admitted without the name - the question window, a stitched
+        continuation - because that may be the television. Every other front
+        door (text mode, the Telegram bot, the extension's chat panel) is
+        text he typed, so the default is True.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+
+        low = text.lower().rstrip(".!?")
+
+        # Answers first - the kill switch, a rating, an open question, a
+        # "Confirm?", an AMBER stop window. An answer is not an instruction;
+        # see _take_as_answer for why each comes before everything below.
+        if self._take_as_answer(text, heard=self._hears_its_own_speakers()):
+            return
 
         # ------------------------------------------------------------------
         # From here on this is a NEW instruction.
