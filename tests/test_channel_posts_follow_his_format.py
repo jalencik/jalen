@@ -282,3 +282,64 @@ def test_as_written_drafts_a_house_post_in_his_own_layout(wired):
 def test_a_dm_reply_draft_is_not_a_channel_post(wired):
     assert draft("see you at six").startswith("Saved as a draft in")
     assert wired.wire[-1][1] == "see you at six"
+
+
+# --------------------------------------------------------------------------
+# 6. EVERY HEADING CARRIES ITS EMOJI
+#
+# "Emoji are punctuation, not decoration. One after the title, one after
+# each section heading, one in the sign-off." The sign-off was checked; the
+# rest was not - and the title check's own message asked for an emoji it
+# never looked for. A heading that ends at its </b> gets the guide's emoji,
+# and the reply says so; a heading with anything after it is a choice.
+# --------------------------------------------------------------------------
+PEN, ROCKET, ROAD, PIN, CLAP = (chr(0x1F58A), chr(0x1F680), chr(0x1F6E3),
+                                chr(0x1F4CC), chr(0x1F44F))
+
+
+def _bare(post, *headings):
+    for heading, emoji in headings:
+        post = post.replace(f"{heading} {emoji}", heading, 1)
+    return post
+
+
+def test_his_post_with_bare_headings_gets_each_emoji_back():
+    bare = _bare(LEE_LAB, ("NLP students</b>", PEN), ("<b>Research Areas:</b>", ROAD),
+                 ("<b>Requirements:</b>", CLAP))
+    sent, tidied, wrong = check(bare)
+    assert sent == LEE_LAB and wrong == []
+    assert tidied == ["gave the title, Research Areas: and Requirements: their emoji"]
+
+
+def test_a_project_title_gets_the_rocket_and_project_the_pin():
+    project = (LEE_LAB.replace(f"<b>Research Areas:</b> {ROAD}", "<b>Project:</b>")
+               .replace(f"NLP students</b> {PEN}", "NLP students</b>"))
+    sent, tidied, wrong = check(project)
+    assert wrong == []
+    assert sent.splitlines()[0].endswith(f"</b> {ROCKET}")
+    assert f"<b>Project:</b> {PIN}" in sent
+
+
+@pytest.mark.parametrize("after", [
+    '<tg-emoji emoji-id="5368324170671202288">' + CLAP + "</tg-emoji>",   # his premium one
+    chr(0x1F525),                                                          # another emoji
+    "(read this first)",                                                   # words
+])
+def test_a_heading_with_anything_after_it_is_left_as_he_wrote_it(after):
+    chosen = LEE_LAB.replace(f"<b>Requirements:</b> {CLAP}", f"<b>Requirements:</b> {after}")
+    sent, tidied, wrong = check(chosen)
+    assert sent == chosen and tidied == []
+
+
+def test_with_no_template_the_title_is_not_guessed_at():
+    neither = _without(_bare(LEE_LAB, ("NLP students</b>", PEN)),
+                       "<b>Research Areas:</b>", "<b>Requirements:</b>")
+    sent, _tidied, wrong = check(neither)
+    assert sent.splitlines()[0].endswith("</b>"), "an emoji was picked for an unknown template"
+    assert any("Research Areas: section (a lab)" in w for w in wrong)
+
+
+def test_the_reply_names_the_emoji_it_added(wired):
+    reply = send(_bare(LEE_LAB, ("<b>Requirements:</b>", CLAP)))
+    assert reply.endswith("Tidied to the channel format: gave Requirements: its emoji.")
+    assert f"Requirements: {CLAP}" in wired.wire[-1][1]

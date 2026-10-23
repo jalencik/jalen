@@ -613,6 +613,17 @@ def _rejected_note(exc: Exception) -> str:
     return f"Telegram rejected the markup ({_error_code(exc)})"
 
 
+# Refusals of the WORDS, which no retry without formatting can get past.
+# Telegram's limits: 4,096 characters a message; a caption 1,024, or 2,048
+# from a Premium account.
+_TOO_LONG = {
+    "MESSAGE_TOO_LONG": ("it's longer than one Telegram message can be (4,096 "
+                         "characters), so shorten it"),
+    "MEDIA_CAPTION_TOO_LONG": ("the caption is longer than Telegram allows (1,024 "
+                               "characters, 2,048 with Premium), so shorten it"),
+}
+
+
 async def _deliver(send, post: _Formatted) -> tuple[str | None, str]:
     """
     Put `post` through `send(text, entities)`: formatted; then, if Telegram
@@ -633,6 +644,13 @@ async def _deliver(send, post: _Formatted) -> tuple[str | None, str]:
         if not _rejected(exc):
             raise
         first = exc
+    code = _error_code(first)
+    if (said := _TOO_LONG.get(code) or _TELEGRAM_REFUSALS.get(code)) is not None:
+        # The message was refused, not its formatting - too long, a person
+        # who blocked him, a chat he left: each retry below would be refused
+        # the same way, a round trip apiece, and the reply then blamed the
+        # formatting. Every code there is about the message or the chat.
+        return None, said
     if not post.entities:
         return None, f"Telegram refused it ({_error_code(first)})"
     # A premium emoji is the likeliest thing for Telegram to refuse (an id it
@@ -2081,6 +2099,14 @@ def _run_send(work, to: str, attempted: _Attempt) -> str:
                 f"to {to} may already be there. Check the chat before sending "
                 "it again.")
     except Exception as exc:  # noqa: BLE001 - spoken, not raised
+        # Telegram ANSWERED, with a refusal - a 400, a 403 such as "you can't
+        # post in that chat", or "wait": nothing went out, whenever it was
+        # handed over. It used to be "Not confirmed ... the connection
+        # failed" after the hand-over, which sent him to check a chat that
+        # could not have it, and counted the post as maybe-sent in a batch.
+        reason = _refused_by_telegram(exc)
+        if reason is not None:
+            return f"Nothing sent — {reason}."
         if attempted:
             return (f"Not confirmed — the connection failed ({type(exc).__name__}) "
                     f"after I sent it to {to}, so it may already be there. Check "

@@ -217,8 +217,11 @@ random one.
 
 - **Typing is put right, and the reply says so:** `-` or `*` bullets become
   `•`, `**bold**` becomes `<b>bold</b>`, a Q&A `<blockquote>` becomes
-  `<blockquote expandable>`, "1." / "Question 1:" becomes `<b>1</b>`, and
-  bullets inside the Q&A become `—`.
+  `<blockquote expandable>`, "1." / "Question 1:" becomes `<b>1</b>`,
+  bullets inside the Q&A become `—`, and a title or section heading with
+  nothing after its `</b>` gets its emoji from the table above (🖊 or 🚀 by
+  template, 🛣, 📌, 👏). A heading with anything after it - a premium emoji,
+  another emoji, words - is left as written.
 - **Structure is not guessed at:** a missing `Research Areas:` / `Project:`
   or `Requirements:` section, questions that are not exactly the three
   above, a missing `Students who are competent in:`, a missing

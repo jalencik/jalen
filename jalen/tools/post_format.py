@@ -76,6 +76,52 @@ def _split_qa(markup: str) -> tuple[str, str, str]:
     return markup[:opened.start()], markup[opened.start():end], markup[end:]
 
 
+# The emoji a heading carries - the guide's table ("one after the title, one
+# after each section heading"), by code point and with no presentation
+# selector, exactly as they are in his real post.
+_TITLE_EMOJI = {"lab": chr(0x1F58A), "project": chr(0x1F680)}        # pen, rocket
+_HEADING_EMOJI = {
+    "<b>Research Areas:</b>": chr(0x1F6E3),                            # motorway
+    "<b>Project:</b>": chr(0x1F4CC),                                   # pushpin
+    "<b>Requirements:</b>": chr(0x1F44F),                              # clapping hands
+}
+
+
+def _bare_headings(part: str) -> tuple[str, list[str]]:
+    """
+    Give the title, and each section heading, the emoji the guide gives it,
+    when the line ends at its </b> with nothing after it. Returns the part
+    and the names of what was given one.
+
+    Only a BARE heading. One with anything after it - its emoji, a premium
+    one, another emoji, a word - is a choice and is left alone. The title's
+    emoji depends on the template, so it is given only when the post has
+    exactly one of Research Areas: (a lab, pen) and Project: (a project,
+    rocket); with both or neither, problems() says what to fix instead.
+    """
+    lab = "<b>Research Areas:</b>" in part
+    project = "<b>Project:</b>" in part
+    template = "lab" if lab and not project else "project" if project and not lab else ""
+    named: list[str] = []
+    out: list[str] = []
+    past_title = False
+    for line in part.splitlines(keepends=True):
+        body = line.rstrip()
+        ending = line[len(body):]
+        heading = body.strip()
+        if heading in _HEADING_EMOJI:
+            out.append(f"{body} {_HEADING_EMOJI[heading]}{ending}")
+            named.append(heading[len("<b>"):-len("</b>")])
+        elif (not past_title and template and heading.startswith("<b>")
+              and heading.endswith("</b>")):
+            out.append(f"{body} {_TITLE_EMOJI[template]}{ending}")
+            named.append("the title")
+        else:
+            out.append(line)
+        past_title = past_title or bool(heading)
+    return "".join(out), named
+
+
 def tidy(markup: str) -> tuple[str, list[str]]:
     """
     Put right what is only typing, and say what was put right. Returns the
@@ -104,6 +150,11 @@ def tidy(markup: str) -> tuple[str, list[str]]:
     before, after = fixed_parts
     if outside:
         changes.append(f"changed {outside} bullet{'s' if outside != 1 else ''} to {BULLET}")
+
+    before, given = _bare_headings(before)
+    if given:
+        listed = given[0] if len(given) == 1 else ", ".join(given[:-1]) + " and " + given[-1]
+        changes.append(f"gave {listed} {'its' if len(given) == 1 else 'their'} emoji")
 
     if block:
         numbered, renumbered = 0, block
