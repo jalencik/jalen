@@ -383,6 +383,18 @@ _PLAIN_ANSWER_WORDS = frozenset({
 _CORRECTION_MARKERS = (" instead ", " actually ", " rather ", " but ",
                        " first ", " change ")
 
+# A whole answer made of these, typed on a phone, is a yes or a no - see
+# Jalen._parse_yes_no. No is checked first, like every other negative there.
+_YES_EMOJI = frozenset("👍👌✅✔🆗")
+_NO_EMOJI = frozenset("👎❌✖🛑🚫✋")
+# What rides along with a thumb without changing it: skin tones (U+1F3FB to
+# U+1F3FF), the emoji variation selector (U+FE0F) and the zero-width joiner
+# (U+200D). Built from code points, not typed: these characters are invisible,
+# and an editor that turns an escape into the character itself leaves bytes in
+# the source nobody can see.
+_EMOJI_DECORATION = frozenset(
+    [chr(c) for c in range(0x1F3FB, 0x1F400)] + [chr(0xFE0F), chr(0x200D)])
+
 
 class ConfirmAnswer:
     """
@@ -1356,6 +1368,20 @@ class Jalen:
         matters more than the lists do - "no, don't send it" contains "send
         it", and a yes-first search would send the email he just refused.
         """
+        # A THUMB. Typed on a phone, the answer to "... Confirm?" is as often an
+        # emoji as a word, and the scrub below turns an emoji into nothing - so
+        # a bare 👍 was "not an answer": asked about again, then cancelled.
+        # Only a message that is NOTHING BUT these counts; "👍 but send it to
+        # Rodion instead" still goes through the words below, where it is a
+        # correction. A mix of yes and no emoji is neither. Speech recognition
+        # never writes one, so this only ever reads typing.
+        bare = "".join(ch for ch in (text or "")
+                       if ch not in _EMOJI_DECORATION and not ch.isspace())
+        if bare and all(ch in _NO_EMOJI for ch in bare):
+            return False
+        if bare and all(ch in _YES_EMOJI for ch in bare):
+            return True
+
         # THE APOSTROPHE SPEECH RECOGNITION ACTUALLY EMITS is U+2019, not
         # U+0027, and the character class below keeps only the straight one.
         # So "don't send it" was scrubbed to " don t send it ", the NO list's
