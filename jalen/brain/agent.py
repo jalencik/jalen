@@ -974,13 +974,16 @@ class Brain:
         plus a few of speaking. It stopped fitting the moment a second question
         could precede the first - a limit he is asked about (jalen/limits.py),
         then the leash, then the action's own "Confirm?" - and it never fit
-        an answer typed on a phone (safety.confirm_timeout_typed_s, 300 s). In
-        the CLI a PreToolUse callback that runs out of time is rethrown rather
-        than answered (the Stop and SessionStart callbacks are the ones it
-        shrugs off and carries on without), so what a timeout does to the
-        tool call under it is the CLI's to decide, not the gate's. Sized so
-        that it never happens instead: three questions, each with its full
-        wait and its longest speech, and ten seconds over.
+        an answer typed on a phone (safety.confirm_timeout_typed_s, 300 s).
+
+        What a timeout does, read in the bundled CLI's PreToolUse dispatcher
+        (2026-10-23): the tool call is STOPPED and the model is handed an
+        error, "Execution stopped by hook" - so it fails closed, and nothing
+        ran unapproved. What it broke was the question: the CLI gave up while
+        Jalen was still asking, so his answer, given after the cut-off, went to
+        a call that was already refused, and the RED path logged it "executed"
+        if he said yes. Sized so that it never happens: three questions, each
+        with its full wait and its longest speech, and ten seconds over.
         """
         spoken = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
         typed = float(self.cfg.get_path("safety.confirm_timeout_typed_s", 300))
@@ -1031,8 +1034,13 @@ class Brain:
             # action past a limit asks about the limit first and a refused
             # one never reaches the RED "Confirm?" below.
             governor = getattr(self.safety, "governor", None)
+            # Set when the governor asked him a question that NAMED this action
+            # and he said yes: then that yes is the action's approval, and the
+            # tier does not ask "Confirm?" (or announce it) a second time.
+            approved_by_limit = False
             if governor is not None:
                 admission = await governor.admit(verdict, self.confirm)
+                approved_by_limit = admission.approved_action
                 if not admission.allowed:
                     self.audit.action(
                         verdict,
@@ -1057,7 +1065,8 @@ class Brain:
                 template = (
                     self.cfg.get_path("safety_tiers.red.confirm_template", "{summary}. Confirm?")
                 )
-                approved = await self.confirm(template.format(summary=verdict.summary))
+                approved = approved_by_limit or await self.confirm(
+                    template.format(summary=verdict.summary))
                 self.audit.action(verdict, "executed" if approved else "cancelled")
                 if not approved:
                     return {
@@ -1069,7 +1078,7 @@ class Brain:
                     }
                 return allowed_to_run()
 
-            if verdict.tier is Tier.AMBER:
+            if verdict.tier is Tier.AMBER and not approved_by_limit:
                 template = self.cfg.get_path(
                     "safety_tiers.amber.announce_template",
                     "{summary}. Say stop if you don't want that.",

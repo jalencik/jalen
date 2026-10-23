@@ -135,12 +135,24 @@ There is no linter, no type checker, no CI and no git remote.
   closed; lifting it needs `his_own_words and from_him` (`Jalen._lockdown_off`).
   Numbers are changed in `safety.yaml` only, never by voice.
 - **The brain's PreToolUse hook must outlive the questions it asks.** The SDK
-  cuts a hook off at 60 s (`HookMatcher.timeout`) unless told otherwise, and
-  the CLI rethrows a `PreToolUse` callback that times out instead of
-  answering for it. `Brain._hook_timeout_s()` sizes it for three questions in a
-  row at the longest wait; change `safety.confirm_timeout_s` or
+  cuts a hook off at 60 s (`HookMatcher.timeout`) unless told otherwise. When
+  that happens the CLI stops the tool call with an error (it fails closed), but
+  the question Jalen was asking is cut off mid-wait: an answer after the
+  cut-off goes to a call that was already refused, and a yes was logged
+  "executed". `Brain._hook_timeout_s()` sizes it for three questions in a row
+  at the longest wait; change `safety.confirm_timeout_s` or
   `confirm_timeout_typed_s` and it follows.
   `tests/test_confirmation_windows.py` pins it.
+- **Past a limit, one question, not two.** The governor's question names the
+  action and ends "Confirm?", so `Admission.approved_action` makes the RED
+  "Confirm?" (and the AMBER announcement) stand down for that action. Do not
+  let a limit question that does NOT name the action set it.
+- **The AMBER "say stop" window takes answers, not just the word.** While it
+  is open the address gate admits speech without his name; `process()` turns a
+  refusal ("no", "don't", "wait") into stop and agreement into "go now", and
+  ignores only an exact tail of the announcement (`_echoes_the_announcement`) -
+  narrower than the confirm echo test on purpose, because here a missed echo
+  can only stop an action.
 - **A tap is an answer, never an instruction.** In `--telegram` mode a question
   goes out with Yes/No (a "Confirm?") or Stop (an AMBER announcement) under it
   (`Jalen._put_the_question`, `telegram_bot.prompt_keyboard`). A tap reaches

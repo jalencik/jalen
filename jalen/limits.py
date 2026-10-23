@@ -74,7 +74,7 @@ import os
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable
 
@@ -128,6 +128,11 @@ class Admission:
     why: str = ""
     for_model: str = ""
     asked: bool = False
+    # He said yes to a question that NAMED THIS ACTION ("send email: x. That's
+    # your limit on emails ... Confirm?"). The gates treat that yes as the
+    # action's own approval, so an over-limit RED action is asked about ONCE,
+    # not twice in a row. Only admit() sets it; a brain-turn yes names no action.
+    approved_action: bool = False
 
 
 OK = Admission()
@@ -168,6 +173,10 @@ def _number(value: Any, minimum: float, what: str, problems: list[str],
     if isinstance(value, bool):
         problems.append(f"{what} is {value!r}, not a number")
         return None
+    if integer and isinstance(value, float) and not value.is_integer():
+        # int(2.5) is 2: a cap he wrote as 2.5 would quietly become 2.
+        problems.append(f"{what} is {value!r}, not a whole number")
+        return None
     try:
         number = int(value) if integer else float(value)
     except (TypeError, ValueError):
@@ -189,7 +198,10 @@ def _parse_rule(raw: Any, index: int, seen: set, problems: list[str]) -> Rule | 
         problems.append(f"{where} has no name")
         return None
     where = f"limits rule '{name}'"
-    if name in seen or name in (LEASH, BRAIN_TURNS):
+    if name in (LEASH, BRAIN_TURNS):
+        problems.append(f"{where} uses a name reserved for the leash and the brain-turn count")
+        return None
+    if name in seen:
         problems.append(f"{where} repeats a name already in use")
         return None
     tools = raw.get("tools")
@@ -562,7 +574,9 @@ class Governor:
             if hit.kind == LEASH:
                 with self._mutex:
                     self._since_instruction = 0     # his yes buys another batch
-        return Admission(True, "ok", asked=True)
+        # Every question above named the action (see _question), so his yes
+        # was a yes to THIS action, not only to going past a number.
+        return Admission(True, "ok", asked=True, approved_action=True)
 
     async def admit_brain_turn(self, confirm: Callable[[str], Awaitable[Any]]) -> Admission:
         """The same question for 'may I think about this one?' - see handle_with_brain."""

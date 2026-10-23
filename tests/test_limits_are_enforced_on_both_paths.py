@@ -145,15 +145,54 @@ def test_a_hard_limit_is_refused_by_the_router_without_a_question(jalen):
     assert "won't" in said and jalen.asked == [] and jalen.ran == []
 
 
-def test_a_red_action_past_a_limit_asks_about_the_limit_first_then_its_own_question(jalen):
+def test_a_red_action_past_a_limit_is_asked_about_once_naming_the_action_and_the_limit(jalen):
+    """One question, not two: it names the action, so his yes is the action's approval."""
     jalen.safety.governor.record("delete_file")
-    jalen.answers = [YES, YES]
+    jalen.answers = [YES]
     jalen.handle_local(Intent(tool="delete_file", args={"path": "C:/tmp/doesnotmatter.txt"}),
                        his_own_words=True)
-    assert len(jalen.asked) == 2
-    assert "deletions" in jalen.asked[0]
-    assert jalen.asked[1].startswith("delete file")
+    (question,) = jalen.asked
+    assert question.startswith("delete file: C:/tmp/doesnotmatter.txt")
+    assert "deletions" in question and question.endswith("Confirm?")
     assert [t for t, _ in jalen.ran] == ["delete_file"]
+
+
+def test_under_the_limit_a_red_action_still_gets_its_own_question(jalen):
+    jalen.answers = [YES]
+    jalen.handle_local(Intent(tool="delete_file", args={"path": "C:/tmp/doesnotmatter.txt"}),
+                       his_own_words=True)
+    (question,) = jalen.asked
+    assert question == "delete file: C:/tmp/doesnotmatter.txt. Confirm?"
+    assert [t for t, _ in jalen.ran] == ["delete_file"]
+
+
+def test_an_amber_action_past_a_limit_is_asked_once_and_not_also_announced(jalen, monkeypatch):
+    announced = []
+
+    async def announce(self, text):
+        announced.append(text)
+
+    monkeypatch.setattr(Jalen, "announce", announce)
+    jalen.safety.governor = small_governor(
+        jalen.safety, Rule("edits", frozenset({"edit_file"}), 1, HOUR, noun="edits"))
+    jalen.safety.governor.record("edit_file")
+    jalen.answers = [YES]
+    jalen.handle_local(Intent(tool="edit_file", args={"path": "C:/tmp/notes.txt"}),
+                       his_own_words=True)
+    assert len(jalen.asked) == 1 and announced == []
+    assert [t for t, _ in jalen.ran] == ["edit_file"]
+
+
+def test_an_amber_action_under_the_limit_is_still_announced(jalen, monkeypatch):
+    announced = []
+
+    async def announce(self, text):
+        announced.append(text)
+
+    monkeypatch.setattr(Jalen, "announce", announce)
+    jalen.handle_local(Intent(tool="edit_file", args={"path": "C:/tmp/notes.txt"}),
+                       his_own_words=True)
+    assert jalen.asked == [] and len(announced) == 1
 
 
 def test_a_no_to_the_limit_means_the_red_question_is_never_asked(jalen):
@@ -164,13 +203,30 @@ def test_a_no_to_the_limit_means_the_red_question_is_never_asked(jalen):
     assert len(jalen.asked) == 1 and jalen.ran == []
 
 
-def test_a_yes_to_the_limit_and_a_no_to_the_red_question_uses_up_nothing(jalen):
+def test_his_no_to_the_one_question_runs_nothing_and_uses_up_nothing(jalen):
     jalen.safety.governor.record("delete_file")
-    jalen.answers = [YES, NO]
-    jalen.handle_local(Intent(tool="delete_file", args={"path": "C:/tmp/doesnotmatter.txt"}),
-                       his_own_words=True)
-    assert jalen.ran == []
+    jalen.answers = [NO]
+    said = jalen.handle_local(Intent(tool="delete_file", args={"path": "C:/tmp/doesnotmatter.txt"}),
+                              his_own_words=True)
+    assert "Cancelled" in said and jalen.ran == []
     assert jalen.safety.governor.usage()[1]["used"] == 1       # only the one recorded above
+
+
+def test_a_tool_that_does_not_exist_uses_up_nothing(jalen, monkeypatch):
+    """A habit recalled after its tool was removed: systools.call raises KeyError and nothing runs."""
+    async def announce(self, text):
+        return None
+
+    monkeypatch.setattr(Jalen, "announce", announce)
+    jalen.safety.governor = small_governor(
+        jalen.safety, Rule("ghost", frozenset({"no_such_tool_xyz"}), 5, HOUR))
+
+    def real_dispatch(tool, args):
+        raise KeyError(tool)
+
+    monkeypatch.setattr(app_module.systools, "call", real_dispatch)
+    assert jalen.handle_local(Intent(tool="no_such_tool_xyz", args={})) is None
+    assert jalen.safety.governor.usage()[0]["used"] == 0
 
 
 def test_the_limit_is_judged_before_a_never_touch_black_verdict_would_be_irrelevant(jalen):
@@ -338,12 +394,39 @@ def test_the_hook_denies_in_lockdown_and_lets_a_read_through(brain):
     assert brain.script.questions == []
 
 
-def test_a_red_action_past_a_limit_asks_about_the_limit_before_its_own_question(brain):
+def test_a_red_action_past_a_limit_is_asked_about_once_by_the_hook(brain):
     brain.safety.governor.record("delete_file")
-    brain.script.answers = [YES, YES]
+    brain.script.answers = [YES]
     assert hook_call(brain, "delete_file", {"path": "C:/tmp/x.txt"}) == {}
-    assert "deletions" in brain.script.questions[0]
-    assert brain.script.questions[1].startswith("delete file")
+    (question,) = brain.script.questions
+    assert question.startswith("delete file: C:/tmp/x.txt") and "deletions" in question
+    assert brain.safety.governor.usage()[1]["used"] == 2
+
+
+def test_under_the_limit_the_hooks_red_question_is_still_asked(brain):
+    brain.script.answers = [YES]
+    assert hook_call(brain, "delete_file", {"path": "C:/tmp/x.txt"}) == {}
+    assert brain.script.questions == ["delete file: C:/tmp/x.txt. Confirm?"]
+
+
+def test_an_amber_action_past_a_limit_is_asked_once_and_not_announced_by_the_hook():
+    engine = SafetyEngine(CONFIG)
+    engine.paranoid = False
+    engine.posture = "irreversible_only"
+    engine.governor = small_governor(engine, Rule("edits", frozenset({"edit_file"}), 1, HOUR))
+    engine.governor.record("edit_file")
+    script = Scripted()
+    script.answers = [YES]
+    announced = []
+
+    async def announce(text):
+        announced.append(text)
+
+    b = Brain(CONFIG, engine, AuditLog(CONFIG, "test-session-limits-amber-once"),
+              confirm=script.confirm, announce=announce)
+    assert hook_call(b, "edit_file", {"path": "C:/tmp/x.txt", "content": "x"}) == {}
+    assert len(script.questions) == 1 and announced == []
+    assert engine.governor.usage()[0]["used"] == 2
 
 
 def test_a_no_to_the_limit_means_the_hooks_red_question_is_never_asked(brain):
@@ -353,9 +436,9 @@ def test_a_no_to_the_limit_means_the_hooks_red_question_is_never_asked(brain):
     assert len(brain.script.questions) == 1
 
 
-def test_a_yes_to_the_limit_and_a_no_to_red_uses_up_nothing(brain):
+def test_his_no_to_the_hooks_one_question_denies_and_uses_up_nothing(brain):
     brain.safety.governor.record("delete_file")
-    brain.script.answers = [YES, NO]
+    brain.script.answers = [NO]
     assert denied(hook_call(brain, "delete_file", {"path": "C:/tmp/x.txt"}))
     assert brain.safety.governor.usage()[1]["used"] == 1
 
@@ -405,7 +488,7 @@ def test_the_router_gate_asks_the_limit_before_its_own_question_and_counts_after
     body = _between(_source("jalen/app.py"), "def handle_local(", "async def _start_brain")
     admit = body.index("self._admit(verdict)")
     red = body.index("if verdict.tier is Tier.RED:")
-    amber = body.index("elif verdict.tier is Tier.AMBER:")
+    amber = body.index("elif verdict.tier is Tier.AMBER and not admission.approved_action:")
     record = body.index("governor.record(tool)")
     call = body.index("systools.call(tool, intent.args)")
     assert body.index("verdict.tier is Tier.BLACK") < admit < red < amber < record < call
@@ -423,6 +506,9 @@ def test_the_hook_asks_the_limit_before_its_own_question_and_counts_only_when_al
     # The only bare allow left is inside allowed_to_run itself: a fourth
     # `return {}` would be a way through the hook that does not count.
     assert body.count("return {}") == 1
+    # One question, not two - and only because the governor's question named it.
+    assert "approved_by_limit or await self.confirm(" in body
+    assert "if verdict.tier is Tier.AMBER and not approved_by_limit:" in body
 
 
 def test_the_brain_is_built_on_the_same_engine_the_router_uses():

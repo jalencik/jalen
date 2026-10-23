@@ -344,8 +344,45 @@ def test_a_confirmation_gets_yes_and_no():
                                                       ("No", f"jalen:{ID}:no")]
 
 
-def test_an_announcement_gets_stop_alone():
-    assert buttons(prompt_keyboard("stop", ID)) == [("Stop", f"jalen:{ID}:stop")]
+def test_an_announcement_gets_go_ahead_and_stop():
+    assert buttons(prompt_keyboard("stop", ID)) == [("Go ahead", f"jalen:{ID}:go"),
+                                                   ("Stop", f"jalen:{ID}:stop")]
+
+
+def test_go_ahead_ends_the_stop_window_early_without_stopping_anything():
+    j = a_jalen()
+    open_stop_window(j)
+    assert j.answer_from_tap(f"jalen:{ID}:go") == Tap(True, "Going ahead.")
+    assert j._answer_q.get_nowait() is True
+
+
+def test_go_ahead_can_never_answer_a_confirmation():
+    """It ends a wait for "stop"; it is not a yes to a RED action."""
+    j = a_jalen()
+    open_confirmation(j)
+    assert not j.answer_from_tap(f"jalen:{ID}:go").accepted
+    assert j._answer_q.empty()
+
+
+def test_announce_lets_go_ahead_through_at_once():
+    j = a_jalen(cfg=Cfg({"safety": {"undo_window_s": 30, "undo_window_typed_s": 30}}))
+    sent = []
+    j._offer_buttons = lambda question, kind, pid: sent.append(pid)
+    result = {}
+
+    def announce():
+        started = time.monotonic()
+        asyncio.run(j.announce("edit file x. Say stop if you don't want that."))
+        result["took"] = time.monotonic() - started
+
+    worker = threading.Thread(target=announce)
+    worker.start()
+    deadline = time.monotonic() + 3
+    while not j._awaiting_stop and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert j.answer_from_tap(f"jalen:{sent[0]}:go").accepted
+    worker.join(5)
+    assert result["took"] < 5, "went ahead only when the 30 s window ran out"
 
 
 def test_an_unknown_kind_has_no_buttons_rather_than_the_wrong_ones():

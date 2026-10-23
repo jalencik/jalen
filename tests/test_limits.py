@@ -685,3 +685,72 @@ def test_the_counts_file_is_valid_json_of_a_known_shape(tmp_path):
     gov.record("send_email")
     blob = json.loads(path.read_text(encoding="utf-8"))
     assert blob["v"] == 1 and list(blob["events"]) == ["emails"]
+
+
+# --------------------------------------------------------------------------
+# ONE QUESTION, NOT TWO: what his yes approved
+# --------------------------------------------------------------------------
+def test_a_yes_to_a_limit_question_approves_the_action_it_named():
+    gov = governor(emails(1))
+    use_up(gov, "send_email", 1)
+    out = run(gov.admit(v("send_email", "send email: a@b.com"), Asker(YES)))
+    assert out.allowed and out.asked and out.approved_action
+
+
+def test_nothing_was_approved_when_nothing_was_asked():
+    """Under the limit the tier must still ask its own question."""
+    gov = governor(emails(5))
+    out = run(gov.admit(v("send_email"), Asker()))
+    assert out.allowed and not out.asked and not out.approved_action
+    assert not gov.quick(v("send_email")).approved_action
+
+
+def test_the_leash_question_names_the_action_too_so_it_approves_it():
+    gov = governor(leash=1)
+    use_up(gov, "close_app", 1)
+    asker = Asker(YES)
+    out = run(gov.admit(v("close_app", "close app notepad"), asker))
+    assert out.approved_action and "close app notepad" in asker.questions[0]
+
+
+def test_every_question_that_can_approve_an_action_names_it():
+    """approved_action is only honest if every action question says WHICH action."""
+    from jalen.limits import _Hit, LEASH
+
+    summary = "send email: a@b.com"
+    for hit in (_Hit("emails", "emails", 2, 2, HOUR, "ask"),
+                _Hit("emails", "emails", 5, 2, HOUR, "ask"),
+                _Hit(LEASH, "actions", 40, 40, None, "ask", kind=LEASH)):
+        assert summary in Governor._question(hit, summary), hit
+
+
+def test_a_brain_turn_yes_approves_no_action():
+    gov = brain_governor(1)
+    gov.record_brain_turn()
+    out = run(gov.admit_brain_turn(Asker(YES)))
+    assert out.allowed and not out.approved_action
+
+
+def test_a_refused_or_declined_answer_approves_nothing():
+    gov = governor(emails(1))
+    use_up(gov, "send_email", 1)
+    assert not run(gov.admit(v("send_email"), Asker(NO))).approved_action
+    gov.new_instruction()
+    assert not run(gov.admit(v("send_email"), Asker(TIMEOUT))).approved_action
+
+
+# --------------------------------------------------------------------------
+# STRICTER READING OF THE FILE
+# --------------------------------------------------------------------------
+def test_a_fractional_cap_is_reported_not_quietly_rounded_down():
+    gov = Governor.from_config({"rules": [dict(GOOD, max=2.5), dict(GOOD, name="b", max=3.0)]})
+    assert any("whole number" in p for p in gov.problems)
+    assert [r["name"] for r in gov.usage()] == ["b"]
+    assert gov.usage()[0]["max"] == 3
+
+
+@pytest.mark.parametrize("reserved", ["leash", "brain_turns"])
+def test_a_rule_may_not_take_a_reserved_name(reserved):
+    gov = Governor.from_config({"rules": [dict(GOOD, name=reserved)]})
+    assert gov.problems and "reserved" in gov.problems[0]
+    assert gov.usage() == []

@@ -40,11 +40,14 @@ def is_authorized(user_id: int | None, allowed_user_ids: list[int]) -> bool:
 
 def prompt_keyboard(kind: str, prompt_id: str):
     """
-    The buttons under a question: Yes and No under a "Confirm?", Stop under an
-    announcement ("Say stop if you don't want that").
+    The buttons under a question: Yes and No under a "Confirm?"; Go ahead and
+    Stop under an announcement ("Say stop if you don't want that"). Go ahead
+    only ends the wait for "stop" early - it can approve nothing the
+    announcement was not already about to do - so a phone does not sit through
+    the typed-mode window for an action he is happy with.
 
-    The callback data is "jalen:<question id>:<choice>" - 18 characters, far
-    inside Telegram's 64 bytes. The id is what makes a button belong to ONE
+    The callback data is "jalen:<question id>:<choice>" - at most 19
+    characters, far inside Telegram's 64 bytes. The id is what makes a button belong to ONE
     question: Jalen.answer_from_tap refuses any tap whose id is not the open
     one, so an old keyboard left in the chat cannot answer a new question.
     aiogram is imported here and not at module level, like every heavy import.
@@ -55,7 +58,8 @@ def prompt_keyboard(kind: str, prompt_id: str):
         row = [InlineKeyboardButton(text="Yes", callback_data=f"jalen:{prompt_id}:yes"),
                InlineKeyboardButton(text="No", callback_data=f"jalen:{prompt_id}:no")]
     elif kind == "stop":
-        row = [InlineKeyboardButton(text="Stop", callback_data=f"jalen:{prompt_id}:stop")]
+        row = [InlineKeyboardButton(text="Go ahead", callback_data=f"jalen:{prompt_id}:go"),
+               InlineKeyboardButton(text="Stop", callback_data=f"jalen:{prompt_id}:stop")]
     else:
         raise ValueError(f"no buttons for a question of kind {kind!r}")
     return InlineKeyboardMarkup(inline_keyboard=[row])

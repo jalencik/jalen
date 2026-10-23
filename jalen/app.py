@@ -557,6 +557,11 @@ class Jalen:
         # one (the Telegram bot installs it). See _put_the_question.
         self._prompt_id = ""
         self._offer_buttons = None
+        # Bumped when a question is put and when it is over, so a wait that
+        # outlived its question knows it (_wait_for); and the words of the open
+        # AMBER announcement, for telling its echo from his answer.
+        self._prompt_seq = 0
+        self._stop_question = ""
         self._confirm_question = ""
         self._confirm_asked_at = 0.0
         self._confirm_reasked = False
@@ -686,7 +691,7 @@ class Jalen:
         does not.
 
         A rule that could not be read is logged as a failed system line and
-        said once at startup (see _say_what_is_unusual_at_startup), never
+        said once at startup (see startup_notes), never
         dropped silently: a limit that quietly isn't there reads as one that is.
         """
         governor = _governor_of(self)
@@ -736,8 +741,10 @@ class Jalen:
         """
         End the lockdown - ONLY for a sentence that is his: the router rule
         matched what he said word for word (not text expanded from something
-        read, not a misheard-name door) AND the microphone admitted it with
-        his name. The brain has no tool that does this, and nothing Jalen reads
+        read, not a misheard-name door) AND it came with his name or was typed
+        (process() passes from_him=False for speech admitted without the name,
+        which may be the television). The brain has no tool that does this,
+        and nothing Jalen reads
         reaches this branch, because a page can put words in front of the
         model but not into this comparison.
         """
@@ -1011,6 +1018,7 @@ class Jalen:
         or the same button twice, can never answer this one.
         """
         self._prompt_id = uuid.uuid4().hex[:8]
+        self._prompt_seq = getattr(self, "_prompt_seq", 0) + 1     # see _wait_for
         offer = getattr(self, "_offer_buttons", None)
         if offer is not None:
             try:
@@ -1030,8 +1038,9 @@ class Jalen:
           * it carries the id of the question that is open RIGHT NOW (an old
             button, or a question that has timed out, is refused);
           * it is the kind of answer that question takes - Yes or No for a
-            "Confirm?", Stop for an announcement - so a Stop cannot approve a
-            RED action and a Yes cannot be read as "stop";
+            "Confirm?", Stop or Go ahead for an announcement - so a Stop
+            cannot approve a RED action, a Yes cannot be read as "stop", and
+            Go ahead can only end a wait for "stop", never answer "Confirm?";
           * it is the first: the id is spent when it is accepted, so a second
             tap of the same button, or both Yes and No, cannot answer twice.
 
@@ -1055,6 +1064,12 @@ class Jalen:
                 self._prompt_id = ""
                 self._answer_q.put(False)
                 done = Tap(True, "Stopped.")
+            elif choice == "go" and self._awaiting_stop:
+                # "Go ahead": end the stop window now instead of waiting it out.
+                # It approves nothing the announcement was not already doing.
+                self._prompt_id = ""
+                self._answer_q.put(True)
+                done = Tap(True, "Going ahead.")
             else:
                 return gone
         self.audit.write("system", summary=f"tapped {choice} under a question")
@@ -1081,6 +1096,7 @@ class Jalen:
             finally:
                 self._awaiting_confirmation = False
                 self._prompt_id = ""        # a button under this question is spent
+                self._prompt_seq = getattr(self, "_prompt_seq", 0) + 1     # and its wait
                 self.orb.set_state("thinking")
         if answer is None:
             self.say_blocking("No answer, so I've cancelled it.")
@@ -1096,6 +1112,9 @@ class Jalen:
         window = self._undo_window_s()
         async with self._prompt_lock():
             self._put_the_question(text, "stop")
+            # Its own words, so process() can tell the announcement coming back
+            # through the speakers from his answer to it (_echoes_the_announcement).
+            self._stop_question = text
             self._awaiting_stop = True
             self._drain_answers()
             try:
@@ -1105,6 +1124,7 @@ class Jalen:
             finally:
                 self._awaiting_stop = False
                 self._prompt_id = ""        # a button under this announcement is spent
+                self._prompt_seq = getattr(self, "_prompt_seq", 0) + 1     # and its wait
         if stopped:
             raise RuntimeError("cancelled by user")
 
@@ -1189,6 +1209,34 @@ class Jalen:
                 return hits / len(heard) >= _CONFIRM_ECHO_SHARE
         return False
 
+    def _echoes_the_announcement(self, text: str) -> bool:
+        """
+        Is this the END of the open AMBER announcement coming back through the
+        microphone - "want that.", "don't want that." - rather than his answer?
+
+        Deliberately narrower than _echoes_the_confirmation, and the asymmetry
+        is the point. There, a missed echo APPROVES a RED action, so anything
+        made only of the question's own words is thrown away. Here a missed
+        echo can only STOP an action (the safe direction), while throwing away
+        every sentence made of "say stop if you don't want that"'s words would
+        throw away "stop that" and "don't" - the answers the window is for.
+        So only an exact tail of the announcement counts as its echo: that is
+        what comes back through the speakers, and nobody answers "want that".
+        Longer echoes are refused before this by the address gate, which runs
+        _sounds_like_its_own_voice on the stop window with the sound's onset.
+        """
+        def words(sentence: str) -> list[str]:
+            # Speech recognition writes "don’t" with U+2019, which _SPOKEN_WORD
+            # splits in two; flattened exactly as _parse_yes_no flattens it.
+            flat = (sentence or "").lower()
+            for curly in ("’", "ʼ", "‘", "`"):
+                flat = flat.replace(curly, "'")
+            return _SPOKEN_WORD.findall(flat)
+
+        heard = words(text)
+        said = words(getattr(self, "_stop_question", ""))
+        return bool(heard) and len(heard) <= len(said) and said[-len(heard):] == heard
+
     def _drain_answers(self) -> None:
         while not self._answer_q.empty():
             try:
@@ -1196,17 +1244,64 @@ class Jalen:
             except queue.Empty:
                 break
 
+    # How often a wait looks up to check that its question is still the open
+    # one. Only an ABANDONED wait is noticed this late - an answer wakes it at
+    # once - so this costs no latency. NOT MEASURED: half a second is far
+    # inside the shortest window (the 2 s AMBER one).
+    _ABANDONED_CHECK_S = 0.5
+
+    def _wait_for(self, timeout: float):
+        """
+        The next answer to the question that is open NOW, or None when its time
+        runs out. The one wait behind confirm() and announce().
+
+        TWO THINGS A PLAIN queue.get() GOT WRONG
+        ----------------------------------------
+        The deadline was not one moment. A tap or a spoken answer that landed
+        in the instant between get() timing out and the question closing was
+        acknowledged ("Approved." on his phone) and then thrown away, while
+        Jalen said "No answer, so I've cancelled it." Now, at the deadline,
+        under the tap lock, the question's id is spent - a tap from here on is
+        refused, and says so - and one that landed just before is still taken.
+
+        And a wait could outlive its question. The SDK cancels a hook the CLI
+        has given up on, which cancels confirm(), but not the thread blocked in
+        get(): it went on waiting, up to the whole window, and the next
+        question's answer could be handed to it instead. Every question bumps
+        _prompt_seq when it is put and again when it is over, so an abandoned
+        wait notices within _ABANDONED_CHECK_S, and an answer it took that
+        belongs to a later question is put back.
+        """
+        mine = getattr(self, "_prompt_seq", 0)
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                with _TAP_LOCK:
+                    if getattr(self, "_prompt_seq", 0) == mine:
+                        self._prompt_id = ""
+                    try:
+                        return self._answer_q.get_nowait()
+                    except queue.Empty:
+                        return None
+            try:
+                answer = self._answer_q.get(timeout=min(remaining, self._ABANDONED_CHECK_S))
+            except queue.Empty:
+                if getattr(self, "_prompt_seq", 0) != mine:
+                    return None
+                continue
+            if getattr(self, "_prompt_seq", 0) != mine:
+                self._answer_q.put(answer)
+                return None
+            return answer
+
     def _wait_for_answer(self, timeout: float) -> Optional[bool]:
-        try:
-            return self._answer_q.get(timeout=timeout)
-        except queue.Empty:
-            return None
+        return self._wait_for(timeout)
 
     def _wait_for_stop(self, window: float) -> bool:
-        try:
-            return self._answer_q.get(timeout=window) is False
-        except queue.Empty:
-            return False
+        # False is "stop" (a kill phrase, a refusal, the Stop button); True is
+        # "go ahead now", which ends the wait early without stopping anything.
+        return self._wait_for(window) is False
 
     @staticmethod
     def _is_correction(text: str) -> bool:
@@ -1735,12 +1830,19 @@ class Jalen:
                 f"limit: {admission.outcome}")
             return admission.why
 
+        # ONE QUESTION, NOT TWO. Past a limit he has just been asked a question
+        # that NAMED this action and ended "Confirm?" (limits.Governor._question),
+        # and his yes to it is this action's approval: asking "Confirm?" about
+        # the same thing a second later, or announcing it and waiting for a
+        # "stop" he has in effect already declined to say, is noise. Under the
+        # limit nothing was asked, and the tier asks exactly as it always has.
         if verdict.tier is Tier.RED:
-            approved = self._run_coro(self.confirm(f"{verdict.summary}. Confirm?"))
+            approved = admission.approved_action or self._run_coro(
+                self.confirm(f"{verdict.summary}. Confirm?"))
             self.audit.action(verdict, "executed" if approved else "cancelled")
             if not approved:
                 return "Cancelled."
-        elif verdict.tier is Tier.AMBER:
+        elif verdict.tier is Tier.AMBER and not admission.approved_action:
             # Router tools used to skip straight to execution here — AMBER's
             # announce+undo-window (spec: "say stop if you don't want that")
             # was only ever wired on the Brain/agent-hook path. Anything
@@ -1758,9 +1860,12 @@ class Jalen:
                 return "Cancelled."
 
         # Allowed to run: count it. Counted here, after every question that
-        # could still have said no, so a cancelled action does not use up a limit.
+        # could still have said no, so a cancelled action does not use up a
+        # limit - and only for a tool that exists, because systools.call below
+        # answers an unknown name (a habit recalled after its tool was removed)
+        # with KeyError, and nothing runs.
         governor = _governor_of(self)
-        if governor is not None:
+        if governor is not None and tool in systools.REGISTRY:
             governor.record(tool)
 
         try:
@@ -2255,6 +2360,25 @@ class Jalen:
                 self._confirm_reasked = True
                 self.audit.utterance(text, who="user")
                 self.say("Sorry - was that a yes or a no?")
+                return
+
+        # AN AMBER ANNOUNCEMENT IS WAITING FOR "STOP" ("... Say stop if you
+        # don't want that."). The kill phrases above catch the word itself. A
+        # plain refusal - "no", "don't", "wait", "hold on" - is the same answer
+        # in other words, and while this window is open the address gate lets
+        # his speech in WITHOUT his name precisely so that it can be this answer
+        # (should_act_on). It fell through to the router and the brain as a NEW
+        # instruction instead, and the action it refused went ahead when the
+        # window closed. Agreement - "yes", "go ahead" - became a new turn too;
+        # now it lets the action go at once instead of after the window.
+        # Anything that is neither still falls through, as before.
+        if getattr(self, "_awaiting_stop", False):
+            if self._echoes_the_announcement(text):
+                return
+            answer = self._parse_yes_no(text)
+            if answer is not None:
+                self.audit.utterance(text, who="user")
+                self._answer_q.put(answer)      # False stops it; True lets it go now
                 return
 
         # ------------------------------------------------------------------
