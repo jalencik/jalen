@@ -52,23 +52,54 @@ def said(text: str) -> str:
 
 
 # --------------------------------------------------------------- the fake
+#
+# Telethon's two kinds of message, because the difference was a bug: what its
+# own get_messages hands back is FINISHED - .text in the client's default
+# markdown ("**Lab** opportunity"), .raw_text plain - and what a raw request
+# returns is not: .text is None, the words only in .message and .raw_text.
+_UNSET = object()
+
+
+class Finished(Msg):
+    def __init__(self, id, words, *, markdown=None, **kwargs):
+        super().__init__(id, markdown or words, **kwargs)
+        self.raw_text = self.message = words
+
+
+class Raw:
+    def __init__(self, finished):
+        self.id, self.date, self.out = finished.id, finished.date, finished.out
+        self.message = self.raw_text = finished.raw_text
+        self.text = None
+        self.entities = finished.entities
+        self.action = self.fwd_from = None
+
+
 class Queue(Account):
     """An account with Telegram's scheduled queue, in its own numbering."""
 
     def __init__(self):
         super().__init__()
-        self.waiting = {}           # chat id -> {scheduled id: Msg}
+        self.waiting = {}           # chat id -> {scheduled id: Finished}
         self.next_id = 1
 
     def _queue(self, chat_id):
         return self.waiting.setdefault(chat_id, {})
 
-    def add(self, chat_id, text, when_, entities=None):
-        message = Msg(self.next_id, text, out=True)
+    def add(self, chat_id, words, when_, entities=None, markdown=None):
+        message = Finished(self.next_id, words, markdown=markdown, out=True)
         message.date, message.entities = when_, list(entities or [])
         self._queue(chat_id)[self.next_id] = message
         self.next_id += 1
         return message
+
+    async def get_messages(self, entity, limit=_UNSET, ids=None, reply_to=None,
+                           scheduled=False, **_):
+        if scheduled:
+            posts = list(self._queue(entity.id).values())
+            return posts[:1] if limit is _UNSET else posts   # Telethon: no limit is ONE
+        return await super().get_messages(entity, limit=None if limit is _UNSET else limit,
+                                          ids=ids, reply_to=reply_to)
 
     async def send_message(self, entity, message="", *, parse_mode=(), formatting_entities=None,
                            schedule=None, reply_to=None, **_):
@@ -97,9 +128,9 @@ class Queue(Account):
         self._raise(name)
         queue = self._queue(request.peer.id)
         if isinstance(request, functions.messages.GetScheduledHistoryRequest):
-            return SimpleNamespace(messages=list(queue.values()))
+            return SimpleNamespace(messages=[Raw(m) for m in queue.values()])
         if isinstance(request, functions.messages.GetScheduledMessagesRequest):
-            return SimpleNamespace(messages=[queue[i] for i in request.id if i in queue])
+            return SimpleNamespace(messages=[Raw(queue[i]) for i in request.id if i in queue])
         if isinstance(request, functions.messages.DeleteScheduledMessagesRequest):
             for i in request.id:
                 queue.pop(i, None)
@@ -232,7 +263,8 @@ def test_premium_emoji_are_read_back_from_the_queue_not_from_a_chat_message(tg):
 # 3. SEEING, CANCELLING AND MOVING WHAT IS SCHEDULED
 # --------------------------------------------------------------------------
 def _two_waiting(tg):
-    first = tg.add(1, "<b>Lab</b> opportunity", when.parse(at(1, "09:00"))[0])
+    first = tg.add(1, "Lab opportunity with the Lee Language Lab", when.parse(at(1, "09:00"))[0],
+                   markdown="**Lab** opportunity with the **Lee Language Lab**")
     second = tg.add(1, "Reminder: forms close tonight", when.parse(at(2, "18:00"))[0])
     return first, second
 
@@ -247,6 +279,30 @@ def test_the_queue_is_listed_soonest_first_with_numbers_and_fenced(tg):
     assert f"#{first.id} {said(at(1, '09:00'))}" in reply
     assert reply.index(f"#{first.id} ") < reply.index(f"#{second.id} ")
     assert "UNTRUSTED CONTENT" in reply and taint.origin_now() == "content"
+
+
+def test_every_post_in_the_queue_is_listed_with_its_words(tg):
+    """Not one: get_messages given no limit returns ONE. Not wordless: a raw .text is None."""
+    first, second = _two_waiting(tg)
+    reply = messaging.scheduled_telegram_posts(chat=CHANNEL)
+    assert reply.splitlines()[0].startswith("2 posts scheduled")
+    assert "Lab opportunity with the Lee Language Lab" in reply
+    assert "Reminder: forms close tonight" in reply
+    assert "**" not in reply
+
+
+def test_a_search_by_words_finds_them_across_bold(tg):
+    first, _second = _two_waiting(tg)
+    messaging.cancel_scheduled_post(chat=CHANNEL, message="opportunity with the Lee Language Lab")
+    assert first.id not in tg.waiting[1]
+
+
+def test_a_chat_message_is_found_by_words_across_bold_too(tg):
+    """The same fix for _reply_target, which edit, delete, reply_to and the rest use."""
+    tg.history[1].insert(0, Finished(401, "Lab opening with the Lee Language Lab",
+                                     markdown="Lab opening with the **Lee Language Lab**"))
+    messaging.delete_message(chat=CHANNEL, message="with the Lee Language Lab")
+    assert ("delete", 1, [401], True) in tg.calls
 
 
 def test_an_empty_queue_says_so(tg):
@@ -308,8 +364,9 @@ def test_moving_a_post_changes_only_its_time(tg):
     edit = next(c for c in tg.calls if c[0] == "edit")
     assert edit[1:5] == (1, first.id, None, None), "words or a parse mode were re-sent"
     assert edit[5] == when.parse(at(1, "10:30"))[0]
-    assert reply == (f"Moved your message '<b>Lab</b> opportunity' in {CHANNEL} from "
-                     f"{said(at(1, '09:00'))} to {said(at(1, '10:30'))}.")
+    assert reply == (f"Moved your message 'Lab opportunity with the Lee Language Lab' in "
+                     f"{CHANNEL} from {said(at(1, '09:00'))} to {said(at(1, '10:30'))}.")
+    assert "**" not in reply, "markdown asterisks in a reply that is read aloud"
 
 
 def test_now_sends_the_scheduled_post_at_once(tg):

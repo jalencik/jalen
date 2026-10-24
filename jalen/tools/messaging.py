@@ -931,15 +931,22 @@ def _media_kind(message) -> tuple[str, str]:
     return "", ""
 
 
-def _describe_message(message) -> str:
+def _describe_message(message, plain: bool = False) -> str:
     """
     One message as one thing to read: its text, or what it is, or both.
 
     A text message comes back exactly as written. Anything else is named in
     square brackets with its caption after it: "[voice note, 0:23]",
     "[photo] look at this", "[file: cv.pdf, 2.1 MB]".
+
+    `plain` takes the words without their markup - for a search by words and
+    for a reply that is SPOKEN. Under the client's default parse mode .text is
+    markdown, so a bold name reads "**Lee Language Lab**": a search for "with
+    the Lee Language Lab" missed it across the asterisks, and a reply naming
+    the post had TTS read them out.
     """
-    text = getattr(message, "text", None) or ""
+    text = ((getattr(message, "raw_text", None) if plain else None)
+            or getattr(message, "text", None) or getattr(message, "message", None) or "")
     kind, label = _media_kind(message)
     forwarded = _forwarded(message)
     if not kind and not text.strip():
@@ -2468,7 +2475,7 @@ async def _reply_target(client, entity, wanted: str, scope: int | None, keep=Non
     pool = await client.get_messages(entity, **asks)
     needle = " ".join(wanted.lower().split())
     hits = [m for m in (pool or []) if (keep is None or keep(m))
-            and needle in " ".join(_describe_message(m).lower().split())]
+            and needle in " ".join(_describe_message(m, plain=True).lower().split())]
     said = _one_line(wanted, 60)
     if not hits:
         return None, f"none of the last {_REPLY_LOOKBACK} messages there has the words {said!r}."
@@ -3208,7 +3215,7 @@ def _called(message, entity) -> str:
     """
     own = getattr(message, "out", False) or _runs_channel(entity, "post_messages")
     if own and not getattr(message, "fwd_from", None):
-        words = _one_line(_describe_message(message), 60)
+        words = _one_line(_describe_message(message, plain=True), 60)
         return f"your message {words!r}" if words else "your message"
     head = _head(message)
     return f"the message from {head}" if head else "that message"
@@ -3512,11 +3519,16 @@ _THE_NEXT_ONE = frozenset({
 
 
 async def _scheduled(client, entity) -> list:
-    """The posts waiting to go out in this chat, soonest first."""
-    from telethon import functions
+    """
+    The posts waiting to go out in this chat, soonest first.
 
-    found = await client(functions.messages.GetScheduledHistoryRequest(peer=entity, hash=0))
-    waiting = [m for m in (getattr(found, "messages", None) or []) if getattr(m, "date", None)]
+    Through Telethon's own get_messages(scheduled=True), never the raw
+    request: a raw message's .text is None until Telethon finishes it, so the
+    list read as posts with no words and no search by words could match one.
+    And limit=None, because get_messages given no limit returns ONE.
+    """
+    found = await client.get_messages(entity, scheduled=True, limit=None)
+    waiting = [m for m in (found or []) if getattr(m, "date", None)]
     return sorted(waiting, key=lambda m: m.date)
 
 
@@ -3548,7 +3560,7 @@ async def _which_scheduled(client, entity, wanted: str):
         if len(posts) == 1:
             return posts[0], ""
         return None, f"{len(posts)} posts are scheduled there ({listed(posts)}). Which one do you mean?"
-    hits = [m for m in posts if said in " ".join(_describe_message(m).lower().split())]
+    hits = [m for m in posts if said in " ".join(_describe_message(m, plain=True).lower().split())]
     if not hits:
         return None, f"no scheduled post there has the words {_one_line(wanted, 60)!r}"
     if len(hits) > 1:
@@ -3576,7 +3588,7 @@ def scheduled_telegram_posts(chat: str) -> str:
         name = await _chat_name(client, entity)
         if not posts:
             return f"Nothing is scheduled in {name}."
-        lines = [f"#{m.id} {when.say(m.date)}: {_one_line(_describe_message(m), 160)}"
+        lines = [f"#{m.id} {when.say(m.date)}: {_one_line(_describe_message(m, plain=True), 160)}"
                  for m in posts]
         head = (f"{len(posts)} post{'' if len(posts) == 1 else 's'} scheduled in {name}, "
                 "soonest first:")
