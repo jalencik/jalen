@@ -213,6 +213,36 @@ def test_a_start_that_fails_with_nothing_to_resume_still_says_so(sdk):
         asyncio.run(brain().start())
 
 
+def test_a_resumed_conversation_that_never_got_a_turn_out_is_not_resumed_again(sdk):
+    """A session that kills the CLI child on every turn must not be resumed by every restart."""
+    write_record()
+    b = brain()
+    asyncio.run(b.start())
+    assert sdk.made[-1].options.resume == SESSION
+    asyncio.run(b._restart_client())          # its child died before any turn ended well
+    assert record() is None
+    assert sdk.made[-1].options.resume is None
+
+
+def test_once_a_turn_has_ended_well_on_it_a_restart_resumes_it(sdk):
+    write_record()
+    b = brain()
+    asyncio.run(b.start())
+    turn(b)                                   # proven
+    asyncio.run(b._restart_client())
+    assert sdk.made[-1].options.resume == SESSION and record()["session_id"] == SESSION
+
+
+def test_the_app_lets_an_unproven_resume_go_when_its_child_dies():
+    import inspect
+
+    from jalen.app import Jalen
+
+    source = inspect.getsource(Jalen)
+    dead = source.index("if _looks_like_a_dead_client(exc):")
+    assert source.index("forget_unproven_resume()", dead) < source.index("self.brain = None", dead)
+
+
 def test_a_private_turn_is_never_brought_back(sdk):
     write_record()
     turn(brain(private=True))

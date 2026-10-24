@@ -505,6 +505,7 @@ class Brain:
     _epoch = 0
     _fresh = False
     _private_sessions: frozenset[str] = frozenset()
+    _unproven = False
     resumed = ""
 
     def __init__(
@@ -1355,6 +1356,19 @@ class Brain:
             self._client = ClaudeSDKClient(options=options)
             await self._client.__aenter__()
         self.resumed = options.resume or ""
+        # Unproven until a turn ends well on it (_remember_session).
+        self._unproven = bool(options.resume)
+
+    def forget_unproven_resume(self) -> None:
+        """
+        A resumed conversation whose first turn did not end well is let go.
+        Without this, a session that kills the CLI child on every turn would
+        be resumed again by each restart - every turn "my connection to Claude
+        dropped", for good. Called wherever a dead child is replaced.
+        """
+        if self._unproven and self._session_path is not None:
+            forget_saved_conversation(self._session_path)
+        self._unproven = False
 
     def _session_to_resume(self) -> str | None:
         """
@@ -1385,6 +1399,7 @@ class Brain:
         if (self._session_path is None or not session_id or epoch != self._epoch
                 or not _SESSION_ID.fullmatch(session_id)):
             return
+        self._unproven = False
         if getattr(self.audit, "private", False):
             self._private_sessions = self._private_sessions | {session_id}
         if session_id in self._private_sessions:
@@ -1496,6 +1511,7 @@ class Brain:
         that fails does a new one start fresh, earlier turns forgotten. Either
         is enormously better than every subsequent turn failing.
         """
+        self.forget_unproven_resume()
         try:
             await self.stop()
         except Exception:

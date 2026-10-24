@@ -2621,6 +2621,13 @@ class Jalen:
             from .brain.agent import _looks_like_a_dead_client
 
             if _looks_like_a_dead_client(exc):
+                # A conversation it had just resumed and never got a turn out
+                # of is not resumed again by the next brain (Brain.
+                # forget_unproven_resume), or this would repeat every turn.
+                try:
+                    self.brain.forget_unproven_resume()
+                except Exception:  # noqa: BLE001 - whatever it was, it is still stopped
+                    pass
                 try:
                     await self.brain.stop()
                 except Exception:
