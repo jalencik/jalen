@@ -51,7 +51,7 @@ GROUPS: list[tuple[str, str, tuple[str, ...]]] = [
      ("email", "inbox", "gmail", "scan_inbox", "google_status")),
     ("Telegram", "Your own chats and your channel.",
      ("telegram", "send_posts", "save_draft_text", "community_post_guide",
-      "sticker", "premium_emoji", "delete_message!")),
+      "sticker", "premium_emoji", "delete_message!", "cancel_scheduled_post!")),
     ("Calendar", "", ("calendar",)),
     ("The web", "", ("web_", "open_url", "search_site", "play_on_youtube",
                      "browser_tab", "current_page_url")),

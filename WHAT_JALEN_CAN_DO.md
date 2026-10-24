@@ -1,5 +1,5 @@
 
-# What Jalen can do  (194 things)
+# What Jalen can do  (197 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -97,6 +97,7 @@ _Reading, drafting and sending Gmail._
 ## Telegram
 _Your own chats and your channel._
 
+- [ ]   **cancel_scheduled_post** - Cancel a scheduled Telegram post before it goes out  [tells you first, you can say stop]
 - [ ]   **community_post_guide** - The layout rules for his AI Engineering & Machine Learning channel: bullet character, where bold goes, the expandable Q&A block, the fixed sign-off
 - [ ]   **delete_message** - Delete a Telegram message for everyone  [stops and waits for you to say yes]
 - [ ]   **edit_telegram_message** - Change one of HIS Telegram messages in place - fix a typo in a post that already went out, correct a time  [stops and waits for you to say yes]
@@ -108,8 +109,10 @@ _Your own chats and your channel._
 - [ ]   **pin_telegram_message** - Pin a Telegram message at the top of a chat, or with unpin=true take it down  [tells you first, you can say stop]
 - [ ]   **react_to_telegram_message** - Put his reaction on a Telegram message - exactly one emoji, such as a thumbs-up, a heart or a fire - or with an empty emoji take his reaction off  [tells you first, you can say stop]
 - [ ] * **read_telegram** - Read recent messages from ONE Telegram chat, named the way he says it — 'Uluhbek', 'Saved Messages', an @username
+- [ ]   **reschedule_telegram_post** - Move a scheduled Telegram post to another time, or with schedule_at 'now' send it at once  [tells you first, you can say stop]
 - [ ]   **save_draft_text** - Write a long piece — an essay, a personal statement, an application answer, a post — to a file AND his clipboard
 - [ ]   **save_telegram_draft** - Write text into a chat's DRAFT box without sending it
+- [ ]   **scheduled_telegram_posts** - What is scheduled to go out in one Telegram chat, soonest first: when, its number, and its words
 - [ ]   **search_telegram** - Search his Telegram messages for a phrase, across every chat or in one
 - [ ]   **send_posts** - Send SEVERAL posts to one Telegram chat in a single call  [stops and waits for you to say yes]
 - [ ]   **send_sticker** - Send ONE sticker to a Telegram chat as its own message, as him, ONLY WHEN HE ASKS for a sticker (for example 'post it with a sticker'): never after...  [stops and waits for you to say yes]
@@ -268,7 +271,7 @@ _The vault, and typing into forms._
 
 ---
 
-176 tools: 26 amber, 131 green, 19 red
+179 tools: 28 amber, 132 green, 19 red
 100 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:

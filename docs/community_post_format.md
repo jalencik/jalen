@@ -233,6 +233,11 @@ random one.
 - **A post already in the channel is fixed with `edit_telegram_message`**,
   never by sending it again: `message` is "last" (his newest post) or its
   number, and `text` is the whole corrected post, checked exactly like a send.
+- **A post for later** goes with `schedule_at` ("2026-10-25 09:00", his local
+  time) and is checked exactly like a post now. It waits in Telegram's own
+  queue: `scheduled_telegram_posts` lists it, `reschedule_telegram_post` moves
+  it (or sends it now), `cancel_scheduled_post` takes it out. To change its
+  words, cancel it and schedule the corrected one.
 
 ---
 

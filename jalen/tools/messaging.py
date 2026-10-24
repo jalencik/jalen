@@ -478,7 +478,7 @@ def _unknown_emoji_sentence(unknown: list[int]) -> str:
     )
 
 
-async def _read_back(client, entity, sent, promised: list[int]) -> str:
+async def _read_back(client, entity, sent, promised: list[int], scheduled: bool = False) -> str:
     """
     One sentence about how many of the `promised` premium emoji are in the
     message Telegram actually stored.
@@ -487,6 +487,10 @@ async def _read_back(client, entity, sent, promised: list[int]) -> str:
     that is not Premium: it accepts the message and drops them, so the send
     "succeeds" and the post is not what he approved. Nothing in the send
     reports it. The only way to know is to ask Telegram for the message.
+
+    A SCHEDULED message is asked for among the scheduled ones. Its id is in
+    their own numbering, so get_messages(ids=) would read whatever ordinary
+    message in the chat happens to have that number, and count its emoji.
     """
     from collections import Counter
 
@@ -495,7 +499,14 @@ async def _read_back(client, entity, sent, promised: list[int]) -> str:
     stored = None
     if message_id is not None:
         try:
-            stored = await client.get_messages(entity, ids=message_id)
+            if scheduled:
+                from telethon import functions
+
+                found = await client(functions.messages.GetScheduledMessagesRequest(
+                    peer=entity, id=[message_id]))
+                stored = next(iter(getattr(found, "messages", None) or []), None)
+            else:
+                stored = await client.get_messages(entity, ids=message_id)
         except Exception:  # noqa: BLE001 - not worth failing a delivered send over
             stored = None
     if stored is None:
@@ -1962,9 +1973,15 @@ def _in_house_format(text: str, as_written: bool,
 
 
 def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "",
-                          as_written: bool = False) -> str:
+                          as_written: bool = False, schedule_at: str = "") -> str:
     """
     Send a Telegram message as him. RED tier — asks out loud first.
+
+    `schedule_at` sends it LATER instead: Telegram holds it and posts it at
+    that moment ("2026-10-25 09:00" or "tomorrow 09:00", his local time -
+    jalen/when.py reads it strictly). The gate decides exactly as for a send
+    now, and the question names the day and the time; the reply says them
+    back. A time that has passed, or is unreadable, sends nothing.
 
     "Saved Messages" (or "me") targets his own notes, which is the only safe
     destination for a first test: it reaches nobody else.
@@ -1984,6 +2001,13 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
     text, tidied, off_format = _in_house_format(text, as_written)
     if off_format:
         return f"Nothing sent — {off_format}."
+    later = None
+    if str(schedule_at or "").strip():
+        from .. import when
+
+        later, problem = when.parse(schedule_at)
+        if later is None:
+            return f"Nothing sent — {problem}."
 
     async def work(client):
         entity = await _resolve(client, to)
@@ -2013,6 +2037,8 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
             # parse_mode=None AND explicit entities: Telethon's markdown
             # default must never see this text. See _formatted().
             extra = {} if thread.reply_id is None else {"reply_to": thread.reply_id}
+            if later is not None:
+                extra["schedule"] = later
             sent = await client.send_message(
                 entity, words, formatting_entities=entities, parse_mode=None, **extra
             )
@@ -2031,7 +2057,8 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
         # refusal the retry carries none, and the note already says so.
         check = ""
         if went_out and (promised := _custom_emoji_ids(went_out[-1][0])):
-            check = " " + await _read_back(client, entity, went_out[-1][1], promised)
+            check = " " + await _read_back(client, entity, went_out[-1][1], promised,
+                                           scheduled=later is not None)
         # The PARSED text, not the raw HTML: this reply is spoken, and the
         # tags are how the post is formatted, not what it says. It starts
         # "Sent to" whenever the post went out, and only then: that opening
@@ -2039,6 +2066,20 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
         # What the house-format check put right, said after the post: it is
         # what went out, and he should know it is not word for word.
         also = f" {tidied}" if tidied else ""
+        if later is not None:
+            # "Scheduled", never "Sent": nothing is in the chat yet, and he
+            # hears the day and the clock it will be, read back from the
+            # moment Telegram was given.
+            from .. import when
+
+            if note.startswith(PREMIUM_DROPPED):
+                how = f", but the premium emoji went as ordinary emoji — {note}."
+            elif note:
+                how = f", but WITHOUT formatting — {note}."
+            else:
+                how = ":"
+            return (f"Scheduled for {when.say(later)} in {name}{thread.where}{how} "
+                    f"{message!r}{check}{also}")
         if note.startswith(PREMIUM_DROPPED):
             return (
                 f"Sent to {name}{thread.where}, but the premium emoji went as ordinary emoji "
@@ -3449,7 +3490,180 @@ def react_to_telegram_message(chat: str, emoji: str, message: str = "last") -> s
     return _act(chat, "no reaction", act, attempted, "it may be there already")
 
 
+# ------------------------------------------------------------- scheduled posts
+#
+# "Add the scheduled posts too" (2026-10-24). send_telegram_message's
+# schedule_at puts a post in Telegram's own queue for later; these three see
+# that queue, take a post out of it, and move one - to another time, or out
+# now. Scheduled posts have their own numbering, separate from the chat's, so
+# they are only ever looked up among the scheduled ones (_which_scheduled):
+# "#5" here is never message 5 of the chat.
+#
+#   scheduled_telegram_posts   GREEN - reads, and fences what it reads
+#   cancel_scheduled_post      AMBER - announced; nobody has seen the post
+#   reschedule_telegram_post   AMBER - announced; its words were approved
+#                              when it was scheduled, only WHEN changes
+
+# What "the next one" is called: the soonest scheduled post.
+_THE_NEXT_ONE = frozenset({
+    "next", "the next one", "next one", "the next post", "next post", "soonest",
+    "the soonest", "first", "the first one",
+})
+
+
+async def _scheduled(client, entity) -> list:
+    """The posts waiting to go out in this chat, soonest first."""
+    from telethon import functions
+
+    found = await client(functions.messages.GetScheduledHistoryRequest(peer=entity, hash=0))
+    waiting = [m for m in (getattr(found, "messages", None) or []) if getattr(m, "date", None)]
+    return sorted(waiting, key=lambda m: m.date)
+
+
+async def _which_scheduled(client, entity, wanted: str):
+    """
+    The one scheduled post meant: (message, "") or (None, why not). By its
+    number (as scheduled_telegram_posts shows it), by a few of its words, as
+    "the next one" (the soonest) - or, said as "it" or not named at all, the
+    only one there. With several, which is a question that names them by
+    their times, never a choice.
+    """
+    from .. import when
+
+    posts = await _scheduled(client, entity)
+    if not posts:
+        return None, "nothing is scheduled there"
+    said = " ".join(str(wanted or "").lower().split())
+    number = said.lstrip("#").strip()
+    if number.isdigit():
+        hit = [m for m in posts if m.id == int(number)]
+        return (hit[0], "") if hit else (None, f"no scheduled post there is number {number}")
+    if said in _THE_NEXT_ONE:
+        return posts[0], ""
+
+    def listed(found) -> str:
+        return ", ".join(f"#{m.id} {when.say(m.date)}" for m in found[:5])
+
+    if said in LAST_MESSAGE_WORDS:
+        if len(posts) == 1:
+            return posts[0], ""
+        return None, f"{len(posts)} posts are scheduled there ({listed(posts)}). Which one do you mean?"
+    hits = [m for m in posts if said in " ".join(_describe_message(m).lower().split())]
+    if not hits:
+        return None, f"no scheduled post there has the words {_one_line(wanted, 60)!r}"
+    if len(hits) > 1:
+        return None, (f"{len(hits)} scheduled posts fit {_one_line(wanted, 60)!r} "
+                      f"({listed(hits)}). Which one do you mean?")
+    return hits[0], ""
+
+
+def scheduled_telegram_posts(chat: str) -> str:
+    """
+    What is waiting to go out in one chat, soonest first: when, its number
+    (which cancel_scheduled_post and reschedule_telegram_post take) and its
+    words. Read-only. Fenced like any chat content - in a channel another
+    admin can schedule posts too - so it marks the turn as having read.
+    """
+    _enabled()
+
+    async def work(client):
+        from .. import when
+
+        entity = await _resolve(client, chat)
+        if entity is None:
+            return await _unresolved(client, chat)
+        posts = await _scheduled(client, entity)
+        name = await _chat_name(client, entity)
+        if not posts:
+            return f"Nothing is scheduled in {name}."
+        lines = [f"#{m.id} {when.say(m.date)}: {_one_line(_describe_message(m), 160)}"
+                 for m in posts]
+        head = (f"{len(posts)} post{'' if len(posts) == 1 else 's'} scheduled in {name}, "
+                "soonest first:")
+        body = _fence("\n".join(lines), f"scheduled posts in {name}")
+        return f"{head}\n{body}"
+
+    return RUNTIME.run(work)
+
+
+def cancel_scheduled_post(chat: str, message: str = "") -> str:
+    """
+    Take a scheduled post out of Telegram's queue before it goes out. AMBER:
+    announced; nobody has seen it. `message` is its number from
+    scheduled_telegram_posts, a few of its words, "next" for the soonest, or
+    empty when it is the only one there.
+    """
+    _enabled()
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        from telethon import functions
+
+        from .. import when
+
+        target, why = await _which_scheduled(client, entity, message)
+        if target is None:
+            raise _Refused(why)
+        attempted.set()
+        await client(functions.messages.DeleteScheduledMessagesRequest(
+            peer=entity, id=[target.id]))
+        name = await _chat_name(client, entity)
+        return (f"Cancelled {_called(target, entity)}, which was scheduled for "
+                f"{when.say(target.date)} in {name}. It won't go out.")
+
+    return _act(chat, "nothing cancelled", act, attempted, "it may already be cancelled")
+
+
+_RIGHT_NOW = frozenset({"now", "right now", "immediately", "straight away", "at once"})
+
+
+def reschedule_telegram_post(chat: str, schedule_at: str, message: str = "") -> str:
+    """
+    Move a scheduled post to another time - or, with schedule_at "now", send
+    it at once. AMBER: announced; its words were approved when it was
+    scheduled, and only WHEN changes. `message` is chosen as for
+    cancel_scheduled_post.
+    """
+    _enabled()
+    now_please = " ".join(str(schedule_at or "").lower().split()) in _RIGHT_NOW
+    later = None
+    if not now_please:
+        from .. import when
+
+        later, problem = when.parse(schedule_at)
+        if later is None:
+            return f"Nothing moved — {problem}."
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        from telethon import functions
+
+        from .. import when
+
+        target, why = await _which_scheduled(client, entity, message)
+        if target is None:
+            raise _Refused(why)
+        name = await _chat_name(client, entity)
+        what = _called(target, entity)
+        was = when.say(target.date)
+        attempted.set()
+        if now_please:
+            await client(functions.messages.SendScheduledMessagesRequest(
+                peer=entity, id=[target.id]))
+            return f"Sent {what} to {name} now, instead of {was}."
+        # Only the time: no text and no parse mode, so Telegram keeps the
+        # words and their formatting exactly as they were scheduled.
+        await client.edit_message(entity, target.id, None, parse_mode=None, schedule=later)
+        return f"Moved {what} in {name} from {was} to {when.say(later)}."
+
+    return _act(chat, "nothing moved", act, attempted,
+                "it may already have gone out" if now_please else "it may already have moved")
+
+
 REGISTRY: dict[str, Any] = {
+    "scheduled_telegram_posts": scheduled_telegram_posts,
+    "cancel_scheduled_post": cancel_scheduled_post,
+    "reschedule_telegram_post": reschedule_telegram_post,
     "edit_telegram_message": edit_telegram_message,
     "delete_message": delete_message,
     "forward_telegram_message": forward_telegram_message,

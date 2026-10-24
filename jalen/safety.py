@@ -323,6 +323,8 @@ def _text_message_summary(args: dict[str, Any], app: str) -> str:
     """
     to = _said(args.get("to"), 90) or "someone"
     head = f"send {to} a {app} message"
+    if later := _when_said(args.get("schedule_at")):
+        head += f", to go out {later},"
     if str(args.get("reply_to") or "").strip():
         head += " as a reply"
     if topic := _said(args.get("topic"), 60):
@@ -333,6 +335,50 @@ def _text_message_summary(args: dict[str, Any], app: str) -> str:
     hosts = _link_hosts(str(args.get("text") or ""))
     links = f", with links to {', '.join(hosts[:3])}" if hosts else ""
     return f'{head} saying "{words}"{links}'
+
+
+def _when_said(raw: Any) -> str:
+    """
+    A scheduled time as he will hear it - "tomorrow at 09:00" - read by the
+    same rules the tool uses (jalen/when.py), so the question and the post
+    cannot disagree; quoted as given when it cannot be read (the tool then
+    refuses it). "" when nothing is scheduled.
+    """
+    said = " ".join(str(raw or "").split())
+    if not said:
+        return ""
+    if said.lower() in ("now", "right now", "immediately", "straight away", "at once"):
+        return "now"
+    from . import when
+
+    moment, _why = when.parse(said)
+    return when.say(moment) if moment is not None else f'at "{_said(said, 40)}"'
+
+
+def _which_scheduled_said(args: dict[str, Any]) -> str:
+    which = _said(args.get("message"), 50)
+    number = which.lstrip("#").strip()
+    if number.isdigit():
+        return f"scheduled post number {number}"
+    plain = " ".join(which.lower().split())
+    if plain in LAST_MESSAGE_WORDS:
+        return "the scheduled post"
+    if plain in ("next", "the next one", "next one", "the next post", "next post",
+                 "soonest", "the soonest", "first", "the first one"):
+        return "the next scheduled post"
+    return f'the scheduled post with "{which}"'
+
+
+def _cancel_scheduled_summary(args: dict[str, Any]) -> str:
+    return f"cancel {_which_scheduled_said(args)} in {_in_chat(args)}, so it never goes out"
+
+
+def _reschedule_summary(args: dict[str, Any]) -> str:
+    later = _when_said(args.get("schedule_at"))
+    which, where = _which_scheduled_said(args), _in_chat(args)
+    if later == "now":
+        return f"send {which} in {where} now, instead of when it was scheduled"
+    return f"move {which} in {where} to {later or 'another time'}"
 
 
 def _email_summary(args: dict[str, Any]) -> str:
@@ -411,6 +457,8 @@ _SUMMARIES = {
     "send_telegram_message": lambda args: _text_message_summary(args, "Telegram"),
     "send_whatsapp_message": lambda args: _text_message_summary(args, "WhatsApp"),
     "send_email": _email_summary,
+    "cancel_scheduled_post": _cancel_scheduled_summary,
+    "reschedule_telegram_post": _reschedule_summary,
     "edit_telegram_message": _edit_summary,
     "delete_message": _delete_message_summary,
     "forward_telegram_message": _forward_summary,
@@ -1150,7 +1198,10 @@ class SafetyEngine:
             joined = text
         else:
             text = str(args.get("text") or "")
-            head = f"post to {where}"
+            # A scheduled post is announced with WHEN it goes out: the stop
+            # window is now, the post is later, and he has to know which.
+            later = _when_said(args.get("schedule_at"))
+            head = f"schedule a post to {where} for {later}" if later else f"post to {where}"
             joined = text
         first = _first_spoken_line(text)
         hosts = _link_hosts(joined)

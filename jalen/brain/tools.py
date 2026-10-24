@@ -541,13 +541,47 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "bold and the Q&A block are put right and the reply says so; a "
         "missing section, wrong questions or a changed sign-off sends nothing "
         "and the reply says exactly what to fix - fix it and send again. "
-        "as_written=true only when he asked for a different layout.",
+        "as_written=true only when he asked for a different layout. "
+        "schedule_at posts it LATER instead (\"post it tomorrow at 9\"): his "
+        "local time as '2026-10-25 09:00', or 'tomorrow 09:00' / 'today 18:00'. "
+        "If you are not sure what today's date is, call get_time first. It is "
+        "gated exactly like a send now, and the question and the reply both "
+        "say the day and the time - say them back to him.",
         {"to": ("string", "chat name, @username, or 'Saved Messages'", True),
          "text": ("string", "the message to send", True),
          "reply_to": ("string", "the message being answered: its number, or a few of its words", False),
          "topic": ("string", "in a forum group, the topic to post in", False),
          "as_written": ("boolean", "send exactly as written, skipping the channel-format "
-                        "check - only when he asked for a different layout", False)},
+                        "check - only when he asked for a different layout", False),
+         "schedule_at": ("string", "send it later instead: '2026-10-25 09:00' or "
+                         "'tomorrow 09:00', his local time; empty sends it now", False)},
+    ),
+    "scheduled_telegram_posts": (
+        "What is scheduled to go out in one Telegram chat, soonest first: when, "
+        "its number, and its words. Read-only; comes back fenced like any chat "
+        "content. Use it for 'what's scheduled in my channel', and before "
+        "cancelling or moving a post when you do not know its number.",
+        {"chat": ("string", "the chat or channel: its name, @username, or 'Saved Messages'", True)},
+    ),
+    "cancel_scheduled_post": (
+        "Cancel a scheduled Telegram post before it goes out. Announced first. "
+        "message is its number from scheduled_telegram_posts, a few of its "
+        "words, 'next' for the soonest, or empty when it is the only one "
+        "scheduled there; with several, the reply asks which - ask him. To "
+        "change a scheduled post's WORDS, cancel it and schedule the corrected "
+        "one.",
+        {"chat": ("string", "the chat or channel it is scheduled in", True),
+         "message": ("string", "its number, a few of its words, or 'next'; empty when only one is scheduled", False)},
+    ),
+    "reschedule_telegram_post": (
+        "Move a scheduled Telegram post to another time, or with schedule_at "
+        "'now' send it at once. Announced first, with the new time. message is "
+        "chosen as for cancel_scheduled_post. schedule_at is his local time as "
+        "'2026-10-25 09:00' or 'tomorrow 09:00' (call get_time first if you "
+        "are not sure of today's date), or 'now'.",
+        {"chat": ("string", "the chat or channel it is scheduled in", True),
+         "schedule_at": ("string", "the new time, or 'now'", True),
+         "message": ("string", "its number, a few of its words, or 'next'; empty when only one is scheduled", False)},
     ),
     "edit_telegram_message": (
         "Change one of HIS Telegram messages in place - fix a typo in a post "

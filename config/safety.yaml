@@ -136,6 +136,8 @@ green:
     - telegram_dm_catchup   # unread DMs by person, plus DMs he read and left unanswered; display names and bodies inside
                             # one untrusted fence; marks nothing read. A reader, so it
                             # is not on refuse_from_content (reading is what taints).
+    - scheduled_telegram_posts  # what waits to go out in one chat; fenced, as a
+                                # channel's co-admins can schedule posts too
     - read_github
     - read_notion
     - media_play_pause
@@ -313,6 +315,13 @@ amber:
     # that notifies everyone says so in the announcement.
     - pin_telegram_message
     - react_to_telegram_message
+    # A post already scheduled: taken out of the queue before anyone has seen
+    # it, or moved - to another time, or out now. Its words were approved
+    # when it was scheduled (send_telegram_message, decided like a send to
+    # the same place); only WHEN changes, so these are announced with the
+    # time, not asked. AMBER, so nothing he read can move or cancel a post.
+    - cancel_scheduled_post
+    - reschedule_telegram_post
     # Sends ONE voice note somebody recorded to Groq (a third party) to be
     # turned into words. The audio leaves the laptop, so it is announced - the
     # line names whose voice note goes to Groq (SafetyEngine._describe) - and

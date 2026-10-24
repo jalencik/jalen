@@ -1,6 +1,6 @@
 # What Jalen can do
 
-**176 tools.** Generated from the running code by
+**179 tools.** Generated from the running code by
 `scripts/abilities.py`, so it cannot promise something that no longer
 exists. Every quoted phrase is one the test suite already asserts.
 
@@ -147,6 +147,12 @@ List unread inbox mail, newest first, as sender + subject + snippet. This is the
 
 _Your own chats, your saved messages, and your channel._
 
+### `cancel_scheduled_post`   — AMBER
+
+Cancel a scheduled Telegram post before it goes out. Announced first. message is its number from scheduled_telegram_posts, a few of its words, 'next' for the soonest, or empty when it is the only one scheduled there; with several, the reply asks which - ask him. To change a scheduled post's WORDS, cancel it and schedule the corrected one.
+
+Needs: `chat`
+
 ### `community_post_guide`   — GREEN
 
 The layout rules for his AI Engineering & Machine Learning channel: bullet character, where bold goes, the expandable Q&A block, the fixed sign-off. Call this BEFORE writing any channel post, and call voice_guide too — one is how a post is laid out, the other is how he sounds, and a post needs both. Then, before sending, call find_premium_emoji for the post's emoji: he has Telegram Premium and wants his premium emoji in every post. A sticker goes out only when he asks for one.
@@ -207,6 +213,12 @@ Say: "read my telegram from Ali" · "what did Ali say on telegram"
 
 Needs: `chat`
 
+### `reschedule_telegram_post`   — AMBER
+
+Move a scheduled Telegram post to another time, or with schedule_at 'now' send it at once. Announced first, with the new time. message is chosen as for cancel_scheduled_post. schedule_at is his local time as '2026-10-25 09:00' or 'tomorrow 09:00' (call get_time first if you are not sure of today's date), or 'now'.
+
+Needs: `chat`, `schedule_at`
+
 ### `save_draft_text`   — GREEN
 
 Write a long piece — an essay, a personal statement, an application answer, a post — to a file AND his clipboard. Use this for anything over a paragraph: speaking 600 words aloud is absurd and a reply that long gets truncated anyway. Call voice_guide FIRST for anything going out under his name. Tell him the word count and that it is on the clipboard.
@@ -218,6 +230,12 @@ Needs: `name`, `text`
 Write text into a chat's DRAFT box without sending it. Nothing reaches anyone — it appears in the message box of that chat on his phone, for him to read and send himself. This is what to use for a channel post: compose it, save it here, and tell him it's waiting. Never use send_telegram_message for a post he hasn't seen. Saving a second draft to the same chat replaces the first. This is also how a reply to a DM is prepared: write it as him (voice_guide first), save it with reply_to naming the message it answers, read it back to him, and let him say send it. A draft in a person's chat reaches nobody. A post in his channel's format is checked exactly as a send is: slips are put right and said, a structural mistake saves nothing and says what to fix - fix it and save the draft again. as_written=true only when he asked for a different layout.
 
 Needs: `to`, `text`
+
+### `scheduled_telegram_posts`   — GREEN
+
+What is scheduled to go out in one Telegram chat, soonest first: when, its number, and its words. Read-only; comes back fenced like any chat content. Use it for 'what's scheduled in my channel', and before cancelling or moving a post when you do not know its number.
+
+Needs: `chat`
 
 ### `search_telegram`   — GREEN
 
@@ -245,7 +263,7 @@ Needs: `to`, `file`
 
 ### `send_telegram_message` * — RED
 
-Send a Telegram message AS HIM to a person or group. Irreversible and it reaches someone else, so the safety gate asks out loud first. 'Saved Messages' targets his own notes and reaches nobody. If the name is ambiguous this refuses rather than guessing — a message delivered to the wrong person cannot be recalled. The text may carry premium emoji as <tg-emoji emoji-id="ID">E</tg-emoji> tags, but only with ids from find_premium_emoji; an id Telegram does not know is refused, and the reply says how many premium emoji arrived. To answer ONE message, give reply_to: its number (#4821, as read_telegram shows it) or a few of its words; a message that cannot be found, or fits two, sends nothing and says so. In a forum group, topic names the topic. For a DM he has not seen drafted first, use save_telegram_draft and send only after he says yes. A post in his channel's format is checked against it before it goes: bullets, bold and the Q&A block are put right and the reply says so; a missing section, wrong questions or a changed sign-off sends nothing and the reply says exactly what to fix - fix it and send again. as_written=true only when he asked for a different layout.
+Send a Telegram message AS HIM to a person or group. Irreversible and it reaches someone else, so the safety gate asks out loud first. 'Saved Messages' targets his own notes and reaches nobody. If the name is ambiguous this refuses rather than guessing — a message delivered to the wrong person cannot be recalled. The text may carry premium emoji as <tg-emoji emoji-id="ID">E</tg-emoji> tags, but only with ids from find_premium_emoji; an id Telegram does not know is refused, and the reply says how many premium emoji arrived. To answer ONE message, give reply_to: its number (#4821, as read_telegram shows it) or a few of its words; a message that cannot be found, or fits two, sends nothing and says so. In a forum group, topic names the topic. For a DM he has not seen drafted first, use save_telegram_draft and send only after he says yes. A post in his channel's format is checked against it before it goes: bullets, bold and the Q&A block are put right and the reply says so; a missing section, wrong questions or a changed sign-off sends nothing and the reply says exactly what to fix - fix it and send again. as_written=true only when he asked for a different layout. schedule_at posts it LATER instead ("post it tomorrow at 9"): his local time as '2026-10-25 09:00', or 'tomorrow 09:00' / 'today 18:00'. If you are not sure what today's date is, call get_time first. It is gated exactly like a send now, and the question and the reply both say the day and the time - say them back to him.
 
 Say: "telegram sat talk saying hello"
 
@@ -1134,4 +1152,4 @@ Look up one of his own details from the personal-info folder - 'what's my school
 - Reach Gemini or ChatGPT over their APIs on this machine - the Gemini key is 403'd and there is no OpenAI key. The browser route works instead.
 - Undo a sent email or a deleted file. That is why those ask first.
 
-**176 tools** — 26 amber, 131 green, 19 red
+**179 tools** — 28 amber, 132 green, 19 red
