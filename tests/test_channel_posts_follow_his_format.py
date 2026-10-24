@@ -31,6 +31,9 @@ from test_telegram_posting import FakeClient, _kinds, wired  # noqa: F401 - fixt
 ROOT = Path(__file__).resolve().parent.parent
 GUIDE = (ROOT / "docs" / "community_post_format.md").read_text(encoding="utf-8")
 LEE_LAB = GUIDE.split("## Worked example")[1].split("```")[1].strip("\n")
+# His channel, as config/jalen.yaml names it among the chats he sends to without
+# being asked: the check is for posts that go there (messaging._his_channel).
+HIS_CHANNEL = "AI engineering & Machine learning"
 
 
 def plain_of(markup):
@@ -217,8 +220,9 @@ def test_the_sign_off_handle_is_his_configured_one(monkeypatch):
                         "@another_channel_owner" if key == "personal.channel_handle"
                         else real(key, default))
     theirs = LEE_LAB.replace("@Iht_student", "@another_channel_owner")
-    assert messaging._in_house_format(theirs, False) == (theirs, "", "")
-    assert messaging._in_house_format(LEE_LAB, False)[2], "the old handle passed for a new owner"
+    assert messaging._in_house_format(theirs, False, to=HIS_CHANNEL) == (theirs, "", "")
+    assert messaging._in_house_format(LEE_LAB, False, to=HIS_CHANNEL)[2], (
+        "the old handle passed for a new owner")
 
 
 def test_the_brain_is_told_about_the_check():
@@ -239,8 +243,7 @@ def test_the_brain_is_told_about_the_check():
 # could carry every mistake the send refuses.
 # --------------------------------------------------------------------------
 def draft(markup, **kwargs):
-    return messaging.save_telegram_draft(to="AI engineering & Machine learning",
-                                         text=markup, **kwargs)
+    return messaging.save_telegram_draft(to=HIS_CHANNEL, text=markup, **kwargs)
 
 
 @pytest.mark.parametrize("name", sorted(BROKEN))
@@ -255,7 +258,7 @@ def test_a_broken_post_is_not_left_as_a_draft(wired, name):
 def test_a_refused_draft_says_save_it_again_never_send_it():
     """Told to "send it again", the brain would post what he asked to see first."""
     broken = BROKEN["no requirements"][0](LEE_LAB)
-    reply = messaging._in_house_format(broken, False, "save the draft again")[2]
+    reply = messaging._in_house_format(broken, False, "save the draft again", to=HIS_CHANNEL)[2]
     assert "save the draft again" in reply and "send" not in reply
 
 

@@ -101,7 +101,7 @@ There is no linter, no type checker, no CI and no git remote.
   gate). Grep for it before adding a fourth.
   `opened_by` and `vouched_by` in the audit rows (`ignored`, `acted on without
   his name`, `heard nothing`) record which window opened the microphone
-  (`wake`, `follow_up`, `answer`, `barge`) and which question of Jalen's, if
+  (`wake`, `wake-over-voice`, `follow_up`, `answer`, `barge`) and which question of Jalen's, if
   any, was open when the sound began (`question`, `bare-wake`, or empty).
 - **The address gate is also the echo defence**, because Jalen's own
   sentences do not begin with his name. Any exemption you add has to call
@@ -145,6 +145,13 @@ There is no linter, no type checker, no CI and no git remote.
   `safety.confirm_timeout_s`, `confirm_timeout_typed_s`, `undo_window_s`,
   `undo_window_typed_s` or `vad.silence_ms` and it follows.
   `tests/test_confirmation_windows.py` pins it.
+- **A post that will not go is refused before he is asked.** A channel post
+  off his format sends nothing. The format check used to run inside the tool,
+  after he had been asked and the limit had counted the post.
+  `messaging.refused_before_asking` runs on both paths, after `classify()` and
+  before `admit()`. The check applies only to his channel (`_his_channel`),
+  never to a message to a person.
+  `tests/test_the_pr_review_answered.py`.
 - **Past a limit, one question, not two.** The governor's question names the
   action and ends "Confirm?", so `Admission.approved_action` makes the RED
   "Confirm?" (and the AMBER announcement) stand down for that action. Do not
@@ -163,8 +170,11 @@ There is no linter, no type checker, no CI and no git remote.
   answer word in the question. `_echoes_the_confirmation` treats a fragment
   holding one of the MESSAGE's answer words, half or more of it the message's
   own words (`_quoted_words`), as the echo, and reads "okay" and "ok" as one
-  word (`_ANSWER_FAMILY`). A new summary that quotes text must keep the
-  `saying "..."` / `starts "..."` / `saying: ...` shapes `_quoted_words` reads.
+  word (`_ANSWER_FAMILY`). A new summary that quotes text must put it in
+  double quotes or after `saying: `: `_quoted_words` reads every quoted span
+  and that tail, and nothing else. (It used to read two openings, and the
+  edit, delete, forward and email questions quote with `with "` and
+  `subject "`.)
   `tests/test_a_message_is_heard_before_it_is_sent.py`.
 - **The yes/no rules decide first, and nothing overrules them.**
   `_parse_yes_no` reads negatives first; a self-correction ("no no, I mean
@@ -172,7 +182,10 @@ There is no linter, no type checker, no CI and no git remote.
   (`_his_last_word`). Only a sentence the rules left unclear goes to the model
   that reads rambling answers (`jalen/answer_reader.py`, Groq), so a model can
   never turn a refusal into approval - keep it after the rules, never before,
-  and never for a question or a correction.
+  and never for a question or a correction. A reply with a question word goes
+  to it only if it also holds a plain yes (`_STRONG_YES`). The model is never
+  shown the words the question quotes (`answer_reader.without_what_it_quotes`),
+  because they are text Jalen did not write.
   `tests/test_he_answers_like_a_person.py`.
 - **One answer path, and the echo tests are for the microphone only.** Every
   front door hands a sentence to `Jalen._take_as_answer(text, heard=...)`
@@ -188,7 +201,11 @@ There is no linter, no type checker, no CI and no git remote.
   refusal ("no", "don't", "wait") into stop and agreement into "go now", and
   ignores only an exact tail of the announcement (`_echoes_the_announcement`) -
   narrower than the confirm echo test on purpose, because here a missed echo
-  can only stop an action.
+  can only stop an action. Only an ANSWER-SHAPED sentence counts
+  (`_answers_the_stop_window`). A refusal counts when it is nothing but an
+  answer or begins like one ("no, the other chat", "wait"). Agreement counts
+  only when it is nothing but agreement. "Remind me tomorrow to call mom"
+  holds a no word and is a new instruction.
 - **By voice a question's window is held for a sentence on its way.** The
   AMBER 2 s end before any spoken word can arrive (3.2 s after the sound ends,
   at the median), and a "yes" begun in the last seconds of a RED "Confirm?"
@@ -209,7 +226,12 @@ There is no linter, no type checker, no CI and no git remote.
   because the wake model heard the name; the any-voice branch below it
   (`barge_in: true`) must never, because it fires on sound, his own echo
   included (`tests/test_reported_failures.py`).
-  `tests/test_only_his_name_interrupts_him.py`.
+  `tests/test_only_his_name_interrupts_him.py`. In this mode Jalen's own
+  playback reaches the wake model, so the branch has two guards. A hit while
+  his own sentence carries the name (`_saying_its_own_name`, router
+  `says_the_name`) is ignored. The window a hit opens is
+  `opened_by="wake-over-voice"`, which the address gate echo-tests before it
+  takes it as him.
 - **"He speaks" is `Speaker.on_air`, never `speaker.speaking`.** A brain
   reply's SpeechStream holds `speaking` (and `_say_lock`) for the whole turn,
   through minutes of tools with nothing playing. Read as "his voice is in the

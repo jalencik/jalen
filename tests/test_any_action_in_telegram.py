@@ -9,7 +9,7 @@ pinned, forwarded or reacted to. Five tools now (jalen/tools/messaging.py):
 
   edit_telegram_message      RED; his channel announced, Saved Messages free
   delete_message             RED, never pre-approved, and asked twice
-  forward_telegram_message   RED; gated on where it goes, like a send
+  forward_telegram_message   RED; only his Saved Messages free - never his channel
   pin_telegram_message       AMBER
   react_to_telegram_message  AMBER
 
@@ -278,8 +278,11 @@ def test_a_forward_is_decided_by_where_it_goes():
     assert to_rodion.summary == 'forward the message with "the invoice" from Ali to Rodion'
     assert e.classify("forward_telegram_message",
                       {"chat": "Ali", "to": "Saved Messages"}).tier is Tier.GREEN
+    # Asked, never pre-approved: a forward posts somebody else's words, which
+    # nobody has heard, and his channel got it after a 2 s window that never
+    # said them (review of PR #1, finding 9).
     to_channel = e.classify("forward_telegram_message", {"chat": "Ali", "to": CHANNEL})
-    assert to_channel.tier is Tier.AMBER
+    assert to_channel.tier is Tier.RED
     assert to_channel.summary == f"forward the last message from Ali to {CHANNEL}"
 
 

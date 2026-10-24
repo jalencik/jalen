@@ -337,6 +337,19 @@ def _text_message_summary(args: dict[str, Any], app: str) -> str:
     return f'{head} saying "{words}"{links}'
 
 
+# How he says "send it now" for a time, and "the one going out first" for a
+# scheduled post. One list each, for the question he is asked and for what the
+# tool then does (messaging.send_telegram_message, reschedule_telegram_post,
+# _which_scheduled): they were written out twice and could drift, and "now"
+# was read by the question and refused by the send after he had said yes
+# (review of PR #1, finding 13).
+RIGHT_NOW_WORDS = frozenset({"now", "right now", "immediately", "straight away", "at once"})
+NEXT_SCHEDULED_WORDS = frozenset({
+    "next", "the next one", "next one", "the next post", "next post", "soonest",
+    "the soonest", "first", "the first one",
+})
+
+
 def _when_said(raw: Any) -> str:
     """
     A scheduled time as he will hear it - "tomorrow at 09:00" - read by the
@@ -347,7 +360,7 @@ def _when_said(raw: Any) -> str:
     said = " ".join(str(raw or "").split())
     if not said:
         return ""
-    if said.lower() in ("now", "right now", "immediately", "straight away", "at once"):
+    if said.lower() in RIGHT_NOW_WORDS:
         return "now"
     from . import when
 
@@ -363,8 +376,7 @@ def _which_scheduled_said(args: dict[str, Any]) -> str:
     plain = " ".join(which.lower().split())
     if plain in LAST_MESSAGE_WORDS:
         return "the scheduled post"
-    if plain in ("next", "the next one", "next one", "the next post", "next post",
-                 "soonest", "the soonest", "first", "the first one"):
+    if plain in NEXT_SCHEDULED_WORDS:
         return "the next scheduled post"
     return f'the scheduled post with "{which}"'
 
@@ -1121,10 +1133,12 @@ class SafetyEngine:
     # _SAFE_TO_OWN_CHAT_UNDER_TAINT below: after a read, a voice message is
     # refused even to Saved Messages.
     #
-    # An edit changes what a chat reads, and a forward posts into `to`, so both
-    # are decided like a send to the same place: his channel announced first,
-    # his Saved Messages without a question. delete_message is NOT here: a
-    # deletion is asked twice wherever it is (`consequences:`).
+    # An edit changes what a chat reads, so it is decided like a send to the
+    # same place: his channel announced first, his Saved Messages without a
+    # question. A forward posts into `to` too, but only his own Saved Messages
+    # is ever pre-approved for it (_is_preapproved): what it posts is somebody
+    # else's message, unheard. delete_message is NOT here: a deletion is asked
+    # twice wherever it is (`consequences:`).
     _DESTINATION_ARG = {
         "send_telegram_message": "to",
         "save_telegram_draft": "to",
@@ -1171,10 +1185,6 @@ class SafetyEngine:
         where = _said(args.get("to"), 60) or "your channel"
         if tool == "send_voice_message":
             return _voice_message_summary(args)
-        if tool == "forward_telegram_message":
-            # What the message says is not known until it is fetched; which
-            # one, from where, and to where are.
-            return _forward_summary(args)
         if tool == "send_sticker":
             what = " ".join(x for x in (_said(args.get("emoji"), 20),
                                         _said(args.get("pack"), 40)) if x)
@@ -1252,6 +1262,14 @@ class SafetyEngine:
             return False
         if _is_self_chat(raw) and self._self_chat_preapproved:
             return True
+        # A FORWARD POSTS SOMEBODY ELSE'S WORDS, UNHEARD. What the message says
+        # is not known until it is fetched, and "the last message" is whichever
+        # one arrived a moment before - spam, a phishing link. Into his own
+        # Saved Messages that reaches nobody; anywhere else it is asked first,
+        # never pre-approved: his channel got it after a two-second window
+        # that never said what it said (review of PR #1, finding 9).
+        if tool == "forward_telegram_message":
+            return False
         return any(allowed and target == allowed and allowed not in SELF_CHAT_ALIASES
                    for allowed in self._preapproved)
 

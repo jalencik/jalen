@@ -49,7 +49,7 @@ from typing import Any, NamedTuple
 
 from ..config import CONFIG
 from ..integrations.telegram_user import RUNTIME, TelegramNotConnected, have_session
-from ..safety import LAST_MESSAGE_WORDS, SafetyEngine
+from ..safety import LAST_MESSAGE_WORDS, NEXT_SCHEDULED_WORDS, RIGHT_NOW_WORDS, SafetyEngine
 
 _MAX_BODY_CHARS = 3000
 
@@ -1952,13 +1952,33 @@ def _house_handle() -> str:
         return post_format.DEFAULT_HANDLE
 
 
+def _his_channel(name) -> bool:
+    """
+    Is `name` his channel: a chat he sends to without being asked
+    (telegram.personal.send_without_asking_to) that is not his own Saved
+    Messages? Matched the way the gate matches it (safety._simplify).
+    """
+    from ..safety import _is_self_chat, _simplify
+
+    if not str(name or "").strip() or _is_self_chat(name):
+        return False
+    target = _simplify(str(name))
+    listed = CONFIG.get_path("telegram.personal.send_without_asking_to", []) or []
+    return any(target == _simplify(str(chat)) for chat in listed if not _is_self_chat(chat))
+
+
 def _in_house_format(text: str, as_written: bool,
-                     again: str = "send it again") -> tuple[str, str, str]:
+                     again: str = "send it again", to: str = "") -> tuple[str, str, str]:
     """
     A channel post checked against his format (post_format.py) before it
     goes: (the text to send, a note of what was tidied or "", why it must not
     go or ""). Anything that is not a house post - and anything he asked to
     be sent as written - passes untouched.
+
+    ONLY WHAT GOES TO HIS CHANNEL (`to`). The check is about his channel's
+    posts, and it ran on every send, draft and edit to anyone: a message to a
+    friend with "Requirements:" and "dm me" in it was refused for not
+    following the channel's format (review of PR #1, finding 12).
 
     `again` is what to do once it is fixed, in the words of the action that
     was refused. A draft or an edit told to "send it again" is how a second
@@ -1966,7 +1986,7 @@ def _in_house_format(text: str, as_written: bool,
     """
     from . import post_format
 
-    if as_written:
+    if as_written or not _his_channel(to):
         return text, "", ""
     tidied, changes, wrong = post_format.check(
         text, lambda markup: _formatted(markup).text, _house_handle())
@@ -1977,6 +1997,39 @@ def _in_house_format(text: str, as_written: bool,
                             "asked for a different layout)")
     note = ("Tidied to the channel format: " + ", ".join(changes) + ".") if changes else ""
     return tidied, note, ""
+
+
+# The tools whose post is checked against his channel's format, the argument
+# that names where it goes, and what to do once it is fixed.
+_FORMAT_CHECKED = {
+    "send_telegram_message": ("to", "send it again", "Nothing sent"),
+    "save_telegram_draft": ("to", "save the draft again", "Nothing saved"),
+    "edit_telegram_message": ("chat", "make the edit again", "Nothing changed"),
+}
+
+
+def refused_before_asking(tool: str, args: dict) -> str:
+    """
+    The sentence the tool would refuse this post with, or "": asked by the gate
+    on both paths (the brain's hook, Jalen.handle_local) after classify() and
+    before any question or limit.
+
+    The format check ran inside the tool, AFTER the gate: a channel post that
+    failed it had already been announced or confirmed, and counted against the
+    "messages" limit and the leash - so every fix and retry asked again and
+    counted again (review of PR #1, finding 12). The tool still checks too.
+    """
+    checked = _FORMAT_CHECKED.get(tool)
+    if checked is None or not isinstance(args, dict):
+        return ""
+    where, again, nothing = checked
+    as_written = args.get("as_written") in (True, 1, "true", "True")
+    try:
+        _text, _tidied, off_format = _in_house_format(
+            str(args.get("text") or ""), as_written, again, to=str(args.get(where) or ""))
+    except Exception:  # noqa: BLE001 - the tool checks again; a gate step must not break the gate
+        return ""
+    return f"{nothing} — {off_format}." if off_format else ""
 
 
 def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "",
@@ -2005,11 +2058,14 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
     as written, for when he asked for a different layout.
     """
     _enabled()
-    text, tidied, off_format = _in_house_format(text, as_written)
+    text, tidied, off_format = _in_house_format(text, as_written, to=to)
     if off_format:
         return f"Nothing sent — {off_format}."
     later = None
-    if str(schedule_at or "").strip():
+    # "Now" is no schedule at all: the question said "to go out now", and he
+    # said yes to that (safety.RIGHT_NOW_WORDS).
+    when_said = " ".join(str(schedule_at or "").lower().split())
+    if when_said and when_said not in RIGHT_NOW_WORDS:
         from .. import when
 
         later, problem = when.parse(schedule_at)
@@ -2198,7 +2254,7 @@ def save_telegram_draft(to: str, text: str, reply_to: str = "", topic: str = "",
     three. `as_written` skips it, as for a send.
     """
     _enabled()
-    text, tidied, off_format = _in_house_format(text, as_written, "save the draft again")
+    text, tidied, off_format = _in_house_format(text, as_written, "save the draft again", to=to)
     if off_format:
         return f"Nothing saved — {off_format}."
     also = f" {tidied}" if tidied else ""
@@ -3312,7 +3368,7 @@ def edit_telegram_message(chat: str, text: str, message: str = "last",
     _enabled()
     if not str(text or "").strip():
         return "Nothing changed — say what the message should say now."
-    text, tidied, off_format = _in_house_format(text, as_written, "make the edit again")
+    text, tidied, off_format = _in_house_format(text, as_written, "make the edit again", to=chat)
     if off_format:
         return f"Nothing changed — {off_format}."
     attempted = _Attempt()
@@ -3512,10 +3568,8 @@ def react_to_telegram_message(chat: str, emoji: str, message: str = "last") -> s
 #                              when it was scheduled, only WHEN changes
 
 # What "the next one" is called: the soonest scheduled post.
-_THE_NEXT_ONE = frozenset({
-    "next", "the next one", "next one", "the next post", "next post", "soonest",
-    "the soonest", "first", "the first one",
-})
+# The words are the gate's, so the question and the tool name the same post.
+_THE_NEXT_ONE = NEXT_SCHEDULED_WORDS
 
 
 async def _scheduled(client, entity) -> list:
@@ -3626,7 +3680,8 @@ def cancel_scheduled_post(chat: str, message: str = "") -> str:
     return _act(chat, "nothing cancelled", act, attempted, "it may already be cancelled")
 
 
-_RIGHT_NOW = frozenset({"now", "right now", "immediately", "straight away", "at once"})
+# The gate's words for "now", so the question and the send cannot disagree.
+_RIGHT_NOW = RIGHT_NOW_WORDS
 
 
 def reschedule_telegram_post(chat: str, schedule_at: str, message: str = "") -> str:

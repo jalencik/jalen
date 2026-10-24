@@ -39,7 +39,7 @@ from . import conversation, habits, limits, plan as planning
 from . import taint
 from .brain.router import (
     Intent, IntentRouter, NAME_ACK, addressed_to_jalen, is_kill_phrase,
-    solicits_an_answer, widened_door, without_a_misheard_name,
+    says_the_name, solicits_an_answer, widened_door, without_a_misheard_name,
 )
 from .config import CONFIG, SECRETS
 from . import crashlog
@@ -450,25 +450,24 @@ _ANSWER_FAMILY = {"okay": "ok", "yeah": "yes", "yep": "yes", "yup": "yes",
 
 def _quoted_words(question: str) -> set[str]:
     """
-    The words of the message a question reads out, or nothing: what follows
-    `saying "` or `starts "` up to the closing quote (a text message, a
-    channel post - safety._text_message_summary, _post_summary), or what
+    The words of what a question quotes, or nothing: every span in double
+    quotes - the message a send reads out (`saying "..."`), the start of a
+    post or an edit (`starts "..."`), the message an action names (`the
+    message with "..."`), an email's subject (`subject "..."`) - and what
     follows `saying: ` (a voice message, _voice_message_summary).
+
+    EVERY QUOTED SPAN, not the two openings it used to look for. The edit,
+    delete, forward and email questions quote with `with "` and `subject "`,
+    so a garbled echo of their words - "sure see ya" after a forward of "sure,
+    see you at six" - was not recognised and approved the RED action itself
+    (review of PR #1, finding 2). A quote left open runs to the end.
     """
     low = (question or "").lower()
-    part = ""
-    for opening in ('saying "', 'starts "'):
-        at = low.find(opening)
-        if at >= 0:
-            start = at + len(opening)
-            end = low.find('"', start)
-            part = low[start:end] if end > start else low[start:]
-            break
-    else:
-        at = low.find("saying: ")
-        if at >= 0:
-            part = low[at + len("saying: "):]
-    return {_ANSWER_FAMILY.get(w, w) for w in _SPOKEN_WORD.findall(part)}
+    parts = [inside for inside, _closed in re.findall(r'"([^"]*)("|$)', low)]
+    at = low.find("saying: ")
+    if at >= 0:
+        parts.append(low[at + len("saying: "):])
+    return {_ANSWER_FAMILY.get(w, w) for part in parts for w in _SPOKEN_WORD.findall(part)}
 
 # Plain yes/no words. An echo of a confirmation question cannot contain one
 # that the question does not (see _echoes_the_confirmation), and a genuine
@@ -515,9 +514,11 @@ _STRONG_YES = (" yes ", " yeah ", " yep ", " yup ", " go ahead ", " do it ",
 _EXPLICIT_YES = (" yes ", " yeah ", " yep ", " yup ", " sure ", " okay ", " ok ",
                  " of course ", " absolutely ", " definitely ", " certainly ",
                  " go ahead ", " do it ", " alright ", " all right ")
+# NOT "don't worry": "okay, don't worry about it" is "never mind", and with it
+# here the refusal was deleted and the "okay" approved the RED action (review
+# of PR #1, finding 1). Its n't now refuses, as it always did on its own.
 _COURTESIES_WITH_A_NEGATIVE = (" no problem ", " no problems ", " not a problem ",
-                               " no worries ", " don't worry ", " dont worry ",
-                               " no doubt ")
+                               " no worries ", " no doubt ")
 # A yes or a no only as the WHOLE answer.
 _WHOLE_YES = frozenset({
     "go", "go go", "go now", "please", "bet", "say less", "let's go", "lets go",
@@ -654,6 +655,10 @@ class Jalen:
         # previous stop says nothing at all: a line on every single startup
         # is noise, and noise is what stops anyone reading the file.
         previous = crashlog.previous_exit()
+        # Kept: the file is this run's from the next line on, and "what's wrong
+        # with you?" read it there - "state: running", this run's own - and so
+        # always said the last run had crashed (review of PR #1, finding 3).
+        self._previous_exit = previous
         note = crashlog.describe_previous_exit(previous)
         if note:
             self.audit.write("system", summary=note, outcome="failed",
@@ -737,6 +742,10 @@ class Jalen:
         self._answer_reader_model = str(cfg.get_path("safety.answer_reader_model", "") or "")
         self._answer_reader_timeout_s = float(
             cfg.get_path("safety.answer_reader_timeout_s", 2.5))
+        # How long a question waits, said and typed (_confirm_timeout_s,
+        # _undo_window_s): read here once, as config is, rather than on every
+        # question (review of PR #1, finding 15).
+        self._question_windows = self._read_question_windows(cfg)
         # "after the work has been done, it should ask the user, Hey boss,
         # How do you rate my work out of 10". Holds the context of the job
         # being rated, or None. Deliberately NOT reusing _awaiting_reply:
@@ -1172,9 +1181,9 @@ class Jalen:
         given a timeout that covers this (Brain._hook_timeout_s), because the
         SDK cuts a hook off at 60 seconds unless told otherwise.
         """
-        spoken = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
+        spoken, typed = self._windows()["confirm"]
         if getattr(self, "mode", "voice") in ("text", "telegram"):
-            return max(spoken, float(self.cfg.get_path("safety.confirm_timeout_typed_s", 300)))
+            return max(spoken, typed)
         return spoken
 
     def _undo_window_s(self) -> float:
@@ -1185,10 +1194,25 @@ class Jalen:
         existed on paper and nobody could ever use it - the action just ran. The
         same split as _confirm_timeout_s, for the same reason.
         """
-        spoken = float(self.cfg.get_path("safety.undo_window_s", 4))
+        spoken, typed = self._windows()["undo"]
         if getattr(self, "mode", "voice") in ("text", "telegram"):
-            return max(spoken, float(self.cfg.get_path("safety.undo_window_typed_s", 10)))
+            return max(spoken, typed)
         return spoken
+
+    @staticmethod
+    def _read_question_windows(cfg) -> dict:
+        """(said, typed) seconds for a "Confirm?" and for an AMBER "say stop"."""
+        return {
+            "confirm": (float(cfg.get_path("safety.confirm_timeout_s", 20)),
+                        float(cfg.get_path("safety.confirm_timeout_typed_s", 300))),
+            "undo": (float(cfg.get_path("safety.undo_window_s", 4)),
+                     float(cfg.get_path("safety.undo_window_typed_s", 10))),
+        }
+
+    def _windows(self) -> dict:
+        """The windows read in __init__; a Jalen built without it reads its cfg."""
+        windows = getattr(self, "_question_windows", None)
+        return windows if windows is not None else self._read_question_windows(self.cfg)
 
     def _put_the_question(self, question: str, kind: str) -> None:
         """
@@ -1583,6 +1607,21 @@ class Jalen:
         hold_s = getattr(self, "_answer_hold_s", ANSWER_HOLD_S)
         return max([began + hold_s for began in on_its_way if began < closes] + [reasked])
 
+    def _groq_to_borrow(self):
+        """
+        The transcriber's Groq client, whose connection is usually open already
+        (stt.Transcriber._groq_client), or None for the answer reader to make
+        its own. Never raises: a transcriber that is shut down, or has no key,
+        lends nothing.
+        """
+        lend = getattr(getattr(self, "stt", None), "_groq_client", None)
+        if not callable(lend):
+            return None
+        try:
+            return lend()
+        except Exception:  # noqa: BLE001 - the reader makes its own
+            return None
+
     def _read_unclear_answer(self, text: str) -> Optional[bool]:
         """
         His answer to "... Confirm?" that _parse_yes_no could not read, read by
@@ -1600,11 +1639,21 @@ class Jalen:
         low = " " + re.sub(r"[^a-z0-9' ]", " ", (text or "").lower()) + " "
         if any(name in low for name in (" google ", " alexa ", " siri ", " cortana ")):
             return None
+        # A REPLY THAT ASKS SOMETHING IS A QUESTION, unless it also says yes in
+        # so many words. "Yeah so basically what I want is for you to just do
+        # it" is what the model is for; "hmm hang on who is Ali again" is a
+        # question, and the rules' None for it is final - a model shown it
+        # could be argued into a yes (review of PR #1, finding 7).
+        if (any(w in low for w in (" what ", " who ", " why ", " how ", " which ",
+                                   " where ", " when "))
+                and not any(yes in low for yes in _STRONG_YES)):
+            return None
         from . import answer_reader
 
         answer = answer_reader.read(getattr(self, "_confirm_question", ""), text, key=key,
                                     model=model,
-                                    timeout_s=getattr(self, "_answer_reader_timeout_s", 2.5))
+                                    timeout_s=getattr(self, "_answer_reader_timeout_s", 2.5),
+                                    client=self._groq_to_borrow())
         if answer is True and (text or "").rstrip().endswith("?"):
             answer = None
         if answer is not None:
@@ -1637,6 +1686,15 @@ class Jalen:
         say_blocking() is how the first question is asked (see Speaker.say_now).
         """
         again = f"Sorry, I missed that. {getattr(self, '_confirm_question', '')}".strip()
+        # HELD WHILE IT IS BEING ASKED, not only once it has been. A message
+        # question takes seconds to say, and until it ended the window was held
+        # only by the unclear sentence's own ANSWER_HOLD_S - which the answer
+        # reader and the question could outlast: the wait gave up in the middle
+        # of asking, "No answer, so I've cancelled it.", and his yes to the
+        # question went on as a new instruction (review of PR #1, finding 4).
+        # Its length at the measured SPOKEN_CHARS_PER_SECOND, and the window.
+        self._reask_until = (time.monotonic() + self._confirm_timeout_s()
+                             + len(again) / SPOKEN_CHARS_PER_SECOND)
         self.say_blocking(again)
         # As for the first question: stamped after it has been said, so the
         # echo window measures its tail coming back.
@@ -1868,6 +1926,15 @@ class Jalen:
             # "that's wrong" refuses; " wrong " is in no agreement, and
             # "totally" and "right" beside it otherwise approve.
             " wrong ",
+            # Never mind, said other ways. Beside a yes the courtesy above is
+            # taken out, and what was left - "yeah, forget about it", "okay no
+            # problem, I'll send it myself" - approved the action (review of
+            # PR #1, finding 1). "...it myself": he will do it, so Jalen must
+            # not - and never a bare " myself ", which "send a copy to myself"
+            # also says.
+            " forget about it ", " forget about that ", " forget that ",
+            " it myself ", " that myself ", " them myself ", " i'll handle it ",
+            " ill handle it ", " i'll take care of it ", " ill take care of it ",
         ):
             if phrase in low:
                 return False
@@ -2001,8 +2068,12 @@ class Jalen:
         reply = self._take_as_answer(text, heard=False)
         if not reply:
             governor = _governor_of(self)
-            if governor is not None:
-                governor.new_instruction()      # typed by him: a new request, like process()
+            # Typed by him: a new request, like process() - and, like it, only
+            # when nothing else is working. The reset gave a turn still running
+            # forty more actions and asked again the limits he had refused it
+            # (review of PR #1, finding 11).
+            if governor is not None and not self._any_turn_in_flight():
+                governor.new_instruction()
             try:
                 reply = self._run_coro(self.handle_with_brain(text))
             except Exception as exc:  # noqa: BLE001
@@ -2036,6 +2107,21 @@ class Jalen:
             # actually waited for.
             if not timer.tts_source:
                 timer.tts_source = getattr(self.speaker, "last_source", "") or ""
+
+    # How long after a sentence with his name in it the wake word is still not
+    # trusted over Jalen's voice: the wake model fires at the end of the name,
+    # about 0.77 s into "Hey Jalen" (measured, see the wake branch in run), and
+    # the room carries the speakers a moment after they stop. NOT MEASURED
+    # beyond that.
+    OWN_NAME_TAIL_S = 1.5
+
+    def _saying_its_own_name(self) -> bool:
+        """Is what has been on air in the last OWN_NAME_TAIL_S carrying his name?"""
+        spoken_since = getattr(self.speaker, "spoken_since", None)
+        if not callable(spoken_since):
+            return False
+        on_air = spoken_since(time.monotonic() - self.OWN_NAME_TAIL_S)
+        return isinstance(on_air, str) and says_the_name(on_air)
 
     def _await_playback(self, grace_s: float = 0.5, limit_s: float = 180.0) -> None:
         """
@@ -2314,6 +2400,15 @@ class Jalen:
             self.audit.action(verdict, "blocked")
             return f"I won't do that — {verdict.reason}."
 
+        # A post that will not go is refused before he is asked about it, as in
+        # the brain's hook (messaging.refused_before_asking).
+        from .tools import messaging
+
+        not_going = messaging.refused_before_asking(tool, intent.args)
+        if not_going:
+            self.audit.action(verdict, "cancelled", f"format: {not_going[:160]}")
+            return not_going
+
         # HOW MANY, and lockdown (jalen/limits.py). After the kind-of-thing
         # gate above and before its question: an action past a limit asks him
         # about the limit first, and a refused one never reaches the RED
@@ -2533,7 +2628,9 @@ class Jalen:
             problems.append(self._brain_down_sentence(
                 down, getattr(self, "_brain_down_detail", ""), first=True))
         mic = getattr(self, "mic", None)
-        if getattr(mic, "_told_it_is_down", False):
+        # Reopened and not one frame yet is not working either: it may be the
+        # device that opens and stays silent (Microphone._back).
+        if getattr(mic, "_told_it_is_down", False) or getattr(mic, "recovering", False) is True:
             problems.append("My microphone isn't delivering any sound, so I may not hear "
                             "you. Check that it's plugged in.")
         elif getattr(mic, "reopened", 0):
@@ -2562,11 +2659,10 @@ class Jalen:
                             "or say \"Jalen, unmute\".")
         if getattr(self, "paused", False):
             problems.append("I'm paused. Say \"Hey Jalen\" to bring me back.")
-        try:
-            record = crashlog.previous_exit()
-        except Exception:  # noqa: BLE001 - a missing record is not a problem to report
-            record = None
-        if record and record.get("state") == "running":
+        # How the LAST run ended, as it was read at startup - never the file
+        # now, which holds this run's own "running".
+        record = getattr(self, "_previous_exit", None)
+        if isinstance(record, dict) and record.get("state") == "running":
             problems.append("My last run ended without shutting down properly. python run.py "
                             "--why shows what was recorded.")
         try:
@@ -3116,12 +3212,43 @@ class Jalen:
             if heard and self._echoes_the_announcement(text):
                 return "(my own voice - ignored)"
             answer = self._parse_yes_no(text)
-            if answer is not None:
+            if answer is not None and self._answers_the_stop_window(text, answer):
                 self.audit.utterance(text, who="user")
                 self._answer_q.put(answer)      # False stops it; True lets it go now
                 return "Got it."
 
         return ""
+
+    # How a refusal of an announced action begins. Padded like the sentence.
+    _STOP_OPENERS = (" no ", " nope ", " nah ", " don't ", " dont ", " do not ", " not ",
+                     " never ", " wait ", " hold ", " hang ", " stop ", " cancel ",
+                     " abort ", " i'd rather ", " id rather ", " i would rather ")
+
+    @staticmethod
+    def _answers_the_stop_window(text: str, answer: bool) -> bool:
+        """
+        Is this sentence his answer to "... Say stop if you don't want that"?
+
+        Not every sentence with a yes or no word in it. Any sentence used to be,
+        so "remind me tomorrow to call mom" typed in the window (" tomorrow "
+        reads as a no) stopped the pin and was never acted on, and "open the
+        right folder too" (" right " reads as a yes) let it go and was lost
+        (review of PR #1, finding 8). A refusal is the answer when it is
+        nothing but an answer or begins as a refusal does ("no, the other
+        chat", "wait"); agreement only when it is nothing but agreement ("yes",
+        "go ahead"). Anything else is a new instruction, as it always was.
+        """
+        flat = (text or "").lower()
+        for curly in ("’", "ʼ", "‘", "`"):
+            flat = flat.replace(curly, "'")
+        words = re.findall(r"[a-z']+", flat)
+        if not words:
+            return False
+        if all(word in _DECISION_WORDS for word in words):
+            return True
+        padded = " " + " ".join(words) + " "
+        return answer is False and any(padded.startswith(opener)
+                                       for opener in Jalen._STOP_OPENERS)
 
     def process(self, text: str, *, from_him: bool = True, door: str = "",
                 sound_began_at: float | None = None) -> None:
@@ -3468,6 +3595,7 @@ class Jalen:
         #   "follow_up"  a sound inside the 12 seconds after a reply
         #   "answer"     a sound while a question of Jalen's is open
         #   "barge"      a sound over his own speech
+        #   "wake-over-voice"  the wake word heard over his own speech
         # Set at EVERY place `listening` becomes True - a window opened
         # without saying why would inherit the previous one's, and a barge-in
         # on a cough would walk in on the follow-up window's exemption.
@@ -3502,6 +3630,9 @@ class Jalen:
         # goes quiet and speaks again with no session change, and the orb
         # said "speaking" through every minute of tools in between.
         was_on_air = False
+        # A wake word ignored over Jalen saying his own name is written down
+        # once per stretch of speech, not once per frame it fired on.
+        own_name_noted = False
 
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
         if not standby:
@@ -3747,6 +3878,7 @@ class Jalen:
                     # Playback is over, so the latch below re-arms for the
                     # next reply.
                     barge_fired = False
+                    own_name_noted = False
 
                 # ONLY "HEY JALEN" INTERRUPTS HIM (conversation.barge_in:
                 # wake_word). His words, 2026-10-23: "while it is working it
@@ -3760,6 +3892,21 @@ class Jalen:
                 if barge_on_the_wake_word and on_air:
                     if not self.wake.feed(frame) or barge_fired:
                         continue
+                    # HIS NAME IN JALEN'S OWN MOUTH. Playback reaches the wake
+                    # model in this mode, and a sentence of Jalen's with the
+                    # name in it - "until you say "Jalen, end the lockdown"",
+                    # a message that opens "Hey Jalen" - can fire it: he cut
+                    # himself off, and the window that opened was counted as
+                    # him (review of PR #1, finding 5). Not trusted while that
+                    # is on air; Ctrl+Alt+J still stops him.
+                    if self._saying_its_own_name():
+                        if not own_name_noted:
+                            own_name_noted = True
+                            self.audit.write(
+                                "system",
+                                summary="the wake word fired while I was saying my own name - "
+                                        "not taken as him")
+                        continue
                     barge_fired = True
                     self.audit.write(
                         "system",
@@ -3770,9 +3917,11 @@ class Jalen:
                     listening = True
                     # The wake word: he called, so this window is his - unlike
                     # the sound-triggered barge-in below, which vouches for
-                    # nothing.
+                    # nothing. But it was heard OVER HIS OWN VOICE, so the
+                    # address gate checks what it hears against that voice
+                    # before it is taken: the model may have heard the speakers.
                     wake_initiated = True
-                    opened_by = "wake"
+                    opened_by = "wake-over-voice"
                     vouched_by = None
                     sound_began_at = time.monotonic()
                     self.orb.set_state("listening")
@@ -4299,6 +4448,13 @@ class Jalen:
         trip the window open again.
         """
         if wake_initiated:
+            # THE WAKE WORD HEARD OVER HIS OWN VOICE: the model may have heard
+            # the speakers, so the window is his only if what it heard is not
+            # that voice coming back (review of PR #1, finding 5). Under three
+            # words nothing is echo, so "stop" and "yes" are always his.
+            if opened_by == "wake-over-voice" and self._sounds_like_its_own_voice(
+                    text, began_at=began_at):
+                return False
             return True
         # THE QUESTION'S OWN ENDING is not the answer to it. process() asks
         # this too, but only with the clock of the moment it is asked; here
@@ -4620,6 +4776,19 @@ class Jalen:
                                        kind="bare-wake")
         finally:
             self._refresh_orb()
+
+    def _any_turn_in_flight(self) -> bool:
+        """
+        Is ANY turn working - one the microphone started (_active_turns), or one
+        from another door holding the brain? For a door whose own turn is not
+        in _active_turns: the chat panel.
+        """
+        lock = getattr(self, "_turn_lock", None)
+        if lock is not None:
+            with lock:
+                if getattr(self, "_active_turns", None):
+                    return True
+        return self._brain_is_busy()
 
     def _another_turn_in_flight(self) -> bool:
         """

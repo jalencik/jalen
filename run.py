@@ -73,6 +73,19 @@ def main() -> int:
     # voice one (Jalen._wait_in_standby): the kill key ends a standby instance
     # for good, and replaces a voice one with a fresh standby (scripts/hotkeys.py).
     already = runtime.acquire("standby" if (args.standby and mode == "voice") else mode)
+    # A STANDBY JALEN IS NOT IN THE WAY: it is what the kill key leaves behind
+    # (scripts/hotkeys.py), loaded, with the microphone closed. While it waited,
+    # every other way of starting Jalen refused - "Jalen is already running
+    # (mode standby)" - and none of them woke it (review of PR #1, finding 10).
+    # A plain start wakes it, as Ctrl+Alt+J does; text and Telegram mode end it
+    # and take its place.
+    if already is not None and already.mode == "standby" and not args.standby:
+        if mode == "voice":
+            runtime.send_signal("wake")
+            print("Jalen was waiting in standby - it is listening now.")
+            return 0
+        print(runtime.stop_running_instance())
+        already = runtime.acquire(mode)
     if already is not None:
         print(f"Jalen is already running (pid {already.pid}, mode {already.mode}).")
         print("  stop it:     python run.py --stop")

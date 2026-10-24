@@ -197,10 +197,17 @@ def test_the_kill_key_never_starts_a_voice_jalen_in_place_of_something_else(hotk
 
 def test_the_standby_after_the_kill_key_can_be_turned_off(hotkeys, monkeypatch):
     running(hotkeys, monkeypatch, "voice")
-    monkeypatch.setattr(hotkeys.CONFIG, "get_path",
-                        lambda key, default=None: False if key == "startup.standby_after_kill" else default)
+    monkeypatch.setattr(hotkeys, "STANDBY_AFTER_KILL", False)
     hotkeys.on_kill()
     assert hotkeys.launched == []
+
+
+def test_whether_it_waits_in_standby_is_read_once_when_the_listener_starts():
+    """Config is read at startup, not on every press (review of PR #1, finding 15)."""
+    source = (ROOT / "scripts" / "hotkeys.py").read_text(encoding="utf-8")
+    assert 'STANDBY_AFTER_KILL = bool(CONFIG.get_path("startup.standby_after_kill", True))' in source
+    on_kill = source[source.index("def on_kill"):source.index("def _claim_single_instance")]
+    assert "CONFIG.get_path" not in on_kill
 
 
 def test_the_kill_key_gives_a_shorter_grace_than_the_command_line_stop(hotkeys):

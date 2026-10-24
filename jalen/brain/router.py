@@ -164,6 +164,22 @@ def addressed_to_jalen(text: str) -> bool:
     return bool(_ADDRESSED.match(text or ""))
 
 
+_SAYS_THE_NAME = None
+
+
+def says_the_name(text: str) -> bool:
+    """
+    Is his name - Jalen or Jarvis, in any pronunciation _NAME covers -
+    anywhere in `text`? Asked of what JALEN is saying: while that is on air,
+    the wake model hearing the name may be hearing the speakers (app.py, the
+    wake word over his own voice).
+    """
+    global _SAYS_THE_NAME
+    if _SAYS_THE_NAME is None:
+        _SAYS_THE_NAME = re.compile(r"(?<![\w])" + _NAME + r"(?![\w])", re.I)
+    return bool(_SAYS_THE_NAME.search(text or ""))
+
+
 # ----------------------------------------------------------------------------
 # THREE MORE WAYS A SENTENCE IS PLAINLY FOR HIM, and the gate refused all of
 # them - which, from his chair, is Jalen pretending to be deaf.

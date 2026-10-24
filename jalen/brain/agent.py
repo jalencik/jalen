@@ -1147,6 +1147,23 @@ class Brain:
                     }
                 }
 
+            # A POST THAT WILL NOT GO IS REFUSED BEFORE HE IS ASKED ABOUT IT:
+            # off his channel's format, the tool sends nothing, and it used to
+            # say so only after he had been asked and the limit counted it
+            # (messaging.refused_before_asking). The router path does the same.
+            from ..tools import messaging
+
+            not_going = messaging.refused_before_asking(tool, args)
+            if not_going:
+                self.audit.action(verdict, "cancelled", f"format: {not_going[:160]}")
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": not_going,
+                    }
+                }
+
             # HOW MANY, and lockdown (jalen/limits.py): the same governor, on
             # the same engine, that the router path asks in app.handle_local.
             # After the kind-of-thing gate and before its question, so an

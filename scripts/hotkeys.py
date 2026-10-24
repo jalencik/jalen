@@ -184,6 +184,11 @@ def on_wake() -> None:
 # after this is stuck. NOT MEASURED on his machine.
 KILL_GRACE_S = 4.0
 
+# Whether the kill key leaves a warm Jalen waiting in standby. Read once, when
+# this listener starts, as config is - not on every press (review of PR #1,
+# finding 15).
+STANDBY_AFTER_KILL = bool(CONFIG.get_path("startup.standby_after_kill", True))
+
 
 def on_kill() -> None:
     """
@@ -202,7 +207,7 @@ def on_kill() -> None:
     info = runtime.running_instance()
     log("kill pressed — " + runtime.stop_running_instance(timeout=KILL_GRACE_S))
     if (info is not None and info.mode == "voice"
-            and CONFIG.get_path("startup.standby_after_kill", True)):
+            and STANDBY_AFTER_KILL):
         launch_jalen(standby=True)
 
 

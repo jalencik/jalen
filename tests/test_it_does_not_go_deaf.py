@@ -86,21 +86,50 @@ def gone_quiet(m, seconds=STALL_WARN_S + 1):
     m._last_reopen_at = 0.0
 
 
+def a_frame_arrives(m):
+    """The device delivers: one frame through the real frames() loop."""
+    import numpy as np
+
+    m._q.put(np.zeros(m.blocksize, dtype=np.float32))
+    return next(m.frames(timeout=0.01))
+
+
 def test_a_healthy_stream_is_left_alone(microphone):
     m = microphone()
     m._reopen_if_stalled()
     assert m.sd.opened == ["USB headset"] and m.reopened == 0 and m.told == []
 
 
-def test_a_stream_that_went_quiet_is_reopened_and_he_is_told(microphone):
+def test_a_stream_that_went_quiet_is_reopened_and_he_is_told_when_it_delivers(microphone):
     m = microphone()
     gone_quiet(m)
     m._reopen_if_stalled()
     assert m.sd.closed == ["USB headset"]
     assert m.sd.opened == ["USB headset", "USB headset"]
-    assert m.reopened == 1
-    assert m.told == ["My microphone dropped out for a moment. It's back now."]
     assert time.monotonic() - m.last_callback_at < 1.0, "the stall clock did not restart"
+    assert m.told == [] and m.reopened == 0, "it said it was back before a single frame arrived"
+    assert m.recovering
+    a_frame_arrives(m)
+    assert m.told == ["My microphone dropped out for a moment. It's back now."]
+    assert m.reopened == 1 and not m.recovering
+
+
+def test_a_device_that_opens_and_stays_silent_is_never_called_back(microphone):
+    """
+    Review of PR #1, finding 6: "It's back now" was said every time the stream
+    OPENED - every ten seconds, forced through mute - while it delivered
+    nothing, and it was never marked down.
+    """
+    m = microphone()
+    for _ in range(6):                      # a minute of a device that opens and stays silent
+        gone_quiet(m)
+        m._reopen_if_stalled()
+    assert m.told == ["My microphone has stopped working, so I can't hear you. "
+                      "Check that it's plugged in. I'll keep trying."]
+    assert m._told_it_is_down and m.reopened == 0
+    a_frame_arrives(m)
+    assert m.told[-1] == "My microphone is working again. I can hear you."
+    assert not m._told_it_is_down and m.reopened == 1
 
 
 def test_an_unplugged_device_falls_back_to_the_default_one(microphone):
@@ -124,6 +153,8 @@ def test_when_nothing_opens_he_is_told_once_and_it_keeps_trying(microphone):
     m.sd.refuses.clear()
     gone_quiet(m)
     m._reopen_if_stalled()
+    assert len(m.told) == 1, "it said it was working again before it delivered"
+    a_frame_arrives(m)
     assert m.told[-1] == "My microphone is working again. I can hear you."
 
 
@@ -133,7 +164,7 @@ def test_it_does_not_reopen_more_often_than_every_ten_seconds(microphone):
     m._reopen_if_stalled()
     m.last_callback_at = time.monotonic() - STALL_WARN_S - 1       # still quiet
     m._reopen_if_stalled()                                          # but just tried
-    assert m.reopened == 1
+    assert m.sd.opened == ["USB headset", "USB headset"], "reopened again within ten seconds"
     assert RETRY_EVERY_S >= STALL_WARN_S
 
 
@@ -154,6 +185,7 @@ def test_a_failure_to_tell_him_never_takes_the_microphone_down(microphone):
     m.notify = broken
     gone_quiet(m)
     m._reopen_if_stalled()
+    a_frame_arrives(m)
     assert m.reopened == 1
 
 
@@ -192,14 +224,9 @@ def healthy():
     j.stt = SimpleNamespace(last_engine="groq", primary="groq")
     j.muted = j.paused = False
     j.safety = SimpleNamespace(governor=SimpleNamespace(locked=False, usage=lambda: []))
+    # How the last run ended, as Jalen.__init__ read it before claiming the file.
+    j._previous_exit = {"state": "stopped"}
     return j
-
-
-@pytest.fixture(autouse=True)
-def no_crash_record(monkeypatch):
-    from jalen import app as app_module
-
-    monkeypatch.setattr(app_module.crashlog, "previous_exit", lambda: {"state": "stopped"})
 
 
 def test_when_nothing_is_wrong_it_says_so():
@@ -220,6 +247,12 @@ def test_a_dead_microphone_and_the_offline_recogniser_are_both_said():
     said = j.what_is_wrong()
     assert said.startswith("2 things are wrong.")
     assert "microphone isn't delivering" in said and "offline model (moonshine)" in said
+
+
+def test_a_microphone_reopened_but_not_yet_heard_from_is_not_working():
+    j = healthy()
+    j.mic.recovering = True
+    assert "microphone isn't delivering" in j.what_is_wrong()
 
 
 def test_a_microphone_that_came_back_is_reported_as_history_not_as_broken():
@@ -245,11 +278,40 @@ def test_muted_and_paused_are_said_with_how_to_undo_them():
     assert "Ctrl+Alt+J" in said and "Hey Jalen" in said
 
 
-def test_a_run_that_crashed_last_time_is_said(monkeypatch):
-    from jalen import app as app_module
+def test_a_run_that_crashed_last_time_is_said():
+    j = healthy()
+    j._previous_exit = {"state": "running"}
+    assert "run.py --why" in j.what_is_wrong()
 
-    monkeypatch.setattr(app_module.crashlog, "previous_exit", lambda: {"state": "running"})
-    assert "run.py --why" in healthy().what_is_wrong()
+
+def test_this_run_is_never_taken_for_a_crashed_last_one(monkeypatch, tmp_path):
+    """
+    The real record, in the real order: the last run stopped cleanly, this run
+    read that and then claimed the file as "running". The file is read at
+    startup and not again - read again, it said this run had crashed, every
+    time he asked (review of PR #1, finding 3; the fixture used to hide it by
+    faking previous_exit).
+    """
+    from jalen import crashlog
+
+    monkeypatch.setattr(crashlog, "EXIT_STATE", tmp_path / "exit_state.json")
+    crashlog.mark_running("last-run", "voice")
+    crashlog.note_exit("quit-requested")
+    j = healthy()
+    j._previous_exit = crashlog.previous_exit()          # what __init__ reads first
+    crashlog.mark_running("this-run", "voice")            # and then claims
+    assert crashlog.previous_exit()["state"] == "running"
+    assert j.what_is_wrong().startswith("Nothing looks wrong"), j.what_is_wrong()
+
+
+def test_the_startup_record_is_kept_before_the_file_is_claimed():
+    import inspect
+
+    from jalen.app import Jalen
+
+    source = inspect.getsource(Jalen.__init__)
+    assert source.index("self._previous_exit = previous") < source.index("crashlog.mark_running(")
+    assert "crashlog.previous_exit()" not in inspect.getsource(Jalen.what_is_wrong)
 
 
 def test_it_is_answered_by_the_router_without_the_brain():
