@@ -81,6 +81,13 @@ After installing hotkeys, **Ctrl+Alt+J** wakes Jalen and **Ctrl+Alt+K** stops it
 
 **While Jalen is talking, only "Hey Jalen" interrupts it.** The TV, someone else talking or a cough no longer cuts it off mid-sentence; Ctrl+Alt+J and Ctrl+Alt+K still do. This is `conversation.barge_in: wake_word`. Set it to `true` for the old behaviour, where any voice interrupts, or `false` for nothing.
 
+**It keeps listening while a long task works.** "Talking" means sound is actually coming out of the speakers. A task that has been silent for four seconds, because it is busy with its tools, is working, not talking. While it works:
+- "Hey Jalen" or Ctrl+Alt+J opens the microphone without throwing away the answer that is still to come.
+- Your "yes" to its "Confirm?" is heard.
+- "What's up", "are you there", "are you done" and anything else Jalen answers without Claude get their answer at once, spoken between the long task's sentences.
+- A second question for Claude hears "Got it - that's next, as soon as I finish what I'm on." and is answered when the first one is done.
+- If you stop "Give me a second." or "Still working on it.", the answer still comes. If you say "stop", it doesn't.
+
 **Ask "what's wrong with you?"** (or "why can't you hear me?", "why aren't you working?") and Jalen says in plain words what is broken right now and what to do about it: an expired Claude sign-in, a microphone that went quiet, speech recognition stuck on the slow offline model, a lockdown, a limit you've hit, mute or pause, or a run that crashed. It answers even when the brain is down. "Diagnose yourself" still runs the full install check.
 
 **The microphone reopens itself.** If it stops delivering sound (unplugged headset, driver reset, another app taking it), Jalen reopens it after ten seconds, trying the default device if yours is gone, and tells you whether it's back or still dead.

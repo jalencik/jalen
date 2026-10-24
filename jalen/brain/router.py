@@ -1216,8 +1216,27 @@ def _rules() -> list[Rule]:
            r"|^how (?:far|much longer|is it going)(?: are you)?\??$"
            r"|^(?:are you|you) still (?:working|going|on it)\??$"
            r"|^(?:any )?progress\??$|^status\??$"
-           r"|^(?:what.?s|what is) (?:happening|going on)\??$", re.I),
+           r"|^(?:what.?s|what is) (?:happening|going on)\??$"
+           # "It is even taking 10 seconds" (2026-10-24): every one of these
+           # went to the brain - which, while a long task holds it, waits.
+           r"|^(?:are you|you) (?:done|finished|ready)(?: yet)?\??$"
+           r"|^is it (?:done|finished|ready)(?: yet)?\??$"
+           r"|^how long (?:will|is) it (?:going to )?take\??$", re.I),
          "what_are_you_doing", lambda m: {}, None),
+        # SMALL TALK, ANSWERED HERE. "What's up" went to the brain - a model
+        # round trip for two words, and while a long task held the brain it
+        # waited behind it in silence, which is how "it takes 10 seconds to
+        # answer what's up" and "it goes deaf after my prompt" sounded
+        # (2026-10-24). Answered locally, and when something is running the
+        # answer says so (Jalen._small_talk).
+        # "hear me" too: the politeness stripper has taken "can you" off
+        # "can you hear me" before any rule sees it.
+        (R(r"^(?:are you (?:there|listening|awake|with me|alive)"
+           r"|(?:you|u) (?:there|listening|awake)|(?:can you )?hear me)\??$", re.I),
+         "small_talk", lambda m: {"kind": "here"}, None),
+        (R(r"^(?:what'?s up|whats up|wassup|wazzup|sup|yo|how are you|how are things"
+           r"|how have you been|how'?s everything|how'?s life)\??$", re.I),
+         "small_talk", lambda m: {"kind": "chat"}, None),
         (R(r"^cancel (?:that|it|the task|this)$"
            r"|^stop (?:that|the task|what (?:you.?re|you are) doing)$"
            r"|^forget (?:that|this) task$", re.I),
@@ -2083,10 +2102,37 @@ class IntentRouter:
                 break
         return text.strip()
 
+    def would_route(self, text: str) -> bool:
+        """
+        Would route() answer this here, without the brain? Asked by the
+        microphone loop before it turns a sentence away for being busy, so it
+        counts nothing and logs no miss: route() does both when asked for real.
+        """
+        if not self.enabled or not text:
+            return False
+        return self._match(text)[0] is not None
+
     def route(self, text: str) -> Intent | None:
         """Return an Intent if this is a known command, else None -> send to Claude."""
         if not self.enabled or not text:
             return None
+        intent, norm = self._match(text)
+        if intent is not None:
+            self.hits += 1
+            return intent
+
+        self.misses += 1
+        if self.log_misses:
+            try:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                with open(self._miss_log, "a", encoding="utf-8") as fh:
+                    fh.write(norm + "\n")
+            except OSError:
+                pass
+        return None
+
+    def _match(self, text: str) -> tuple[Intent | None, str]:
+        """The first rule that takes `text`, and the normalised text - nothing counted."""
         norm = self._normalise(text)
         # Matched on the lowercased form (every alternation list in _rules is
         # written lowercase), but ARGUMENTS come from the cased form. A
@@ -2121,18 +2167,8 @@ class IntentRouter:
             ):
                 continue
 
-            self.hits += 1
-            return Intent(tool=tool, args=args, reply=reply)
-
-        self.misses += 1
-        if self.log_misses:
-            try:
-                DATA_DIR.mkdir(parents=True, exist_ok=True)
-                with open(self._miss_log, "a", encoding="utf-8") as fh:
-                    fh.write(norm + "\n")
-            except OSError:
-                pass
-        return None
+            return Intent(tool=tool, args=args, reply=reply), norm
+        return None, norm
 
     @property
     def hit_rate(self) -> float:

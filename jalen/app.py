@@ -64,6 +64,20 @@ def _governor_of(app):
     return getattr(getattr(app, "safety", None), "governor", None)
 
 
+def _on_air(speaker) -> bool:
+    """
+    Is Jalen's voice in the room (Speaker.on_air) - not merely a speaking
+    session open, which for a brain reply's stream is the whole turn. A
+    speaker without the notion - every test double built before it - answers
+    with `speaking`. A function for the reason _governor_of is one: tests
+    borrow methods such as Jalen._await_playback onto bare objects.
+    """
+    on_air = getattr(speaker, "on_air", None)
+    if on_air is None:
+        return bool(getattr(speaker, "speaking", False))
+    return bool(on_air)
+
+
 # Queued mic audio older than this predates the wake word, so it can't be part
 # of the command and is dropped. Anything under it is the tail of the phrase
 # still being spoken and must be kept — see the wake handler in run().
@@ -2046,12 +2060,15 @@ class Jalen:
         set. The second is the real wait, bounded so a wedged audio device
         can never hang a dispatch thread forever.
         """
+        # On air, not a session open: a turn that answered while another
+        # turn's reply stream was open waited for that whole turn - minutes
+        # holding its slot - though its own line was over in a second.
         deadline = time.monotonic() + grace_s
-        while not self.speaker.speaking and time.monotonic() < deadline:
+        while not _on_air(self.speaker) and time.monotonic() < deadline:
             time.sleep(0.01)
 
         deadline = time.monotonic() + limit_s
-        while self.speaker.speaking and time.monotonic() < deadline:
+        while _on_air(self.speaker) and time.monotonic() < deadline:
             time.sleep(0.02)
 
     def _finish_timing(self, timer: TurnTimer | None) -> None:
@@ -2098,8 +2115,10 @@ class Jalen:
         if signal == "toggle":
             # Speaking? The press means "stop talking" — the same thing
             # barge-in does, for someone who would rather hit a key than
-            # talk over it.
-            if self.speaker.speaking:
+            # talk over it. ON AIR, not a reply's stream open: pressed while a
+            # long task works in silence, it stopped nothing audible, threw
+            # away the answer still to come, and opened no microphone.
+            if _on_air(self.speaker):
                 self.speaker.stop()
                 return False
             if self.muted or self.paused:
@@ -2262,6 +2281,8 @@ class Jalen:
             return "The log is on screen."
         if tool in ("cancel", "acknowledge"):
             return intent.reply
+        if tool == "small_talk":
+            return self._small_talk(intent.args.get("kind", "chat"))
         if tool == "greet":
             hour = time.localtime().tm_hour
             part = "Morning" if hour < 12 else "Afternoon" if hour < 18 else "Evening"
@@ -2367,6 +2388,64 @@ class Jalen:
         except Exception as exc:
             self.audit.action(verdict, "failed", str(exc))
             return f"That didn't work: {exc}"
+
+    # ----------------------------------------------------- small talk, at once
+    def _answered_without_the_brain(self, text: str) -> bool:
+        """
+        Would the router answer this itself (IntentRouter.would_route)? Such a
+        sentence takes no brain and a moment, so it is never turned away for
+        the turns already in flight. Asked only when a sentence would be: it
+        is a pass over every rule.
+        """
+        router = getattr(self, "router", None)
+        would_route = getattr(router, "would_route", None)
+        if not callable(would_route):
+            return False
+        try:
+            return bool(would_route(text))
+        except Exception as exc:  # noqa: BLE001 - a rule must never cost him the sentence
+            self.audit.error("router.would_route", exc)
+            return False
+
+    # A task this many seconds old is "something running"; the turn asking is
+    # younger than that by the time it is answered - its task is started at
+    # dispatch, and the router answers small talk a few milliseconds later.
+    # NOT MEASURED beyond that: it only has to be longer than that gap.
+    _RUNNING_FOR_S = 2.0
+
+    @classmethod
+    def _longest_running_task(cls):
+        """The oldest live task besides the one just begun, or None."""
+        now = time.time()
+        running = [t for t in conversation.live_tasks()
+                   if now - t.created_at >= cls._RUNNING_FOR_S]
+        return min(running, key=lambda t: t.created_at) if running else None
+
+    @staticmethod
+    def _ago(task) -> str:
+        seconds = max(0, int(time.time() - task.created_at))
+        if seconds < 60:
+            return "a moment ago"
+        if seconds < 120:
+            return "a minute ago"
+        return f"{seconds // 60} minutes ago"
+
+    def _small_talk(self, kind: str) -> str:
+        """
+        "What's up", "are you there": answered here, at once. They went to the
+        brain, and while a long task held it they waited behind it in silence
+        - "taking 10 seconds to respond to what's up", "becoming deaf even
+        after getting my prompt" (2026-10-24). When something is running the
+        answer says so, which is the question behind most of them.
+        """
+        task = self._longest_running_task()
+        who = f", {self.address}" if self.address else ""
+        if task is not None:
+            return (f"I'm here{who}. Still working on what you asked {self._ago(task)} - "
+                    "I'll tell you when it's done.")
+        if kind == "here":
+            return f"I'm here{who}."
+        return f"All good{who}. What do you need?"
 
     async def _start_brain(self) -> None:
         """Construct and connect the Claude client. Idempotent, and guarded
@@ -2667,6 +2746,18 @@ class Jalen:
             self.audit.write("system", summary="brain signed out at startup")
             self.say(self._brain_down_sentence("authentication_failed", "", first=True))
 
+    # Said at once to a sentence that has to wait for the brain because
+    # another turn has it (speak_brain_reply). Pre-rendered (_COMMON_PHRASES).
+    TAKEN_FOR_LATER = "Got it - that's next, as soon as I finish what I'm on."
+
+    def _brain_is_busy(self) -> bool:
+        """Another turn holds the brain, so a turn asked now waits (Brain.busy)."""
+        busy = getattr(getattr(self, "brain", None), "busy", None)
+        try:
+            return bool(callable(busy) and busy())
+        except Exception:  # noqa: BLE001 - only decides whether to say a line
+            return False
+
     # WHAT HE HEARS WHILE A LONG TURN WORKS IN SILENCE, and after how many
     # seconds of it. Measured in data/audit.jsonl (Brain.ask): a brain turn
     # takes 3.0 s at the median, 8.0 s at p75 and 23.0 s at p90, so a first
@@ -2689,10 +2780,14 @@ class Jalen:
         """
         heard_chars, quiet_since, said = state["chars"], time.monotonic(), 0
         while said < len(self.STILL_WORKING) and not done.wait(look_every_s):
+            # ON AIR, not `speaking`: this turn's own stream holds `speaking`
+            # from its first moment to its last, so every line here waited for
+            # a silence that, by that measure, never came.
             busy = (getattr(self, "_awaiting_confirmation", False)
                     or getattr(self, "_awaiting_stop", False)
                     or getattr(self, "_awaiting_reply", False)
-                    or getattr(self.speaker, "speaking", False))
+                    or _on_air(self.speaker)
+                    or not state.get("live", lambda: True)())
             if state["chars"] != heard_chars or busy:
                 heard_chars, quiet_since = state["chars"], time.monotonic()
                 continue
@@ -2720,6 +2815,16 @@ class Jalen:
             self.say(self._run_coro(self.handle_with_brain(user_text)))
             return
 
+        # ANOTHER TURN HAS THE BRAIN, so this one waits for it (Brain.ask
+        # takes one turn at a time) - and he heard nothing until the first
+        # was over: the dead air of "it becomes deaf after my prompt"
+        # (2026-10-24). He hears at once that it was taken and is next: said
+        # through the stream that is speaking now (Speaker.say), not queued
+        # behind it.
+        queued = self._brain_is_busy()
+        if queued:
+            self.say(self.TAKEN_FOR_LATER)
+        began = time.monotonic()
         stream = self.speaker.open_stream()
         # A new reply starts with nothing handed over. A turn that failed
         # half way never reaches _note_said, which is what clears this.
@@ -2728,7 +2833,15 @@ class Jalen:
         # cap is a default about length, not a rule about what he may hear.
         read_it_all = wants_it_all(user_text)
         max_spoken = float("inf") if read_it_all else self.speaker.max_spoken
-        state = {"chars": 0, "overflowed": False, "warned": False}
+        # `stream` is replaced when he stopped the "Give me a second." or a
+        # STILL_WORKING line before the answer had begun (see push); `live`
+        # is whether it is the stream that can speak now - a queued turn's
+        # is not, and its company lines would be heard after the other
+        # turn's answer, about nothing.
+        state = {"chars": 0, "overflowed": False, "warned": False,
+                 "stream": stream, "answering": False}
+        # `getattr`: a stream double built before `live` is always the one speaking.
+        state["live"] = lambda: getattr(state["stream"], "live", True)
 
         # SAY HOW LONG IT IS, ONCE, when he asked for the whole thing.
         #
@@ -2753,8 +2866,20 @@ class Jalen:
         # over: the address gate compares what the microphone hears against
         # it, and the reply is not filed as `_last_reply_text` until it has
         # finished playing. See _note_voice.
-        def push(piece: str) -> None:
-            stream.push(piece)
+        def push(piece: str, *, answer: bool = False) -> None:
+            current = state["stream"]
+            # HE STOPPED A LINE THAT WAS NOT THE ANSWER. "Hey Jalen" over the
+            # "Give me a second." or a STILL_WORKING line stops the stream,
+            # and the answer arriving a minute later went into a stream that
+            # could no longer speak: lost, after "I'll tell you when it's
+            # done". So the answer gets a stream of its own - unless he said
+            # stop (a kill phrase), which is a stop to all of it, as before.
+            if (answer and getattr(current, "finished", False) and not state["answering"]
+                    and getattr(self, "_killed_at", 0.0) < began):
+                current = state["stream"] = self.speaker.open_stream()
+            if answer:
+                state["answering"] = True
+            current.push(piece)
             self._note_voice(piece)
 
         def maybe_warn_about_length(so_far: int) -> None:
@@ -2765,7 +2890,7 @@ class Jalen:
                 return
             state["warned"] = True
             push(f" This runs to about {round(seconds / 60)} minutes — "
-                 f"say stop whenever you've heard enough. ")
+                 f"say stop whenever you've heard enough. ", answer=True)
 
         def on_text(chunk: str) -> None:
             # Spec B15 still applies: long answers are summarised aloud and
@@ -2788,7 +2913,7 @@ class Jalen:
             room = max_spoken - state["chars"]
             state["chars"] += len(chunk)
             if state["chars"] <= max_spoken:
-                push(chunk)
+                push(chunk, answer=True)
                 maybe_warn_about_length(state["chars"])
                 return
 
@@ -2798,8 +2923,8 @@ class Jalen:
             if cut > 0:
                 head = head[: cut + 1]
             if head.strip():
-                push(head)
-            push(" That's the short version, the full text is on screen.")
+                push(head, answer=True)
+            push(" That's the short version, the full text is on screen.", answer=True)
 
         # A turn that calls tools first produces no text for seconds. Silence
         # reads as "it's broken" — he said exactly that, more than once, in
@@ -2819,7 +2944,10 @@ class Jalen:
 
         ack_timer = threading.Timer(ack_after, acknowledge)
         ack_timer.daemon = True
-        ack_timer.start()
+        # Not for a turn that is waiting: it has just been told it is next,
+        # and its filler could only be heard after the other turn's answer.
+        if not queued:
+            ack_timer.start()
 
         # AND AFTER THAT, NOT SILENCE. "When I tell it the task it should not
         # go silent" (2026-10-23). One "Give me a second." and then nothing
@@ -2848,7 +2976,7 @@ class Jalen:
             timer = self._turn_timer
             if timer is not None:
                 timer.filler_pushed = False
-            stream.abandon()
+            state["stream"].abandon()
             self._voice_so_far = ""
             self.say(reply)
             return
@@ -2863,7 +2991,7 @@ class Jalen:
             # cap exists because a forty-second monologue is unbearable, not
             # because the rest of the answer is worthless.
             self._last_full_text = reply
-        stream.close()
+        state["stream"].close()
         self.audit.utterance(reply, who="jalen")
         self._note_said(reply)
         # Filed whole now; what was kept piece by piece while it streamed is
@@ -2893,6 +3021,9 @@ class Jalen:
         # matcher as the address gate's exemption; see is_kill_phrase.
         if is_kill_phrase(text, self.kill_phrases):
             self.audit.utterance(text, who="user")
+            # A stop to all of it: an answer still on its way is not then
+            # given a stream of its own (speak_brain_reply's push).
+            self._killed_at = time.monotonic()
             self.speaker.stop()
             self.kill.set()
             self._answer_q.put(False)
@@ -3366,6 +3497,11 @@ class Jalen:
         # Barge-in has already fired for the CURRENT playback. Re-armed when
         # the speaker actually falls silent - see the latch in the loop.
         barge_fired = False
+        # Whether his voice was on air at the last frame. The speaker tells
+        # the orb when a session opens and closes; inside a reply's stream it
+        # goes quiet and speaks again with no session change, and the orb
+        # said "speaking" through every minute of tools in between.
+        was_on_air = False
 
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
         if not standby:
@@ -3595,7 +3731,19 @@ class Jalen:
                 #
                 # Real speech over the top clears all three in about a fifth
                 # of a second, which still feels immediate.
-                if not self.speaker.speaking:
+                # ON AIR, NOT MERELY A SESSION OPEN (Speaker.on_air). A brain
+                # reply's stream is open for the whole turn, through every
+                # tool call, so `speaking` stayed true for minutes with nothing
+                # playing - and both branches below heard nothing but the wake
+                # word all that time: his "what's up" and the "yes" to its own
+                # "Confirm?" were never heard, and "Hey Jalen" stopped a reply
+                # that was not playing, losing its answer. "It is still
+                # becoming deaf even after getting my prompt" (2026-10-24).
+                on_air = _on_air(self.speaker)
+                if on_air != was_on_air:
+                    was_on_air = on_air
+                    self._refresh_orb(listening=listening)
+                if not on_air:
                     # Playback is over, so the latch below re-arms for the
                     # next reply.
                     barge_fired = False
@@ -3609,7 +3757,7 @@ class Jalen:
                 # against. The wake model is the one detector here that is
                 # about HIM saying the name, not about sound. Ctrl+Alt+J still
                 # stops him mid-sentence, and Ctrl+Alt+K stops everything.
-                if barge_on_the_wake_word and self.speaker.speaking:
+                if barge_on_the_wake_word and on_air:
                     if not self.wake.feed(frame) or barge_fired:
                         continue
                     barge_fired = True
@@ -3631,7 +3779,7 @@ class Jalen:
                     self.collector._reset()
                     continue
 
-                if barge_in and self.speaker.speaking:
+                if barge_in and on_air:
                     if self.speaker.speaking_for() < barge_grace_s:
                         barge_run = 0
                         continue
@@ -4003,10 +4151,19 @@ class Jalen:
                 # answer starts no work; it releases work already waiting.
                 answering = (self._awaiting_confirmation or self._awaiting_reply
                              or self._awaiting_stop or self._rating_is_pending())
-                if in_flight >= MAX_IN_FLIGHT_TURNS and not answering:
+                # NEVER FOR WHAT THE ROUTER ANSWERS ITSELF either: "what's
+                # up", "are you done", "pause", "what time is it" take no
+                # brain and a moment, and refusing them while a long task ran
+                # was the "it becomes deaf after my prompt" of 2026-10-24.
+                # Asked only past the limit: it is a pass over every rule.
+                quick = in_flight >= MAX_IN_FLIGHT_TURNS and self._answered_without_the_brain(text)
+                if in_flight >= MAX_IN_FLIGHT_TURNS and not answering and not quick:
                     with self._turn_lock:
                         self._active_turns.discard(turn_id)
-                    self.say("I'm still on the last one — give me a second.")
+                    # Said so it is plain the sentence was NOT taken: "give
+                    # me a second" read as if it had been, and it never ran.
+                    self.say("I'm still working on two things, so I didn't take that one "
+                             "- say it again in a moment.")
                     self._refresh_orb()
                     continue
                 # The speaker's first-audio callback needs to find THIS
@@ -4871,7 +5028,7 @@ class Jalen:
         """Recompute what the orb should show from what is actually true."""
         if self.muted or self.paused:
             state = "muted"
-        elif self.speaker.speaking:
+        elif _on_air(self.speaker):
             state = "speaking"
         elif self._active_turns:
             state = "thinking"

@@ -1,5 +1,5 @@
 
-# What Jalen can do  (197 things)
+# What Jalen can do  (199 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -11,6 +11,7 @@ without asking Claude.
 _Its own controls. All free, all instant, none need the network._
 
 - [ ] * **acknowledge** - Acknowledge without acting
+- [ ] * **small_talk** - Answer "what's up" or "are you there" at once, saying what is still running
 - [ ] * **ack** - Answer to its own name
 - [ ] * **set_posture** - Change how cautious the safety gate is
 - [ ] * **sleep** - Go quiet until you say the wake word
@@ -19,6 +20,7 @@ _Its own controls. All free, all instant, none need the network._
 - [ ] * **restart** - Restart itself
 - [ ] * **greet** - Say hello
 - [ ] * **read_all** - Speak the rest of an answer that was cut short
+- [ ] * **new_conversation** - Start a fresh conversation instead of resuming the last one
 - [ ] * **resume** - Start listening again
 - [ ] * **quit** - Stop Jalen entirely
 - [ ] * **pause** - Stop listening but stay running
@@ -272,7 +274,7 @@ _The vault, and typing into forms._
 ---
 
 179 tools: 28 amber, 132 green, 19 red
-100 of them also answer to a spoken phrase, for free.
+101 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
   - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S

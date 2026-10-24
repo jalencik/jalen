@@ -118,6 +118,7 @@ green:
     - audit_digest
     - morning_brief
     - greet
+    - small_talk           # "what's up", "are you there": a sentence back, nothing done
     - cancel
     - acknowledge
     - refresh_system_scan  # re-measures disk usage; reads only, deletes nothing

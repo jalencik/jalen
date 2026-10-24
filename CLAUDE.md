@@ -210,6 +210,21 @@ There is no linter, no type checker, no CI and no git remote.
   (`barge_in: true`) must never, because it fires on sound, his own echo
   included (`tests/test_reported_failures.py`).
   `tests/test_only_his_name_interrupts_him.py`.
+- **"He speaks" is `Speaker.on_air`, never `speaker.speaking`.** A brain
+  reply's SpeechStream holds `speaking` (and `_say_lock`) for the whole turn,
+  through minutes of tools with nothing playing. Read as "his voice is in the
+  room", that made Jalen deaf to everything but the wake word for the whole
+  of a long task: no "yes" to the brain's own "Confirm?", no "what's up", and
+  a "Hey Jalen" that stopped a silent reply and lost its answer. `on_air`
+  keeps a gap between two sentences on air (`STREAM_GAP_S`) and lets go of a
+  stream that is waiting, at once after a line said between its sentences.
+  App code asks `_on_air(self.speaker)`. Two more things follow from the
+  stream holding the lock. `Speaker.say()` speaks through the stream holding
+  it (`speak_between`), and a line the stream never began is withdrawn so
+  it is never said twice. `_active_stream` is the stream that HOLDS the lock,
+  set in `SpeechStream._run`, never the newest one opened: a second brain
+  turn's stream pointed a "Confirm?" at a stream that could not speak it.
+  `tests/test_it_hears_him_while_a_long_task_works.py`.
 - **A tap is an answer, never an instruction.** In `--telegram` mode a question
   goes out with Yes/No (a "Confirm?") or Stop (an AMBER announcement) under it
   (`Jalen._put_the_question`, `telegram_bot.prompt_keyboard`). A tap reaches

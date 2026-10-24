@@ -375,6 +375,9 @@ def test_every_new_rule_targets_a_real_registered_tool(router):
         # "New conversation" - lets go of the conversation the brain would
         # otherwise resume after a restart (Brain.forget_conversation).
         "new_conversation",
+        # "What's up", "are you there" - answered here, at once, saying what
+        # is running if anything is (Jalen._small_talk).
+        "small_talk",
         # Hand-gesture orb resizing. App-level for the same reason
         # jalen_orb_size is: it needs the orb and the camera controller this
         # process owns, and a camera toggle must not depend on the network.

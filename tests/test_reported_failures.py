@@ -309,7 +309,7 @@ def test_barge_in_on_noise_does_not_announce_a_failure_to_understand():
 
     source = inspect.getsource(Jalen.run)
     block = re.search(
-        r"if barge_in and self\.speaker\.speaking:.*?continue", source, re.S
+        r"if barge_in and on_air:.*?continue", source, re.S
     )
     assert block, "the barge-in branch has moved — re-check this guard"
     assert "wake_initiated = True" not in block.group(0), (

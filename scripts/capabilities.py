@@ -113,6 +113,8 @@ APP_LEVEL = {
     "jalen_read_all": "Speak the rest of an answer that was cut short",
     "morning_brief": "The day's summary on demand",
     "greet": "Say hello",
+    "small_talk": "Answer \"what's up\" or \"are you there\" at once, saying what is still running",
+    "new_conversation": "Start a fresh conversation instead of resuming the last one",
     "cancel": "Stop what you are doing",
     "acknowledge": "Acknowledge without acting",
     "reload_config": "Re-read config without restarting",

@@ -98,10 +98,10 @@ def test_the_wake_word_branch_never_relaxes_the_any_voice_rule():
     from jalen.app import Jalen
 
     source = inspect.getsource(Jalen.run)
-    wake = source.index("if barge_on_the_wake_word and self.speaker.speaking:")
-    voice = source.index("if barge_in and self.speaker.speaking:")
+    wake = source.index("if barge_on_the_wake_word and on_air:")
+    voice = source.index("if barge_in and on_air:")
     assert wake < voice
-    block = re.search(r"if barge_in and self\.speaker\.speaking:.*?continue", source, re.S)
+    block = re.search(r"if barge_in and on_air:.*?continue", source, re.S)
     assert "wake_initiated = True" not in block.group(0)
 
 

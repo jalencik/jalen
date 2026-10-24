@@ -1519,6 +1519,15 @@ class Brain:
         await self.start()
 
     # -------------------------------------------------------------------- ask
+    def busy(self) -> bool:
+        """
+        A turn is in ask() now, so another one asked waits for it to finish:
+        the turns of one conversation are taken one at a time (`_lock`). The
+        app says so at once rather than leave him in silence behind it.
+        """
+        lock = getattr(self, "_lock", None)
+        return bool(lock is not None and lock.locked())
+
     async def ask(self, text: str, on_text=None) -> str:
         """
         One conversational turn. Returns what Jalen should say out loud.

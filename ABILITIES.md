@@ -22,6 +22,10 @@ _Free, instant, and none of it needs the network._
 
 Acknowledge without acting.
 
+### `small_talk` * — GREEN
+
+Answer "what's up" or "are you there" at once, saying what is still running.
+
 ### `jalen_ack` * — GREEN
 
 Answer to its own name.
@@ -53,6 +57,10 @@ Say hello.
 ### `jalen_read_all` * — GREEN
 
 Speak the rest of an answer that was cut short.
+
+### `new_conversation` * — GREEN
+
+Start a fresh conversation instead of resuming the last one.
 
 ### `jalen_resume` * — GREEN
 

@@ -118,10 +118,20 @@ class Speaker:
         # "cache" or "network" for the most recently rendered sentence. Read
         # by the turn timer; see _render_cached for why it is worth having.
         self.last_source = ""
-        # The stream currently holding _say_lock, if any. say_now() needs to
-        # know, because during a streamed reply that thread is the only one
-        # that can speak. See say_now() for the deadlock this prevents.
+        # The stream currently HOLDING _say_lock, if any - set by the stream
+        # once it has the lock, not when it is opened. say() needs to know,
+        # because during a streamed reply that thread is the only one that can
+        # speak (see say_now() for the deadlock this prevents), and a second
+        # brain turn opens its stream while the first still holds the lock:
+        # pointing at the newest stream sent the first turn's "Confirm?" to a
+        # stream that could not speak it, and stop()'s wake-up to one that was
+        # not asleep.
         self._active_stream: "SpeechStream | None" = None
+        # How long after its last sentence a stream still counts as ON AIR
+        # (see on_air): STREAM_GAP_S after a sentence of the reply, nothing
+        # after a line said between them, which is a question or another
+        # turn's answer and is followed by waiting, not by more of the reply.
+        self._on_air_after_s = 0.0
         # WHAT WAS PLAYED, a sentence at a time, and when - see spoken_since.
         # Each entry is [text, began, ended]; `ended` is None while it plays.
         self._played: "collections.deque[list]" = collections.deque(maxlen=self.PLAYED_KEPT)
@@ -135,10 +145,54 @@ class Speaker:
     # MEASURED beyond that: it only has to be longer than the look-back.
     PLAYED_KEPT = 200
 
+    # A REPLY BETWEEN TWO OF ITS SENTENCES IS STILL ON AIR; A REPLY WAITING ON
+    # THE MODEL IS NOT. A stream holds `speaking` for the whole brain turn, so
+    # through every tool call - a minute and more for a delegated chat - the
+    # microphone loop treated nothing playing as Jalen talking and heard only
+    # the wake word: "it is still becoming deaf even after getting my prompt"
+    # (2026-10-24). Past this long without a sound the stream is waiting, not
+    # talking. Above the ~3.3s network round trip that synthesising one
+    # sentence was measured at (see _COMMON_PHRASES), so a reply between two
+    # sentences stays on air while the next one renders; well under the 20s
+    # of quiet before the first STILL_WORKING line (app.py). The 4.0 itself is
+    # NOT MEASURED: there is no record of the gaps between sentences.
+    STREAM_GAP_S = 4.0
+
     # --------------------------------------------------------------- control
     @property
     def speaking(self) -> bool:
+        """A speaking SESSION is open - for a stream, the whole brain turn. See on_air."""
         return self._speaking.is_set()
+
+    @property
+    def on_air(self) -> bool:
+        """
+        Is Jalen's voice in the room: what the microphone loop means by "he is
+        speaking". `speaking` with one difference - a reply stream that has
+        played nothing for STREAM_GAP_S is waiting on the model, not talking,
+        and a stream that has just said a line between its sentences (a
+        "Confirm?", another turn's answer) is waiting from the moment it ends,
+        exactly as it would be had say() said it.
+
+        A say() session is on air from start to end: its sentences follow one
+        another with nothing to wait for.
+        """
+        if not self._speaking.is_set():
+            return False
+        if self._active_stream is None:
+            return True
+        playing, ended = self._last_sentence()
+        if playing:
+            return True
+        return time.monotonic() - max(ended, self._speaking_since) < self._on_air_after_s
+
+    def _last_sentence(self) -> tuple[bool, float]:
+        """(a sentence is playing now, when the last one ended - 0.0 for never)."""
+        with self._played_lock:
+            last = self._played[-1] if self._played else None
+        if last is None:
+            return False, 0.0
+        return last[2] is None, last[2] or 0.0
 
     def speaking_for(self) -> float:
         """
@@ -168,9 +222,17 @@ class Speaker:
 
         Not _speaking_since: that is when playback began, and it is reset to 0.0
         when it ends.
+
+        AND A STREAM WAITING ON THE MODEL IS QUIET (on_air): its voice left the
+        room with its last sentence, minutes ago for a turn deep in its tools,
+        and counting it as on air made every word he said meanwhile a
+        candidate for his own echo.
         """
-        if self._speaking.is_set():
+        if self.on_air:
             return 0.0
+        if self._speaking.is_set():
+            _playing, ended = self._last_sentence()
+            return max(0.0, time.monotonic() - max(ended, self._speaking_since))
         ended = self._spoke_until
         if not ended:
             return float("inf")
@@ -339,7 +401,13 @@ class Speaker:
         "Done.", "Opening.", "Opened.", "Sure.", "Any time.", "Muted.", "Back.",
         "Skipped.", "Back one.", "Locked.", "Minimised.", "Maximised.",
         "Cancelled.", "Listening again.", "I didn't catch that.",
-        "I'm still on the last one — give me a second.",
+        # Said the moment a sentence arrives while a long task runs: the one
+        # turned away and the one taken for later (app.py), and small talk
+        # (Jalen._small_talk). A line that answers at once has to be instant.
+        "I'm still working on two things, so I didn't take that one - say it again in a moment.",
+        "Got it - that's next, as soon as I finish what I'm on.",
+        "I'm here, Boss.",
+        "All good, Boss. What do you need?",
         # Spoken by speak_brain_reply() when a turn is calling tools and has
         # produced no text yet. It has to be instant to be worth saying at
         # all — a filler that itself takes 1.5s of network to synthesise
@@ -538,10 +606,26 @@ class Speaker:
         state, one call's cleanup would clear the other's flags mid-playback
         while both wrote to the output device — audible as overlapping,
         garbled speech.
+
+        WHILE A REPLY STREAM HOLDS THE LOCK, IT SAYS THIS BETWEEN ITS OWN
+        SENTENCES. A stream holds the lock for the whole brain turn, so the
+        answer to "what's up" - one line, ready at once - waited behind a long
+        task until its last word: "it is even taking 10 seconds to respond to
+        what's up" (2026-10-24). The stream is the one thread that can speak,
+        so it is asked to (SpeechStream.speak_between), the way say_now() asks
+        it for a "Confirm?". Only when it never gets to it - it finished, or
+        was busy past the wait - is it said the ordinary way, and then it has
+        been withdrawn from the stream, so it is never said twice.
         """
         text = clean_for_speech(text)
         if not text:
             return True
+
+        stream = self._active_stream
+        if stream is not None and threading.current_thread() is not stream._thread:
+            said = stream.speak_between(text)
+            if said is not None:
+                return said
 
         with self._say_lock:
             self._interrupt.clear()
@@ -629,10 +713,12 @@ class Speaker:
         them and spoken immediately, so the clock that matters -- how long
         until he hears something -- is set by the first sentence, not the
         last one.
+
+        It becomes `_active_stream` when it has the lock (SpeechStream._run),
+        not here: a second brain turn opens its stream while the first one is
+        still speaking, and only the one holding the lock can say anything.
         """
-        stream = SpeechStream(self)
-        self._active_stream = stream
-        return stream
+        return SpeechStream(self)
 
     def say_now(self, text: str) -> bool:
         """
@@ -651,13 +737,11 @@ class Speaker:
         So: if a stream is running, ask IT to speak the line — it is the
         thread holding the lock, so it is the only one that can. Otherwise
         this is an ordinary blocking say().
+
+        say() itself does that now, for every line said while a stream holds
+        the lock (another turn's answer waited behind a long reply the same
+        way), so this is say() under the name its callers rely on.
         """
-        stream = self._active_stream
-        if stream is not None and not stream.finished:
-            if stream.interject(text):
-                return True
-            # It finished, or could not get to it in time. The lock is free
-            # (or about to be), so the ordinary path is safe now.
         return self.say(text)
 
     def summarise_if_long(self, text: str) -> tuple[str, str | None]:
@@ -699,14 +783,26 @@ class _Urgent:
     The alternative fix — stop the stream, then speak — is simpler and
     wrong: it destroys whatever the model says after the confirmation, and
     it does so silently.
+
+    Said a sentence at a time, so a long line is recorded in the room the way
+    every other line is (Speaker.spoken_since), and so a barge-in stops it at
+    the sentence it was in. `started` is when the stream began saying it, and
+    a line that has not started can be WITHDRAWN by the one waiting for it
+    (SpeechStream.speak_between): one that was withdrawn is never said, so a
+    line that is given up on and said the ordinary way is not said twice.
+    `result` is True when all of it was said, False when it was cut off, None
+    when nothing of it was.
     """
 
-    __slots__ = ("text", "done", "spoken")
+    __slots__ = ("sentences", "started", "done", "result", "heard", "withdrawn")
 
-    def __init__(self, text: str) -> None:
-        self.text = text
+    def __init__(self, sentences: list[str]) -> None:
+        self.sentences = sentences
+        self.started = threading.Event()
         self.done = threading.Event()
-        self.spoken = False
+        self.result: "bool | None" = None
+        self.heard = False          # at least one sentence of it was played
+        self.withdrawn = False
 
 
 class SpeechStream:
@@ -719,6 +815,11 @@ class SpeechStream:
     it". Speaking sentence-by-sentence through say() would drop that flag
     in every gap between sentences, and the microphone would hear the tail
     of his own speech in those gaps and treat it as the user talking.
+
+    What the microphone loop now asks is Speaker.on_air, which keeps a gap
+    between two sentences on air and lets go of a stream that is waiting on
+    the model: the session lasts as long as the brain turn, and a minute of
+    tools with nothing playing is not Jalen talking.
     """
 
     def __init__(self, speaker: "Speaker") -> None:
@@ -728,6 +829,9 @@ class SpeechStream:
         # an urgent line jumps ahead of the model's remaining sentences
         # instead of queueing behind a reply that may still be arriving.
         self._urgent: "queue.Queue[_Urgent]" = queue.Queue()
+        # Taken to begin a line of that lane, and to withdraw one: a line is
+        # either begun or withdrawn, never both (speak_between).
+        self._urgent_lock = threading.Lock()
         self._spoken: list[str] = []
         self._pending_text = ""
         self._first_audio = threading.Event()
@@ -788,6 +892,11 @@ class SpeechStream:
     def finished(self) -> bool:
         return self._done.is_set()
 
+    @property
+    def live(self) -> bool:
+        """It is the stream that can speak now - it has the speaker - and is not finished."""
+        return self._speaker._active_stream is self and not self._done.is_set()
+
     def interject(self, text: str, timeout: float = 30.0) -> bool:
         """
         Speak something urgent inside this session. True if it was spoken.
@@ -799,19 +908,50 @@ class SpeechStream:
         Returns False rather than blocking forever if the stream is already
         finished or does not get to it in time; the caller then falls back
         to the ordinary locking path, which is safe once the stream has let
-        the lock go.
+        the lock go. A line it did not get to in time is withdrawn, so the
+        stream never says it as well (it used to stay in the lane and be said
+        twice).
         """
-        if self._done.is_set() or not text:
-            return False
-        item = _Urgent(text)
+        item = self._say_between(text, timeout)
+        return item is not None and item.heard
+
+    def speak_between(self, text: str, timeout: float = 30.0) -> "bool | None":
+        """
+        Say `text` inside this stream, between its own sentences - Speaker.say()
+        while a stream holds the lock. True when all of it was said; False when
+        it was begun and not all of it was heard (cut off by barge-in, or a
+        sentence that could not be rendered); None when it was never begun -
+        the stream finished, or was still busy after `timeout` - and nothing of
+        it was said, so the caller can say it the ordinary way.
+        """
+        item = self._say_between(text, timeout)
+        return None if item is None else item.result
+
+    def _say_between(self, text: str, timeout: float) -> "_Urgent | None":
+        """Hand `text` to the urgent lane and wait for it: the line once said, None if withdrawn."""
+        sentences = split_sentences(text or "")
+        if self._done.is_set() or not sentences:
+            return None
+        item = _Urgent(sentences)
         self._urgent.put(item)
         # The consumer is very likely parked on self._q.get(), waiting for
         # the model's next sentence. Nudge it so it goes round the loop and
         # sees the urgent lane.
         self._q.put(_WAKE)
-        if not item.done.wait(timeout):
-            return False
-        return item.spoken
+        # Up to `timeout` for the stream to BEGIN it; then for as long as it
+        # takes to say. A line begun is the stream's to finish or cut off.
+        deadline = time.monotonic() + timeout
+        while not item.done.wait(0.05):
+            if item.started.is_set():
+                continue
+            # A stream that has finished will never begin it.
+            if time.monotonic() < deadline and not self._done.is_set():
+                continue
+            with self._urgent_lock:
+                if not item.started.is_set():
+                    item.withdrawn = True
+                    return None
+        return None if item.withdrawn else item
 
     def _drain_urgent(self, sp: "Speaker") -> None:
         """Say anything waiting in the urgent lane, in order."""
@@ -820,20 +960,43 @@ class SpeechStream:
                 item = self._urgent.get_nowait()
             except queue.Empty:
                 return
+            with self._urgent_lock:
+                if item.withdrawn:
+                    continue
+                item.started.set()
+            heard = whole = False
             try:
-                rendered = sp._render_cached(item.text)
-                if rendered is not None:
+                whole = True
+                for sentence in item.sentences:
+                    if sp._interrupt.is_set():
+                        whole = False
+                        break
+                    rendered = sp._render_cached(sentence)
+                    if rendered is None:
+                        # Not said, and so not reported as said: a
+                        # "Confirm?" that was never heard must not be
+                        # waited on as if it had been asked.
+                        whole = False
+                        continue
                     pcm, rate = rendered
                     self._first_audio.set()
-                    sp._play_sentence(item.text, pcm, rate)
-                    item.spoken = True
+                    # A line said between sentences is followed by waiting
+                    # - for his answer, or for the model - not by more of
+                    # the reply, so the stream is off air when it ends.
+                    sp._on_air_after_s = 0.0
+                    heard = True
+                    if not sp._play_sentence(sentence, pcm, rate):
+                        whole = False
+                        break
             except Exception:
                 # A confirmation that cannot be rendered must not take the
                 # reply down with it — but it must also not report success,
                 # or the caller will wait for an answer to a question that
                 # was never asked out loud.
-                item.spoken = False
+                whole = False
             finally:
+                item.heard = heard
+                item.result = whole
                 item.done.set()
 
     # ------------------------------------------------------------- consuming
@@ -845,7 +1008,11 @@ class SpeechStream:
     def _run(self) -> None:
         sp = self._speaker
         with sp._say_lock:
+            # The stream that can speak is the one holding the lock: from now,
+            # say() and stop() find this one (see Speaker._active_stream).
+            sp._active_stream = self
             sp._interrupt.clear()
+            sp._on_air_after_s = sp.STREAM_GAP_S
             sp._speaking_since = time.monotonic()
             sp._speaking.set()
             sp.on_state("speaking")
@@ -896,6 +1063,9 @@ class SpeechStream:
                         if rendered is not None:
                             pcm, rate = rendered
                             self._first_audio.set()
+                            # A sentence of the reply: what follows it is
+                            # more of the reply, so the gap stays on air.
+                            sp._on_air_after_s = sp.STREAM_GAP_S
                             if not sp._play_sentence(text, pcm, rate):
                                 self.interrupted = True
                                 break
@@ -905,14 +1075,17 @@ class SpeechStream:
                             break
             finally:
                 # Release anyone still waiting on an urgent line before the
-                # lock goes. They are marked NOT spoken, so the caller falls
-                # back to the ordinary path rather than waiting for an answer
-                # to a question nobody heard.
+                # lock goes. They are WITHDRAWN - never begun, nothing said -
+                # so the caller falls back to the ordinary path rather than
+                # waiting for an answer to a question nobody heard.
                 while True:
                     try:
-                        self._urgent.get_nowait().done.set()
+                        left = self._urgent.get_nowait()
                     except queue.Empty:
                         break
+                    with self._urgent_lock:
+                        left.withdrawn = True
+                    left.done.set()
                 sp._speaking.clear()
                 sp._speaking_since = 0.0
                 sp._spoke_until = time.monotonic()
