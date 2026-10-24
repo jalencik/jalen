@@ -191,13 +191,14 @@ AGREEMENTS = [
 # THE KNOWN FALSE NOs, written down rather than left to be rediscovered.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("text", [
-    "yes, no problem",
-    "sure, no worries",
     "yes, no rush",
     "no problem",
     "no worries",
+    "not a problem",
+    "no rush",
+    "no doubt",
 ])
-def test_agreement_wrapped_around_a_negative_word_is_refused(text):
+def test_an_idiom_with_a_negative_word_is_not_a_yes_on_its_own(text):
     """
     NOT A YES, and deliberately so. A first version of this fix neutralised
     eight "negative-sounding but affirmative" idioms before the NO list ran.
@@ -206,15 +207,40 @@ def test_agreement_wrapped_around_a_negative_word_is_refused(text):
     and "no objection" - none of which is permission to send an email, on
     the last gate before a RED action runs.
 
-    So they went back to refusing. The colloquial reading of "no problem" as
-    agreement is real and this loses it; that costs him a sentence, and the
-    alternative cost six other phrases becoming approvals. "why not" is the
-    single exception, because it was already True before any of this and
-    taking it away would have been its own regression.
+    So ON THEIR OWN they still refuse. "why not" is the single exception,
+    because it was already True before any of this. "yes, no rush" stays a
+    refusal even beside a yes: it can mean "yes, but not now".
     """
     assert parse(text) is not True, (
         f"{text!r} approves a RED action on the strength of an idiom"
     )
+
+
+@pytest.mark.parametrize("text", [
+    "yes, no problem",
+    "sure, no worries",
+    "okay, not a problem",
+    "yeah no worries, go ahead",
+    "yes, no doubt",
+    "of course, no problem",
+])
+def test_a_courtesy_beside_a_plain_yes_is_the_yes_said_twice(text):
+    """
+    The false NO the test above used to pin for these, paid back (2026-10-23,
+    "it should recognize everything correctly"). Next to an explicit yes the
+    idiom is not the answer - the yes is. Anything else negative in the
+    sentence still refuses: see the next test.
+    """
+    assert parse(text) is True, f"{text!r} is a yes"
+
+
+@pytest.mark.parametrize("text", [
+    "yes, no problem, but not now",
+    "okay no worries, don't send it yet",
+    "sure, no problem, cancel it",
+])
+def test_a_courtesy_does_not_hide_a_real_refusal_beside_it(text):
+    assert parse(text) is False, f"{text!r} refused, and was read as a yes"
 
 
 @pytest.mark.parametrize("text", AGREEMENTS)

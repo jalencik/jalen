@@ -1,5 +1,5 @@
 
-# What Jalen can do  (183 things)
+# What Jalen can do  (199 things)
 
 Generated from the code, not written by hand - so it cannot promise
 something that no longer exists. Tick what works, note what doesn't.
@@ -11,6 +11,7 @@ without asking Claude.
 _Its own controls. All free, all instant, none need the network._
 
 - [ ] * **acknowledge** - Acknowledge without acting
+- [ ] * **small_talk** - Answer "what's up" or "are you there" at once, saying what is still running
 - [ ] * **ack** - Answer to its own name
 - [ ] * **set_posture** - Change how cautious the safety gate is
 - [ ] * **sleep** - Go quiet until you say the wake word
@@ -19,6 +20,7 @@ _Its own controls. All free, all instant, none need the network._
 - [ ] * **restart** - Restart itself
 - [ ] * **greet** - Say hello
 - [ ] * **read_all** - Speak the rest of an answer that was cut short
+- [ ] * **new_conversation** - Start a fresh conversation instead of resuming the last one
 - [ ] * **resume** - Start listening again
 - [ ] * **quit** - Stop Jalen entirely
 - [ ] * **pause** - Stop listening but stay running
@@ -44,7 +46,7 @@ _Gemini, ChatGPT, Hermes, Claude Code, the desktop app._
 
 - [ ] * **ask_claude_code** - Open Claude Code in a folder and start it working on a prompt  [tells you first, you can say stop]
 - [ ] * **claude_code_status** - Check whether the Claude Code CLI is installed and where
-- [ ]   **delegate_task** - Hand a task to another AI: gemini, or chatgpt (needs an API key)  [tells you first, you can say stop]
+- [ ]   **delegate_task** - Hand a task to another AI: gemini, chatgpt (needs an OpenAI key), or hermes - Nous Research's Hermes 4, a genuinely different model for a second op...  [tells you first, you can say stop]
 - [ ]   **follow_up_task** - Reply into an existing delegated conversation - the other AI keeps its own context, so name only what needs fixing rather than restating the whole ...  [tells you first, you can say stop]
 - [ ]   **hand_off_to_code** - Start Claude Code on a fully written brief, in a project folder  [tells you first, you can say stop]
 - [ ]   **hand_off_to_cowork** - Open the Claude desktop app with a fully written brief on the clipboard  [tells you first, you can say stop]
@@ -97,14 +99,22 @@ _Reading, drafting and sending Gmail._
 ## Telegram
 _Your own chats and your channel._
 
+- [ ]   **cancel_scheduled_post** - Cancel a scheduled Telegram post before it goes out  [tells you first, you can say stop]
 - [ ]   **community_post_guide** - The layout rules for his AI Engineering & Machine Learning channel: bullet character, where bold goes, the expandable Q&A block, the fixed sign-off
+- [ ]   **delete_message** - Delete a Telegram message for everyone  [stops and waits for you to say yes]
+- [ ]   **edit_telegram_message** - Change one of HIS Telegram messages in place - fix a typo in a post that already went out, correct a time  [stops and waits for you to say yes]
 - [ ]   **find_premium_emoji** - Look up his PREMIUM custom emoji, read from his own Telegram account, and get the <tg-emoji emoji-id="ID">E</tg-emoji> tag for each
+- [ ]   **forward_telegram_message** - Forward one Telegram message from one chat to another, showing who wrote it  [stops and waits for you to say yes]
 - [ ]   **list_sticker_packs** - List the custom emoji sets and sticker packs on his Telegram account, or, with pack, the stickers inside one pack (numbered, with their emoji)
 - [ ] * **list_telegram_chats** - List his recent Telegram conversations with unread counts
 - [ ]   **mark_telegram_read** - Mark ONE chat as read  [tells you first, you can say stop]
+- [ ]   **pin_telegram_message** - Pin a Telegram message at the top of a chat, or with unpin=true take it down  [tells you first, you can say stop]
+- [ ]   **react_to_telegram_message** - Put his reaction on a Telegram message - exactly one emoji, such as a thumbs-up, a heart or a fire - or with an empty emoji take his reaction off  [tells you first, you can say stop]
 - [ ] * **read_telegram** - Read recent messages from ONE Telegram chat, named the way he says it — 'Uluhbek', 'Saved Messages', an @username
+- [ ]   **reschedule_telegram_post** - Move a scheduled Telegram post to another time, or with schedule_at 'now' send it at once  [tells you first, you can say stop]
 - [ ]   **save_draft_text** - Write a long piece — an essay, a personal statement, an application answer, a post — to a file AND his clipboard
 - [ ]   **save_telegram_draft** - Write text into a chat's DRAFT box without sending it
+- [ ]   **scheduled_telegram_posts** - What is scheduled to go out in one Telegram chat, soonest first: when, its number, and its words
 - [ ]   **search_telegram** - Search his Telegram messages for a phrase, across every chat or in one
 - [ ]   **send_posts** - Send SEVERAL posts to one Telegram chat in a single call  [stops and waits for you to say yes]
 - [ ]   **send_sticker** - Send ONE sticker to a Telegram chat as its own message, as him, ONLY WHEN HE ASKS for a sticker (for example 'post it with a sticker'): never after...  [stops and waits for you to say yes]
@@ -167,7 +177,7 @@ _Windows, windows, volume, media, screenshots._
 
 - [ ]   **click_element** - Click a labelled control inside a window
 - [ ] * **close_app** - Close a running app's window by (partial) title
-- [ ] * **disk_report** - Report free space per drive, plus the biggest folders and files in the user's Desktop, Documents, Downloads and Temp folders
+- [ ] * **disk_report** - Report free space on every drive, then the five biggest places on the system drive (or the drive named), counted from the drive's root, with sizes
 - [ ] * **empty_recycle_bin** - Permanently empty the Recycle Bin  [stops and waits for you to say yes]
 - [ ] * **focus_window** - Bring a window to the foreground by (partial) title
 - [ ]   **forget_site_decision** - Undo a standing decision, so the site is asked about again  [stops and waits for you to say yes]
@@ -175,14 +185,16 @@ _Windows, windows, volume, media, screenshots._
 - [ ] * **get_date** - Current date
 - [ ] * **get_system_status** - CPU, memory and disk usage
 - [ ] * **get_time** - Current time
-- [ ] * **get_window_list** - List currently visible top-level windows
+- [ ]   **get_timezone** - This computer's own time zone: its name, its offset from UTC and the time there
+- [ ]   **get_uptime** - How long this computer has been on, and since when
+- [ ] * **get_window_list** - The windows open on screen, which one is in front and which program each belongs to
 - [ ] * **keyboard_shortcut** - Send a keyboard shortcut
 - [ ]   **lock_vault** - Forget the unlocked secrets immediately
 - [ ] * **lock_workstation** - Lock the screen
 - [ ] * **media_next** - Skip to the next track
 - [ ] * **media_play_pause** - Play or pause whatever media player currently has focus
 - [ ] * **media_previous** - Go back to the previous track
-- [ ]   **memory_report** - Report overall RAM usage and the top processes by memory use
+- [ ] * **memory_report** - Report overall RAM usage and the top processes by memory use
 - [ ] * **open_app** - Launch an application by name
 - [ ] * **open_windows_security** - Show Windows Security / Defender
 - [ ] * **open_windows_update** - Show the Windows Update page
@@ -223,8 +235,8 @@ _The vault, and typing into forms._
 
 ## Remembering
 
-- [ ]   **recall_memory** - Search remembered facts and preferences by meaning, not exact wording
-- [ ]   **remember** - Store a fact or preference for later recall
+- [ ] * **recall_memory** - Search remembered facts and preferences by meaning, not exact wording
+- [ ] * **remember** - Store a fact or preference for later recall
 
 ## Writing as you
 
@@ -242,23 +254,27 @@ _The vault, and typing into forms._
 - [ ]   **ext_form_fields** - List the form fields on his real current tab via the extension, so you can fill what you know and ask for the rest
 - [ ]   **ext_page_state** - Read the page on the tab HE is actually looking at, through the Chrome extension - title, url, headings, form-field count
 - [ ]   **ext_status** - Whether Jalen's Chrome extension is connected - i.e
+- [ ]   **foreground_app** - Which program is in front right now, the one he is using
 - [ ]   **form_errors** - What the form is complaining about right now
 - [ ]   **inspect_form** - List every field on the form currently open in Jalen's browser: its label, type, whether it is required, and whether it is already filled
 - [ ]   **next_field** - Press Tab to move to the next field
 - [ ]   **open_storage_settings** - Show where the disk space went
 - [ ] * **play_media** - Play something he named without saying where: a local media file if one matches, YouTube otherwise
 - [ ]   **read_browser_page** - Read the visible text of the page currently open in Jalen's own Chrome - what a page says, or, AFTER submit_form, whether it went through
+- [ ]   **running_programs** - The programs running now, by name, with the ones that have a window open first and each one's memory
 - [ ]   **send_voice_message** - Send a Telegram VOICE MESSAGE AS HIM to a person, in a DM or a group  [stops and waits for you to say yes]
 - [ ]   **submit_form** - Submit the form and report what the page said back, including any validation errors  [stops and waits for you to say yes]
+- [ ]   **time_in** - The time in another city or country, and how many hours ahead of or behind him it is
 - [ ]   **transcribe_voice_note** - Turn ONE Telegram voice note into words  [tells you first, you can say stop]
 - [ ]   **upload_to_form** - Attach a real file to the form's file input - a CV, a PDF, an image  [tells you first, you can say stop]
+- [ ] * **usage_report** - How much of each usage limit has been used (emails, messages, deletions, coding jobs, thinking turns...) and whether he has put you in lockdown
 - [ ] * **what_are_you_doing** - Everything Jalen is currently working on and how far along it is
 - [ ]   **whats_my** - Look up one of his own details from the personal-info folder - 'what's my school', 'what email do I use'
 
 ---
 
-165 tools: 24 amber, 125 green, 16 red
-92 of them also answer to a spoken phrase, for free.
+179 tools: 28 amber, 132 green, 19 red
+101 of them also answer to a spoken phrase, for free.
 
 Not in this list, because they are not tools:
   - the orb: size it by voice or Ctrl+Alt+B / Ctrl+Alt+S

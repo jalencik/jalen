@@ -35,6 +35,16 @@ except Exception:  # pragma: no cover - lets the rest import on non-Windows CI
 # log as whatever happened next.
 STALL_WARN_S = 10.0
 
+# AND THEN IT IS REOPENED. Writing the stall down left him with a Jalen that
+# was deaf until someone restarted it - "it should not become deaf out of
+# nowhere" (2026-10-23). After the same ten seconds of nothing the stream is
+# closed and opened again: the configured device first, then the default one
+# (a headset that was unplugged is not coming back by itself), and again every
+# RETRY_EVERY_S while it stays dead. NOT MEASURED: no stall is in the log with
+# a device that came back, so how often a reopen succeeds is unknown; it costs
+# nothing when the stream is healthy, because a healthy one is never stalled.
+RETRY_EVERY_S = 10.0
+
 
 class Microphone:
     def __init__(self, cfg) -> None:
@@ -53,6 +63,18 @@ class Microphone:
         self.status_flags: list[str] = []
         self.last_callback_at: float = 0.0
         self._stall_reported = False
+        # Reopening a stream that went quiet (_reopen_if_stalled): how many
+        # times it CAME BACK, when it was last tried, whether he has been told
+        # it is down, and whether a stream has been reopened and not yet
+        # delivered a frame - it is not back until it has (frames()).
+        self.reopened = 0
+        self._last_reopen_at = 0.0
+        self._told_it_is_down = False
+        self._proving = False
+        # Set by Jalen.run to something that says a sentence out loud. The
+        # microphone is the one part that cannot report its own failure by
+        # being heard, so it is told this way instead.
+        self.notify = None
 
     # ----------------------------------------------------------------- device
     @staticmethod
@@ -100,17 +122,22 @@ class Microphone:
             )
         if self._stream is not None:
             return
-        self._stream = sd.InputStream(
+        self._open(self.device)
+        self._running.set()
+
+    def _open(self, device) -> None:
+        """Open and start a capture stream on `device` (None is the default)."""
+        stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=1,
             dtype="float32",
             blocksize=self.blocksize,
-            device=self.device,
+            device=device,
             callback=self._callback,
             latency="low",
         )
-        self._stream.start()
-        self._running.set()
+        stream.start()
+        self._stream = stream
         # Start the stall clock at stream-start, not at the first callback.
         # A device that opens successfully and then never delivers a single
         # frame is a real failure — and the one that leaves the least
@@ -140,11 +167,90 @@ class Microphone:
         """
         while self._running.is_set():
             try:
-                yield self._q.get(timeout=timeout)
-                self._stall_reported = False
+                frame = self._q.get(timeout=timeout)
             except queue.Empty:
                 self._report_stall()
+                self._reopen_if_stalled()
                 continue
+            self._stall_reported = False
+            if self._proving:
+                self._back()
+            yield frame
+
+    def _reopen_if_stalled(self) -> None:
+        """
+        The device has delivered nothing for STALL_WARN_S: close the stream and
+        open it again - the configured device, then the default one - every
+        RETRY_EVERY_S until one delivers. He is told once when it is down and
+        once when it is back, because a deaf assistant looks exactly like a
+        listening one.
+        """
+        if not self.last_callback_at or sd is None:
+            return
+        now = time.monotonic()
+        if now - self.last_callback_at < STALL_WARN_S or now - self._last_reopen_at < RETRY_EVERY_S:
+            return
+        self._last_reopen_at = now
+        # REOPENED LAST TIME, AND STILL NOTHING: opening it did not bring it
+        # back, so it is down, and he is told so - once.
+        if self._proving:
+            self._proving = False
+            self._say_it_is_down()
+        old, self._stream = self._stream, None
+        if old is not None:
+            try:
+                old.stop()
+                old.close()
+            except Exception as exc:  # noqa: BLE001 - a dead device may refuse to close
+                crashlog.write(f"closing the stalled microphone failed: {type(exc).__name__}: {exc}")
+        for device in dict.fromkeys([self.device, None]):
+            try:
+                self._open(device)
+            except Exception as exc:  # noqa: BLE001 - try the next one
+                crashlog.write(f"reopening the microphone (device={device!r}) failed: "
+                               f"{type(exc).__name__}: {exc}")
+                continue
+            # _open restarted the stall clock, so a device that opens and still
+            # delivers nothing is tried again after the same wait.
+            crashlog.write(f"microphone reopened on device={device!r} after a stall")
+            # NOT BACK YET. A stream that opens can still deliver nothing - the
+            # very failure _open's own comment describes - and "It's back now"
+            # said here was said every ten seconds, through mute, to a Jalen
+            # that stayed deaf and was never marked down (review of PR #1,
+            # finding 6). It is back when a frame arrives (_back, frames()).
+            self._proving = True
+            return
+        self._say_it_is_down()
+
+    def _say_it_is_down(self) -> None:
+        if not self._told_it_is_down:
+            self._told_it_is_down = True
+            self._tell("My microphone has stopped working, so I can't hear you. "
+                       "Check that it's plugged in. I'll keep trying.")
+
+    def _back(self) -> None:
+        """A reopened stream has delivered a frame: now it is back, and he is told - once."""
+        self._proving = False
+        self.reopened += 1
+        crashlog.write(f"microphone delivering again after a stall (recovery {self.reopened})")
+        if self._told_it_is_down:
+            self._told_it_is_down = False
+            self._tell("My microphone is working again. I can hear you.")
+        else:
+            self._tell("My microphone dropped out for a moment. It's back now.")
+
+    @property
+    def recovering(self) -> bool:
+        """Reopened after a stall, and not one frame from it yet."""
+        return self._proving
+
+    def _tell(self, sentence: str) -> None:
+        if self.notify is None:
+            return
+        try:
+            self.notify(sentence)
+        except Exception:  # noqa: BLE001 - telling him must never take the microphone down
+            pass
 
     def _report_stall(self) -> None:
         if self._stall_reported or not self.last_callback_at:

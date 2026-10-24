@@ -47,6 +47,13 @@ CAPABILITIES = [
     ("read_telegram", "green", "read my telegram from Ali"),
     ("search_telegram", "green", "what did Ali say about the invoice"),
     ("mark_telegram_read", "amber", "mark Ali's chat read"),
+    # "Take any action in the telegram" (2026-10-23): a message already sent
+    # can be fixed, taken down, forwarded, pinned and reacted to.
+    ("edit_telegram_message", "red", "fix the typo in my last post"),
+    ("delete_message", "red", "delete that message"),
+    ("forward_telegram_message", "red", "forward it to Ali"),
+    ("pin_telegram_message", "amber", "pin it in my channel"),
+    ("react_to_telegram_message", "amber", "put a heart on Ali's message"),
     # Voice, both ways: one voice note in words (announced: it goes to Groq), and
     # a voice message sent in Jalen's synthetic voice. Both are brain tools with
     # no router rule on purpose: one needs a spoken yes to the exact words, the

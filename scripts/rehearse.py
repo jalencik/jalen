@@ -7,10 +7,13 @@ Drive the untested flows once each, with him.  (HANDOFF item 4)
 WHY THIS EXISTS
 ---------------
 Six flows shipped built, unit-tested and reachable, and had never been driven
-all the way through by the brain in a live turn. tests/test_flow_rehearsal.py
-now covers the composition — the gate, the ordering, the argument shapes —
-against fakes. What it cannot cover is the last inch, and the last inch is
-where this project's bugs live:
+all the way through by the brain in a live turn. On 23-24 October six more
+joined them - the two keys, the question that says a message's words, editing
+and deleting, scheduled posts, the conversation after a restart, the channel
+format - tested against fakes and never driven by a person.
+tests/test_flow_rehearsal.py covers the composition of the first six — the
+gate, the ordering, the argument shapes — against fakes. What no test can
+cover is the last inch, and the last inch is where this project's bugs live:
 
     a real opportunity email, not a fixture
     a real login page, with a real password box that has focus
@@ -124,6 +127,75 @@ STEPS = [
         "Look at the Claude window. Is the brief actually IN the input box, "
         "complete, and not truncated or pasted over something else?",
     ),
+    # ---- built 23-24 October, tested against fakes, never driven by a person.
+    # Each uses Saved Messages (nobody else sees it) or ends on his "no".
+    Step(
+        "keys_are_instant",
+        "Ctrl+Alt+K and Ctrl+Alt+J",
+        "The kill key now leaves Jalen loaded in standby, so the wake key "
+        "opens the microphone at once instead of a minute's cold start.",
+        ["Jalen running in voice mode (.\\jalen.ps1 start)."],
+        "Press Ctrl+Alt+K while Jalen is talking. Wait ten seconds. Then "
+        "press Ctrl+Alt+J and say: Jalen, what time is it?",
+        "Did Ctrl+Alt+K silence him at once? After Ctrl+Alt+J, how many "
+        "seconds until he was listening - and did he answer?",
+    ),
+    Step(
+        "message_words_heard",
+        "The question says the words",
+        "A Telegram message the brain words for you is now read out in its "
+        "question, before your yes.",
+        ["Voice mode. Pick a friend's chat: you will say NO, so nothing goes."],
+        "Jalen, tell <a friend> I'll be ten minutes late, but say it nicely.",
+        "Did the question say the exact words it would send? You said NO: "
+        "did nothing arrive in that chat?",
+    ),
+    Step(
+        "telegram_edit_delete",
+        "Edit and delete a message already sent",
+        "A sent message can now be changed in place, or deleted after two "
+        "questions. In your Saved Messages, which nobody else sees.",
+        ["Voice or text mode."],
+        "Jalen, send 'rehearsal one' to my Saved Messages. Then: Jalen, change "
+        "my last message in Saved Messages to 'rehearsal two'. Then: Jalen, "
+        "delete my last message in Saved Messages.",
+        "Did 'rehearsal one' change in place into 'rehearsal two' - not a "
+        "second message? Was the delete asked TWICE, and was it then gone?",
+    ),
+    Step(
+        "scheduled_post",
+        "A scheduled post",
+        "Posts can now be scheduled, listed, moved and cancelled.",
+        ["Voice or text mode. Note the time on your clock."],
+        "Jalen, schedule 'rehearsal reminder' in my Saved Messages for three "
+        "minutes from now. Then: Jalen, what's scheduled in my Saved Messages?",
+        "Did he say the right day and time back? Did the list show it with "
+        "its words? Did it arrive at that minute, and not before?",
+    ),
+    Step(
+        "conversation_after_restart",
+        "The conversation survives a restart",
+        "After Ctrl+Alt+K and Ctrl+Alt+J he now picks the conversation up "
+        "where it was, and keeps what you told him to remember.",
+        ["Voice mode."],
+        "Jalen, remember that my cat is called Pixel. Talk about anything for "
+        "a turn. Press Ctrl+Alt+K, then Ctrl+Alt+J, and ask: Jalen, what were "
+        "we just talking about? and: Jalen, do you remember my cat's name?",
+        "Did he know what you had just been talking about, and the cat's "
+        "name?",
+    ),
+    Step(
+        "channel_post_format",
+        "A channel post in your format",
+        "Every post, draft and edit is now checked against your format "
+        "before it goes.",
+        ["Voice or text mode, and an opportunity worth posting about."],
+        "Jalen, write a post for my ML channel about <the opportunity> and "
+        "save it as a draft.",
+        "Open the draft: bold title with its emoji, each section heading with "
+        "its emoji, dot bullets, the expandable Most Asked Questions with the "
+        "three questions, and your sign-off word for word?",
+    ),
 ]
 
 
@@ -198,7 +270,7 @@ def run(only: str | None = None, redo: bool = False) -> int:
     if not redo:
         todo = [s for s in todo if not done.get(s.key, {}).get("passed")]
     if not todo:
-        print("All six have passed already. Use --redo to run them again.")
+        print(f"All {len(STEPS)} have passed already. Use --redo to run them again.")
         return 0
 
     for index, step in enumerate(todo, start=1):
@@ -241,7 +313,7 @@ def show() -> int:
     if outstanding:
         print(f"Still unproven: {', '.join(outstanding)}")
     else:
-        print("All six flows have been driven end to end and passed.")
+        print(f"All {len(STEPS)} flows have been driven end to end and passed.")
     return 0
 
 

@@ -16,6 +16,7 @@ Design notes worth knowing before you change anything here:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import queue
 import re
 import sys
@@ -34,11 +35,11 @@ from .audio.tts import Speaker
 from .audio.vad import VAD, UtteranceCollector
 from .audio.wake import WakeWord
 from .audit import AuditLog
-from . import conversation, habits, plan as planning
+from . import conversation, habits, limits, plan as planning
 from . import taint
 from .brain.router import (
     Intent, IntentRouter, NAME_ACK, addressed_to_jalen, is_kill_phrase,
-    solicits_an_answer, widened_door, without_a_misheard_name,
+    says_the_name, solicits_an_answer, widened_door, without_a_misheard_name,
 )
 from .config import CONFIG, SECRETS
 from . import crashlog
@@ -47,6 +48,35 @@ from .safety import SafetyEngine, Tier
 from .timing import TimingLog, TurnTimer
 from . import tools as systools
 from .ui.orb import Orb, TranscriptWindow
+
+def _governor_of(app):
+    """
+    The usage governor (jalen/limits.py) of this app, or None when it has none:
+    a test that builds a Jalen with Jalen.__new__ and sets only what it needs
+    has no engine at all, and a stub engine has no governor. No governor means
+    no limits and no lockdown, exactly as before they existed; the
+    kind-of-thing gate is a separate object and is not affected.
+
+    A function and not a method, because tests borrow methods like
+    Jalen.handle_with_brain onto bare objects, and a method would have to be
+    borrowed along with them.
+    """
+    return getattr(getattr(app, "safety", None), "governor", None)
+
+
+def _on_air(speaker) -> bool:
+    """
+    Is Jalen's voice in the room (Speaker.on_air) - not merely a speaking
+    session open, which for a brain reply's stream is the whole turn. A
+    speaker without the notion - every test double built before it - answers
+    with `speaking`. A function for the reason _governor_of is one: tests
+    borrow methods such as Jalen._await_playback onto bare objects.
+    """
+    on_air = getattr(speaker, "on_air", None)
+    if on_air is None:
+        return bool(getattr(speaker, "speaking", False))
+    return bool(on_air)
+
 
 # Queued mic audio older than this predates the wake word, so it can't be part
 # of the command and is dropped. Anything under it is the tail of the phrase
@@ -322,6 +352,57 @@ ANSWER_STT_SLACK_S = 5.0
 # instead. It is the whole tail for a caller that does not say.
 ECHO_REACHES_THE_GATE_S = ECHO_TAIL_S + 4.0 + ANSWER_STT_SLACK_S
 
+# HOW LONG A QUESTION WAITS FOR AN ANSWER OF HIS THAT IS ON ITS WAY.
+# See Jalen._held_for.
+#
+# Both of Jalen's questions have a window, and both were judged by when his
+# words ARRIVED, which is late: a sentence reaches process() 3.2s after the
+# sound ENDS at the median (1.4s of endpoint silence, 1.8s of transcription;
+# see ECHO_TAIL_S).
+#
+#   "... Say stop if you don't want that." waits safety.undo_window_s - 2s as
+#   shipped - so "stop" said the instant the announcement finished arrived more
+#   than a second after the action had gone ahead. The spoken stop almost
+#   never stopped anything.
+#
+#   "... Confirm?" waits safety.confirm_timeout_s, 20s, so a "yes" begun in
+#   its last three seconds or so arrived after it had shut: "No answer, so
+#   I've cancelled it." to a man who had just said yes.
+#
+# So a sentence that BEGAN before the window closed - including one already
+# being heard when it opened, which is "stop" said over the announcement -
+# holds the window until process() has judged it, and at most this long from
+# when it began:
+#
+#     3.0   saying it. NOT MEASURED: "stop", "yes, do it" and "wait, hold on"
+#           are well inside it, and a sentence that runs longer is no longer
+#           a quick answer to the question
+#   + 4.0   the longest endpoint silence, the patient one (vad.silence_ms)
+#   + 5.0   transcription: 4.4s at p95 (ANSWER_STT_SLACK_S)
+#   = 12.0
+#
+# Silence holds nothing - an announcement nobody answers still goes after 2s,
+# a question nobody answers is still cancelled after 20 - and a sentence that
+# began after the window closed is not an answer to it. answer_hold_s()
+# recomputes it from the shipped vad.silence_ms, for Jalen and for the brain's
+# hook timeout, which has to outlive the longest hold.
+SAYING_AN_ANSWER_S = 3.0
+ANSWER_HOLD_S = SAYING_AN_ANSWER_S + 4.0 + ANSWER_STT_SLACK_S
+
+# How long shutdown waits for the brain's Claude Code child to say goodbye.
+# NOT MEASURED: a clean disconnect is a message and an exit; three seconds is
+# room for that on a slow machine, and the child is ended with the process
+# anyway. It used to be unbounded: a child that did not answer held shutdown
+# until the kill key's eight-second grace ran out and it was force-killed.
+BRAIN_STOP_TIMEOUT_S = 3.0
+
+
+def answer_hold_s(cfg) -> float:
+    """ANSWER_HOLD_S with this config's patient endpoint (vad.silence_ms)."""
+    return (SAYING_AN_ANSWER_S
+            + float(cfg.get_path("vad.silence_ms", 4000)) / 1000.0
+            + ANSWER_STT_SLACK_S)
+
 # THE LEAKY ECHO RULE, FOR AN ANSWER TO "...Confirm?". Four or more words of
 # which 80% are words of the question: the rule _sounds_like_its_own_voice
 # measured on the whole corpus (0 of 853 real utterances refused, 725 of 725
@@ -352,6 +433,41 @@ ECHO_REACHES_THE_GATE_S = ECHO_TAIL_S + 4.0 + ANSWER_STT_SLACK_S
 # way to be wrong. [NOT MEASURED] how often he answers like that; none of the 20.
 _CONFIRM_ECHO_MIN_WORDS = 4
 _CONFIRM_ECHO_SHARE = 0.80
+# For a fragment holding a plain answer word the question itself contains
+# (see _echoes_the_confirmation). NOT MEASURED: a half is "sure see ya"
+# (two of three) and "sure ya" (one of two), the shortest mangled echoes of
+# a message read out in a question; only questions that quote an answer word
+# - a voice or text message's own words - can ever reach it.
+_CONFIRM_ECHO_SHARE_WITH_ITS_ANSWER = 0.5
+
+# One plain answer written two ways is one word to the echo test. Speech
+# recognition writes the speaker's "ok" back as "okay" as readily as "ok", and
+# "okay" - "a plain answer word the question does not contain" - settled a
+# mangled echo of a message that said "ok sounds good" as his answer.
+_ANSWER_FAMILY = {"okay": "ok", "yeah": "yes", "yep": "yes", "yup": "yes",
+                  "yea": "yes", "nope": "no", "nah": "no"}
+
+
+def _quoted_words(question: str) -> set[str]:
+    """
+    The words of what a question quotes, or nothing: every span in double
+    quotes - the message a send reads out (`saying "..."`), the start of a
+    post or an edit (`starts "..."`), the message an action names (`the
+    message with "..."`), an email's subject (`subject "..."`) - and what
+    follows `saying: ` (a voice message, _voice_message_summary).
+
+    EVERY QUOTED SPAN, not the two openings it used to look for. The edit,
+    delete, forward and email questions quote with `with "` and `subject "`,
+    so a garbled echo of their words - "sure see ya" after a forward of "sure,
+    see you at six" - was not recognised and approved the RED action itself
+    (review of PR #1, finding 2). A quote left open runs to the end.
+    """
+    low = (question or "").lower()
+    parts = [inside for inside, _closed in re.findall(r'"([^"]*)("|$)', low)]
+    at = low.find("saying: ")
+    if at >= 0:
+        parts.append(low[at + len("saying: "):])
+    return {_ANSWER_FAMILY.get(w, w) for part in parts for w in _SPOKEN_WORD.findall(part)}
 
 # Plain yes/no words. An echo of a confirmation question cannot contain one
 # that the question does not (see _echoes_the_confirmation), and a genuine
@@ -367,6 +483,62 @@ _PLAIN_ANSWER_WORDS = frozenset({
 # parser pads the sentence the same way.
 _CORRECTION_MARKERS = (" instead ", " actually ", " rather ", " but ",
                        " first ", " change ")
+
+# HE CORRECTED HIMSELF (Jalen._his_last_word): the words after the last of
+# these are his answer, when they are nothing but an answer. Padded like the
+# sentence they are searched in.
+_SELF_CORRECTIONS = (" i mean ", " i meant ", " actually ", " on second thought ",
+                     " on second thoughts ", " wait ", " hold on ", " hang on ",
+                     " scratch that ", " scrap that ", " never mind ", " nevermind ",
+                     " sorry ")
+# What "nothing but an answer" is made of: yes and no words, the action said
+# back ("do it", "send it"), fillers, and how he talks to Jalen ("yes brother,
+# do it"). A word outside this - "Rodion", "check", "first" - makes it more
+# than an answer, and the whole sentence is read instead.
+_DECISION_WORDS = frozenset("""
+    yes yeah yep yup ya yea yeh yah aye ok okay alright fine sure please go ahead
+    do it that for proceed confirm confirmed of course absolutely definitely
+    certainly carry on continue let's lets now then just right send delete close
+    empty run post submit them this no nope nah don't dont not cancel stop abort
+    never mind forget leave skip i i'm it's that's mean meant so well oh um uh
+    hmm thanks thank you sir boss man bro brother dude jalen
+""".split())
+# A yes strong enough to be what he finished on after a correction. Not a
+# bare "okay" or "fine": "wait, okay?" asks him to wait as easily as it agrees.
+_STRONG_YES = (" yes ", " yeah ", " yep ", " yup ", " go ahead ", " do it ",
+               " go for it ", " proceed ", " confirm ", " confirmed ", " of course ",
+               " absolutely ", " definitely ", " certainly ", " let's do it ",
+               " lets do it ", " carry on ", " send it ", " delete it ")
+# An explicit yes, beside which a courtesy built from a negative word is not the
+# answer: "yes, no problem". See BESIDE A PLAIN YES in _read_decision.
+_EXPLICIT_YES = (" yes ", " yeah ", " yep ", " yup ", " sure ", " okay ", " ok ",
+                 " of course ", " absolutely ", " definitely ", " certainly ",
+                 " go ahead ", " do it ", " alright ", " all right ")
+# NOT "don't worry": "okay, don't worry about it" is "never mind", and with it
+# here the refusal was deleted and the "okay" approved the RED action (review
+# of PR #1, finding 1). Its n't now refuses, as it always did on its own.
+_COURTESIES_WITH_A_NEGATIVE = (" no problem ", " no problems ", " not a problem ",
+                               " no worries ", " no doubt ")
+# A yes or a no only as the WHOLE answer.
+_WHOLE_YES = frozenset({
+    "go", "go go", "go now", "please", "bet", "say less", "let's go", "lets go",
+    "totally", "obviously", "naturally", "indeed", "for sure", "you bet", "roger",
+    "affirm", "100", "100 percent", "hundred percent", "a hundred percent",
+    "send", "delete", "close", "post", "submit", "yes yes", "yes yes yes",
+})
+_WHOLE_NO = frozenset({"pass", "nope nope", "no no", "no no no"})
+
+# A whole answer made of these, typed on a phone, is a yes or a no - see
+# Jalen._parse_yes_no. No is checked first, like every other negative there.
+_YES_EMOJI = frozenset("👍👌✅✔🆗")
+_NO_EMOJI = frozenset("👎❌✖🛑🚫✋")
+# What rides along with a thumb without changing it: skin tones (U+1F3FB to
+# U+1F3FF), the emoji variation selector (U+FE0F) and the zero-width joiner
+# (U+200D). Built from code points, not typed: these characters are invisible,
+# and an editor that turns an escape into the character itself leaves bytes in
+# the source nobody can see.
+_EMOJI_DECORATION = frozenset(
+    [chr(c) for c in range(0x1F3FB, 0x1F400)] + [chr(0xFE0F), chr(0x200D)])
 
 
 class ConfirmAnswer:
@@ -400,6 +572,20 @@ class ConfirmAnswer:
 
     def __repr__(self) -> str:
         return f"ConfirmAnswer({self.outcome!r}, {self.words!r})"
+
+
+@dataclass(frozen=True)
+class Tap:
+    """What a tap on a button under a question came to: see Jalen.answer_from_tap."""
+
+    accepted: bool
+    toast: str
+
+
+# One tap is decided at a time: "is this question still open?" and "put the
+# answer on the queue" are one step, or Yes and No tapped together could both
+# answer it. Process-wide, because there is one Jalen per process.
+_TAP_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -453,6 +639,12 @@ class Jalen:
         self.session_id = uuid.uuid4().hex[:12]
 
         self.audit = AuditLog(cfg, self.session_id)
+        # Memory keeps private mode's promise too (memory.set_private): the
+        # audit log's switch is the one switch, and it may start on
+        # (memory.private_mode_default).
+        from .tools import memory as memory_tools
+
+        memory_tools.set_private(self.audit.private)
 
         # Before anything overwrites it: how did the LAST run end?
         #
@@ -463,6 +655,10 @@ class Jalen:
         # previous stop says nothing at all: a line on every single startup
         # is noise, and noise is what stops anyone reading the file.
         previous = crashlog.previous_exit()
+        # Kept: the file is this run's from the next line on, and "what's wrong
+        # with you?" read it there - "state: running", this run's own - and so
+        # always said the last run had crashed (review of PR #1, finding 3).
+        self._previous_exit = previous
         note = crashlog.describe_previous_exit(previous)
         if note:
             self.audit.write("system", summary=note, outcome="failed",
@@ -473,6 +669,7 @@ class Jalen:
         )
 
         self.safety = SafetyEngine(cfg)
+        self._attach_limits()
         self.router = IntentRouter(cfg)
 
         self.mic = Microphone(cfg)
@@ -485,6 +682,11 @@ class Jalen:
         self.transcript = TranscriptWindow(cfg)
         self.brain = None  # started by prewarm(), or lazily on first real question
         self._brain_lock = asyncio.Lock()
+        # Where the conversation to resume is written down, for "new
+        # conversation" said before any brain exists (Brain.forget_conversation).
+        from .brain.agent import saved_session_path
+
+        self._brain_session_path = saved_session_path(cfg)
 
         # One persistent event loop, on its own thread, for the whole process
         # lifetime. Brain's ClaudeSDKClient (and anything else async) is
@@ -522,9 +724,28 @@ class Jalen:
         # The confirmation currently being asked, and when it finished
         # playing - for recognising its own echo. See confirm().
         self._confirm_lock: asyncio.Lock | None = None
+        # The id of the question that is open, for the buttons under it to bind
+        # to, and the door's way of sending a question WITH buttons if it has
+        # one (the Telegram bot installs it). See _put_the_question.
+        self._prompt_id = ""
+        self._offer_buttons = None
+        # Bumped when a question is put and when it is over, so a wait that
+        # outlived its question knows it (_wait_for); and the words of the open
+        # AMBER announcement, for telling its echo from his answer.
+        self._prompt_seq = 0
+        self._stop_question = ""
         self._confirm_question = ""
         self._confirm_asked_at = 0.0
         self._confirm_reasked = False
+        # The model that reads an answer to "Confirm?" the rules could not
+        # (_read_unclear_answer); "" is off.
+        self._answer_reader_model = str(cfg.get_path("safety.answer_reader_model", "") or "")
+        self._answer_reader_timeout_s = float(
+            cfg.get_path("safety.answer_reader_timeout_s", 2.5))
+        # How long a question waits, said and typed (_confirm_timeout_s,
+        # _undo_window_s): read here once, as config is, rather than on every
+        # question (review of PR #1, finding 15).
+        self._question_windows = self._read_question_windows(cfg)
         # "after the work has been done, it should ask the user, Hey boss,
         # How do you rate my work out of 10". Holds the context of the job
         # being rated, or None. Deliberately NOT reusing _awaiting_reply:
@@ -559,6 +780,17 @@ class Jalen:
             ECHO_TAIL_S
             + float(cfg.get_path("vad.silence_ms", 4000)) / 1000.0
             + ANSWER_STT_SLACK_S)
+        # How long a question - "say stop", "Confirm?" - waits for a sentence of
+        # his that is on its way (ANSWER_HOLD_S), and what is on its way: the
+        # onset of the sentence the microphone is hearing or transcribing now
+        # (run() writes it), and of each one handed to process() that
+        # _take_as_answer has not judged yet. Read by _held_for, on the thread
+        # waiting for the answer.
+        self._answer_hold_s = answer_hold_s(cfg)
+        self._hearing_since: float | None = None
+        self._judging: set[float] = set()
+        # Until when a "Confirm?" asked again stays open - see _ask_again.
+        self._reask_until = 0.0
         # How long past the end of an answer window a sentence that BEGAN
         # inside it can still arrive: the longest one utterance can run, plus
         # the time to transcribe it. See ANSWER_STT_SLACK_S.
@@ -641,6 +873,122 @@ class Jalen:
         except Exception as exc:  # noqa: BLE001
             self.audit.error("bridge.start", exc)
 
+    # ------------------------------------------------------------------ limits
+    def _attach_limits(self) -> None:
+        """
+        Let the governor remember (jalen/limits.py): what has been used in each
+        window, and whether he left a lockdown on. Done here and not in the
+        engine so that only a real Jalen writes data/jalen-usage.json and
+        data/jalen-lockdown.json - building an engine in a test or a script
+        does not.
+
+        A rule that could not be read is logged as a failed system line and
+        said once at startup (see startup_notes), never
+        dropped silently: a limit that quietly isn't there reads as one that is.
+        """
+        governor = _governor_of(self)
+        if governor is None:
+            return
+        governor.attach(on_error=lambda exc: self.audit.error("limits", exc))
+        limits.install(governor)
+        for problem in governor.problems:
+            self.audit.write("system", summary=f"limits: {problem}", outcome="failed")
+
+    def _admit(self, verdict):
+        """
+        The governor's answer for this action: may it go ahead, or is it past
+        a limit or in lockdown? The ONE place the router path asks; the brain's
+        hook asks the same governor through the same engine. Cheap when nothing
+        is near a limit - the answer is decided without leaving this thread -
+        and only a question to him goes through the event loop.
+        """
+        governor = _governor_of(self)
+        if governor is None:
+            return limits.OK
+        answer = governor.quick(verdict)
+        if answer is not None:
+            return answer
+        return self._run_coro(governor.admit(verdict, self.confirm))
+
+    def _lockdown_on(self) -> str:
+        """
+        "Hands off." Every acting tool is refused until he lifts it; reading
+        and answering go on. Written down, so a restart does not forget it -
+        and if it could not be written down, he is told, because a lockdown he
+        thinks survives a restart and does not is the dangerous version.
+        """
+        governor = _governor_of(self)
+        if governor is None:
+            return "I don't have a limits engine loaded, so I can't lock down."
+        was_locked = governor.locked
+        on_disk = governor.lock(reason="he said hands off")
+        self.audit.write("system", summary="lockdown on", detail={"on_disk": on_disk})
+        said = ("Still in lockdown." if was_locked else
+                "Hands off. I'll only read and answer until you say end the lockdown.")
+        if not on_disk:
+            said += " I couldn't write that down, so a restart would forget it."
+        return said + self._running_jobs_sentence()
+
+    def _lockdown_off(self, from_him: bool) -> str:
+        """
+        End the lockdown - ONLY for a sentence that is his: the router rule
+        matched what he said word for word (not text expanded from something
+        read, not a misheard-name door) AND it came with his name or was typed
+        (process() passes from_him=False for speech admitted without the name,
+        which may be the television). The brain has no tool that does this,
+        and nothing Jalen reads
+        reaches this branch, because a page can put words in front of the
+        model but not into this comparison.
+        """
+        governor = _governor_of(self)
+        if governor is None or not governor.locked:
+            return "I wasn't in lockdown."
+        if not from_him:
+            return ("I don't lift a lockdown on a guess. Say it with my name, in one "
+                    "go: Jalen, end the lockdown.")
+        if not governor.unlock():
+            return ("I couldn't clear the lockdown record, so I'm staying locked rather "
+                    "than guess. Delete data/jalen-lockdown.json yourself to lift it.")
+        self.audit.write("system", summary="lockdown off")
+        return "Lockdown over. I'm acting again."
+
+    def _running_jobs_sentence(self) -> str:
+        """Coding jobs already running are NOT stopped by a lockdown: say so."""
+        try:
+            from .tools import devwork
+
+            running = len(devwork.live_jobs())
+        except Exception:  # noqa: BLE001 - a note about jobs must not break the lock
+            return ""
+        if not running:
+            return ""
+        if running == 1:
+            return " One coding job is still running; say cancel the job if you want it stopped."
+        return (f" {running} coding jobs are still running; say cancel the jobs if you want "
+                "them stopped.")
+
+    def startup_notes(self) -> list[str]:
+        """
+        Two things he must not have to discover by asking: that a lockdown he
+        set is still on after a restart, and that a limit in safety.yaml could
+        not be read. Silence about either reads as "all fine". Spoken by
+        run() (and so only when he has unmuted me - a muted Jalen stays
+        muted), printed by the text mode.
+        """
+        governor = _governor_of(self)
+        notes: list[str] = []
+        if governor is None:
+            return notes
+        if governor.locked:
+            notes.append("I'm still in lockdown from before, so I'm only reading. "
+                         "Say end the lockdown when you want me acting again.")
+        if governor.problems:
+            first = governor.problems[0]
+            more = f", and {len(governor.problems) - 1} more" if len(governor.problems) > 1 else ""
+            notes.append(f"One of your limits in safety.yaml couldn't be read: {first}{more}. "
+                         "The rest are in force.")
+        return notes
+
     # -------------------------------------------------------------- event loop
     def _start_loop(self) -> None:
         ready = threading.Event()
@@ -656,16 +1004,22 @@ class Jalen:
         self._loop_thread.start()
         ready.wait()
 
-    def _run_coro(self, coro):
+    def _run_coro(self, coro, timeout: float | None = None):
         """
         Submit a coroutine to the persistent loop from any other thread and
         block until it finishes. This is the only way async work (brain
         turns, confirmations, announces) should run — never asyncio.run().
+        `timeout` is for shutdown only: a turn waits as long as it takes.
         """
         if self._loop is None:
             raise RuntimeError("Jalen's event loop isn't running")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result()
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            # Out of time: stop it, rather than leave it running on the loop.
+            future.cancel()
+            raise
 
     def _stop_loop(self) -> None:
         if self._loop is None:
@@ -812,18 +1166,141 @@ class Jalen:
             self._confirm_lock = asyncio.Lock()
         return self._confirm_lock
 
+    def _confirm_timeout_s(self) -> float:
+        """
+        How long a question waits for his answer: the spoken window by voice,
+        a longer one when he answers by TYPING (text mode, the Telegram bot).
+
+        Twenty seconds is the window for a sentence said aloud into a room he
+        is standing in. A question that arrives as a Telegram notification on a
+        phone is read when the phone is picked up, then typed with a thumb, and
+        the same twenty seconds cancelled it ("No answer, so I've cancelled
+        it.") before he could have seen it - the cancellation looks like the
+        asking was broken. `mode` is how this knows which kind of room it is;
+        a Jalen built without it is a voice one. The brain's PreToolUse hook is
+        given a timeout that covers this (Brain._hook_timeout_s), because the
+        SDK cuts a hook off at 60 seconds unless told otherwise.
+        """
+        spoken, typed = self._windows()["confirm"]
+        if getattr(self, "mode", "voice") in ("text", "telegram"):
+            return max(spoken, typed)
+        return spoken
+
+    def _undo_window_s(self) -> float:
+        """
+        How long an AMBER announcement waits for "stop": two seconds by voice,
+        longer where "stop" has to be TYPED. In the Telegram bot two seconds is
+        less than the time it takes to read the message, so the stop window
+        existed on paper and nobody could ever use it - the action just ran. The
+        same split as _confirm_timeout_s, for the same reason.
+        """
+        spoken, typed = self._windows()["undo"]
+        if getattr(self, "mode", "voice") in ("text", "telegram"):
+            return max(spoken, typed)
+        return spoken
+
+    @staticmethod
+    def _read_question_windows(cfg) -> dict:
+        """(said, typed) seconds for a "Confirm?" and for an AMBER "say stop"."""
+        return {
+            "confirm": (float(cfg.get_path("safety.confirm_timeout_s", 20)),
+                        float(cfg.get_path("safety.confirm_timeout_typed_s", 300))),
+            "undo": (float(cfg.get_path("safety.undo_window_s", 4)),
+                     float(cfg.get_path("safety.undo_window_typed_s", 10))),
+        }
+
+    def _windows(self) -> dict:
+        """The windows read in __init__; a Jalen built without it reads its cfg."""
+        windows = getattr(self, "_question_windows", None)
+        return windows if windows is not None else self._read_question_windows(self.cfg)
+
+    def _put_the_question(self, question: str, kind: str) -> None:
+        """
+        Put a question to him: say it, and where the door can carry buttons (the
+        Telegram bot) send it with something to tap - Yes and No under a
+        "Confirm?", Stop under an announcement. `kind` is "confirm" or "stop".
+
+        safety.yaml has promised "or a tap in Telegram" since the first draft and
+        nothing sent one: a question that reached his phone could only be
+        answered by typing, which is the slow path on exactly the device that
+        asks for it. The words are still sent, so a door that cannot show
+        buttons, or a button that fails to send, costs nothing but the buttons.
+
+        Every question gets a fresh id and a tap is only accepted for the one
+        that is open (answer_from_tap), so a button from an earlier question,
+        or the same button twice, can never answer this one.
+        """
+        self._prompt_id = uuid.uuid4().hex[:8]
+        self._prompt_seq = getattr(self, "_prompt_seq", 0) + 1     # see _wait_for
+        offer = getattr(self, "_offer_buttons", None)
+        if offer is not None:
+            try:
+                offer(question, kind, self._prompt_id)
+                return
+            except Exception as exc:  # noqa: BLE001 - buttons are a convenience
+                self.audit.error("prompt.buttons", exc)
+        self.say_blocking(question)
+
+    def answer_from_tap(self, data: str) -> "Tap":
+        """
+        He tapped a button under a question. Called by the Telegram bot for a
+        callback from the authorized user, and by nothing else.
+
+        A tap counts only if ALL of these hold, and a tap that fails any of them
+        changes nothing and says why:
+          * it carries the id of the question that is open RIGHT NOW (an old
+            button, or a question that has timed out, is refused);
+          * it is the kind of answer that question takes - Yes or No for a
+            "Confirm?", Stop or Go ahead for an announcement - so a Stop
+            cannot approve a RED action, a Yes cannot be read as "stop", and
+            Go ahead can only end a wait for "stop", never answer "Confirm?";
+          * it is the first: the id is spent when it is accepted, so a second
+            tap of the same button, or both Yes and No, cannot answer twice.
+
+        It does NOT go through process(), and so cannot be mistaken for a new
+        instruction, clears no taint, and has no echo to defend against: no
+        microphone is involved.
+        """
+        parts = (data or "").split(":")
+        if len(parts) != 3 or parts[0] != "jalen" or not parts[1]:
+            return Tap(False, "That isn't one of my buttons.")
+        _tag, prompt_id, choice = parts
+        gone = Tap(False, "That question was already answered, or ran out of time.")
+        with _TAP_LOCK:
+            if prompt_id != getattr(self, "_prompt_id", ""):
+                return gone
+            if choice in ("yes", "no") and self._awaiting_confirmation:
+                self._prompt_id = ""
+                self._answer_q.put(ConfirmAnswer(choice, f"tapped {choice}"))
+                done = Tap(True, "Approved." if choice == "yes" else "Cancelled.")
+            elif choice == "stop" and self._awaiting_stop:
+                self._prompt_id = ""
+                self._answer_q.put(False)
+                done = Tap(True, "Stopped.")
+            elif choice == "go" and self._awaiting_stop:
+                # "Go ahead": end the stop window now instead of waiting it out.
+                # It approves nothing the announcement was not already doing.
+                self._prompt_id = ""
+                self._answer_q.put(True)
+                done = Tap(True, "Going ahead.")
+            else:
+                return gone
+        self.audit.write("system", summary=f"tapped {choice} under a question")
+        return done
+
     async def confirm(self, question: str) -> "ConfirmAnswer":
         """RED tier: ask out loud and wait for a real yes (spec F45/F46)."""
-        timeout = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
+        timeout = self._confirm_timeout_s()
         async with self._prompt_lock():
             self.orb.set_state("blocked")
-            self.say_blocking(question)
+            self._put_the_question(question, "confirm")
             # Stamped AFTER the question has finished playing, so the echo
             # window measures the tail of "...Confirm?" arriving back through
             # the microphone - not the length of the question.
             self._confirm_question = question
             self._confirm_asked_at = time.monotonic()
             self._confirm_reasked = False
+            self._reask_until = 0.0          # nothing asked again yet (_ask_again)
             self._awaiting_confirmation = True
             self._drain_answers()
             try:
@@ -832,6 +1309,8 @@ class Jalen:
                 )
             finally:
                 self._awaiting_confirmation = False
+                self._prompt_id = ""        # a button under this question is spent
+                self._prompt_seq = getattr(self, "_prompt_seq", 0) + 1     # and its wait
                 self.orb.set_state("thinking")
         if answer is None:
             self.say_blocking("No answer, so I've cancelled it.")
@@ -844,9 +1323,13 @@ class Jalen:
 
     async def announce(self, text: str) -> None:
         """AMBER tier: say it, then give a short window to say stop."""
-        window = float(self.cfg.get_path("safety.undo_window_s", 4))
+        window = self._undo_window_s()
         async with self._prompt_lock():
-            self.say_blocking(text)
+            self._put_the_question(text, "stop")
+            # Its own words, so process() can tell the announcement coming back
+            # through the speakers from his answer to it (_echoes_the_announcement).
+            self._stop_question = text
+            self._reask_until = 0.0          # a "Confirm?" asked again is over
             self._awaiting_stop = True
             self._drain_answers()
             try:
@@ -855,6 +1338,8 @@ class Jalen:
                 )
             finally:
                 self._awaiting_stop = False
+                self._prompt_id = ""        # a button under this announcement is spent
+                self._prompt_seq = getattr(self, "_prompt_seq", 0) + 1     # and its wait
         if stopped:
             raise RuntimeError("cancelled by user")
 
@@ -896,10 +1381,11 @@ class Jalen:
         else:
             waited = began_at - asked_at
             window = ECHO_TAIL_S
-        heard = _SPOKEN_WORD.findall((text or "").lower())
+        heard = [_ANSWER_FAMILY.get(w, w) for w in _SPOKEN_WORD.findall((text or "").lower())]
         if not heard:
             return False
-        asked = _SPOKEN_WORD.findall((getattr(self, "_confirm_question", "") or "").lower())
+        asked = [_ANSWER_FAMILY.get(w, w) for w in
+                 _SPOKEN_WORD.findall((getattr(self, "_confirm_question", "") or "").lower())]
         vocabulary = set(asked)
 
         # AN ECHO OF THE QUESTION CANNOT CONTAIN A PLAIN YES OR NO THAT THE
@@ -934,10 +1420,71 @@ class Jalen:
             # text contains; both time out and CANCEL, the safe way to fail.
             if all(word in vocabulary for word in heard):
                 return True
+            # A PLAIN ANSWER WORD FROM THE MESSAGE THE QUESTION READS OUT -
+            # "...saying "sure, see you at six". Confirm?" - is the one way an
+            # echo can bring back a word that answers it, and a short mangled
+            # fragment of that message ("sure see ya") was under the
+            # four-word floor below and approved the send. When half or more
+            # of what was heard is the MESSAGE's own words, it is the echo.
+            # Counted against the message, not the whole question: "yes send
+            # it" to a message that says "yes we are meeting" is one word of
+            # it in three, and him. Cost: his own answer made mostly of the
+            # message's words in these few seconds ("sure see you") is
+            # ignored, and the question times out and cancels - the safe way.
+            quoted = _quoted_words(getattr(self, "_confirm_question", "") or "")
+            if quoted and any(word in _PLAIN_ANSWER_WORDS and word in quoted for word in heard):
+                from_message = sum(1 for word in heard if word in quoted)
+                if from_message / len(heard) >= _CONFIRM_ECHO_SHARE_WITH_ITS_ANSWER:
+                    return True
             if len(heard) >= _CONFIRM_ECHO_MIN_WORDS:
                 hits = sum(1 for word in heard if word in vocabulary)
                 return hits / len(heard) >= _CONFIRM_ECHO_SHARE
         return False
+
+    def _hears_its_own_speakers(self) -> bool:
+        """
+        Can a sentence reaching process() be Jalen's own voice coming back?
+        Only in voice mode. Typed text - run.py --text, the Telegram bot - never
+        went near a microphone, so it is never an echo, whatever words it uses.
+
+        The echo tests were applied to typing anyway, and they are built to
+        throw away what sounds like the question: a typed "Confirm" - the
+        natural reply to "... Confirm?" in a chat - "Confirmed" or "confirm"
+        within about ten seconds of the question was dropped IN SILENCE. No
+        reply, no "was that a yes or a no?", and the question sat out its whole
+        window and cancelled. Reproduced against process() in text and Telegram
+        mode before this was written (tests/test_typed_answers_are_never_echo.py).
+        A Jalen built without a mode is a voice one, as everywhere else.
+        """
+        return getattr(self, "mode", "voice") == "voice"
+
+    def _echoes_the_announcement(self, text: str) -> bool:
+        """
+        Is this the END of the open AMBER announcement coming back through the
+        microphone - "want that.", "don't want that." - rather than his answer?
+
+        Deliberately narrower than _echoes_the_confirmation, and the asymmetry
+        is the point. There, a missed echo APPROVES a RED action, so anything
+        made only of the question's own words is thrown away. Here a missed
+        echo can only STOP an action (the safe direction), while throwing away
+        every sentence made of "say stop if you don't want that"'s words would
+        throw away "stop that" and "don't" - the answers the window is for.
+        So only an exact tail of the announcement counts as its echo: that is
+        what comes back through the speakers, and nobody answers "want that".
+        Longer echoes are refused before this by the address gate, which runs
+        _sounds_like_its_own_voice on the stop window with the sound's onset.
+        """
+        def words(sentence: str) -> list[str]:
+            # Speech recognition writes "don’t" with U+2019, which _SPOKEN_WORD
+            # splits in two; flattened exactly as _parse_yes_no flattens it.
+            flat = (sentence or "").lower()
+            for curly in ("’", "ʼ", "‘", "`"):
+                flat = flat.replace(curly, "'")
+            return _SPOKEN_WORD.findall(flat)
+
+        heard = words(text)
+        said = words(getattr(self, "_stop_question", ""))
+        return bool(heard) and len(heard) <= len(said) and said[-len(heard):] == heard
 
     def _drain_answers(self) -> None:
         while not self._answer_q.empty():
@@ -946,17 +1493,224 @@ class Jalen:
             except queue.Empty:
                 break
 
+    # How often a wait looks up to check that its question is still the open
+    # one. Only an ABANDONED wait is noticed this late - an answer wakes it at
+    # once - so this costs no latency. NOT MEASURED: half a second is far
+    # inside the shortest window (the 2 s AMBER one).
+    _ABANDONED_CHECK_S = 0.5
+    # How often a wait HELD past its window for a sentence on its way looks
+    # again (_held_for), so that once the sentence turns out to answer nothing
+    # the action goes at once rather than at the end of the hold. NOT MEASURED:
+    # a twentieth of a second is under anything he could notice, and a hold
+    # lasts seconds at most.
+    _HELD_CHECK_S = 0.05
+
+    def _wait_for(self, timeout: float, hold=None):
+        """
+        The next answer to the question that is open NOW, or None when its time
+        runs out. The one wait behind confirm() and announce().
+
+        TWO THINGS A PLAIN queue.get() GOT WRONG
+        ----------------------------------------
+        The deadline was not one moment. A tap or a spoken answer that landed
+        in the instant between get() timing out and the question closing was
+        acknowledged ("Approved." on his phone) and then thrown away, while
+        Jalen said "No answer, so I've cancelled it." Now, at the deadline,
+        under the tap lock, the question's id is spent - a tap from here on is
+        refused, and says so - and one that landed just before is still taken.
+
+        And a wait could outlive its question. The SDK cancels a hook the CLI
+        has given up on, which cancels confirm(), but not the thread blocked in
+        get(): it went on waiting, up to the whole window, and the next
+        question's answer could be handed to it instead. Every question bumps
+        _prompt_seq when it is put and again when it is over, so an abandoned
+        wait notices within _ABANDONED_CHECK_S, and an answer it took that
+        belongs to a later question is put back.
+
+        AND A WINDOW CAN BE HELD. `hold` - the AMBER window passes _held_for -
+        is asked, once `timeout` has run out, until when a sentence of his that
+        is on its way keeps the window open. The deadline moves out to that
+        moment and comes back as soon as the sentence has been judged: an
+        answer wakes the wait as it always did, and a sentence that answered
+        nothing lets it end at the next look (_HELD_CHECK_S).
+        """
+        mine = getattr(self, "_prompt_seq", 0)
+        closes = time.monotonic() + timeout
+        while True:
+            now = time.monotonic()
+            deadline = closes
+            if hold is not None and now >= closes:
+                deadline = max(closes, hold(closes))
+            remaining = deadline - now
+            if remaining <= 0:
+                with _TAP_LOCK:
+                    if getattr(self, "_prompt_seq", 0) == mine:
+                        self._prompt_id = ""
+                    try:
+                        return self._answer_q.get_nowait()
+                    except queue.Empty:
+                        return None
+            look = self._ABANDONED_CHECK_S if now < closes else self._HELD_CHECK_S
+            try:
+                answer = self._answer_q.get(timeout=min(remaining, look))
+            except queue.Empty:
+                if getattr(self, "_prompt_seq", 0) != mine:
+                    return None
+                continue
+            if getattr(self, "_prompt_seq", 0) != mine:
+                self._answer_q.put(answer)
+                return None
+            return answer
+
     def _wait_for_answer(self, timeout: float) -> Optional[bool]:
-        try:
-            return self._answer_q.get(timeout=timeout)
-        except queue.Empty:
-            return None
+        # Held past `timeout` while a sentence of his is on its way (_held_for):
+        # a "yes" begun in the last seconds of the twenty used to arrive after
+        # the question had shut, and he was told it was cancelled.
+        return self._wait_for(timeout, hold=self._held_for)
 
     def _wait_for_stop(self, window: float) -> bool:
+        # False is "stop" (a kill phrase, a refusal, the Stop button); True is
+        # "go ahead now", which ends the wait early without stopping anything.
+        # Held past `window` while a sentence of his is on its way (_held_for).
+        return self._wait_for(window, hold=self._held_for) is False
+
+    def _held_for(self, closes: float) -> float:
+        """
+        Until when a question's window - an AMBER "say stop", a RED "Confirm?" -
+        that would close at `closes` waits for a sentence of his on its way to
+        process(); 0.0 when nothing holds it.
+
+        By voice both windows were judged by when his words ARRIVED (see
+        ANSWER_HOLD_S): "stop" said the instant an announcement ended reached
+        process() more than a second after the action had run, and a "yes"
+        begun at the end of a "Confirm?" arrived after it had been cancelled.
+        So a sentence holds the window if its sound BEGAN before `closes` -
+        every window here is judged by when he began to speak - and
+        _take_as_answer has not judged it yet: the microphone is still hearing
+        it or transcribing it (`_hearing_since`), or has handed it on
+        (`_judging`). It holds until it has been judged, and never longer than
+        ANSWER_HOLD_S from when it began.
+
+        Only the microphone loop puts anything here, so a typed door, which
+        has its own longer windows (undo_window_typed_s,
+        confirm_timeout_typed_s), is never held.
+        """
+        # A "Confirm?" he was asked again (_ask_again) is open for a whole
+        # window from then, and a sentence he began inside THAT is his answer.
+        reasked = getattr(self, "_reask_until", 0.0)
+        closes = max(closes, reasked)
+        # A copy: process() takes onsets out of it on another thread.
+        on_its_way = list(getattr(self, "_judging", ()))
+        hearing = getattr(self, "_hearing_since", None)
+        if hearing is not None:
+            on_its_way.append(hearing)
+        hold_s = getattr(self, "_answer_hold_s", ANSWER_HOLD_S)
+        return max([began + hold_s for began in on_its_way if began < closes] + [reasked])
+
+    def _groq_to_borrow(self):
+        """
+        The transcriber's Groq client, whose connection is usually open already
+        (stt.Transcriber._groq_client), or None for the answer reader to make
+        its own. Never raises: a transcriber that is shut down, or has no key,
+        lends nothing.
+        """
+        lend = getattr(getattr(self, "stt", None), "_groq_client", None)
+        if not callable(lend):
+            return None
         try:
-            return self._answer_q.get(timeout=window) is False
-        except queue.Empty:
-            return False
+            return lend()
+        except Exception:  # noqa: BLE001 - the reader makes its own
+            return None
+
+    def _read_unclear_answer(self, text: str) -> Optional[bool]:
+        """
+        His answer to "... Confirm?" that _parse_yes_no could not read, read by
+        a fast model (jalen/answer_reader.py): True, False, or None to ask him
+        again. Off when no model is configured or there is no Groq key.
+
+        Two answers it is never allowed to give, whatever it says: a YES to a
+        question ("ok so what does it say?") or to a sentence spoken to another
+        assistant ("okay Google"). Both stay unclear, as they were.
+        """
+        model = getattr(self, "_answer_reader_model", "")
+        key = getattr(getattr(self, "secrets", None), "groq_api_key", "") or ""
+        if not (model and key):
+            return None
+        low = " " + re.sub(r"[^a-z0-9' ]", " ", (text or "").lower()) + " "
+        if any(name in low for name in (" google ", " alexa ", " siri ", " cortana ")):
+            return None
+        # A REPLY THAT ASKS SOMETHING IS A QUESTION, unless it also says yes in
+        # so many words. "Yeah so basically what I want is for you to just do
+        # it" is what the model is for; "hmm hang on who is Ali again" is a
+        # question, and the rules' None for it is final - a model shown it
+        # could be argued into a yes (review of PR #1, finding 7).
+        if (any(w in low for w in (" what ", " who ", " why ", " how ", " which ",
+                                   " where ", " when "))
+                and not any(yes in low for yes in _STRONG_YES)):
+            return None
+        from . import answer_reader
+
+        answer = answer_reader.read(getattr(self, "_confirm_question", ""), text, key=key,
+                                    model=model,
+                                    timeout_s=getattr(self, "_answer_reader_timeout_s", 2.5),
+                                    client=self._groq_to_borrow())
+        if answer is True and (text or "").rstrip().endswith("?"):
+            answer = None
+        if answer is not None:
+            self.audit.write("system", summary="an unclear answer was read by the model",
+                             detail={"heard": (text or "")[:200],
+                                     "read_as": "yes" if answer else "no"})
+        return answer
+
+    def _ask_again(self) -> None:
+        """
+        His answer to a "Confirm?" was neither yes nor no: ask once more, IN
+        FULL, and give him the whole window again.
+
+        THREE THINGS "Sorry - was that a yes or a no?" GOT WRONG
+        --------------------------------------------------------
+        The window went on running: an unclear answer near its end - and with
+        the hold (_held_for) one can arrive after it - was asked about and then
+        cancelled in the same breath, "No answer, so I've cancelled it."
+
+        Its own echo was an answer. "...a yes or a no?" coming back through the
+        microphone is " no " to _parse_yes_no, and the echo test only knew the
+        first question - so the question asked again could cancel itself.
+        Asked as the question again ("Sorry, I missed that. <question>"), its
+        echo is made of the question's words, which _echoes_the_confirmation
+        throws away, and "yes" and "no" are not among them, so his answer
+        cannot be mistaken for it.
+
+        And it was said with say(), on a thread that waits behind a reply still
+        streaming, so the question could be heard after the window it opened;
+        say_blocking() is how the first question is asked (see Speaker.say_now).
+        """
+        again = f"Sorry, I missed that. {getattr(self, '_confirm_question', '')}".strip()
+        # HELD WHILE IT IS BEING ASKED, not only once it has been. A message
+        # question takes seconds to say, and until it ended the window was held
+        # only by the unclear sentence's own ANSWER_HOLD_S - which the answer
+        # reader and the question could outlast: the wait gave up in the middle
+        # of asking, "No answer, so I've cancelled it.", and his yes to the
+        # question went on as a new instruction (review of PR #1, finding 4).
+        # Its length at the measured SPOKEN_CHARS_PER_SECOND, and the window.
+        self._reask_until = (time.monotonic() + self._confirm_timeout_s()
+                             + len(again) / SPOKEN_CHARS_PER_SECOND)
+        self.say_blocking(again)
+        # As for the first question: stamped after it has been said, so the
+        # echo window measures its tail coming back.
+        self._confirm_question = again
+        self._confirm_asked_at = time.monotonic()
+        self._reask_until = time.monotonic() + self._confirm_timeout_s()
+
+    def _judged(self, sound_began_at: float | None) -> None:
+        """
+        _take_as_answer has judged the sentence whose sound began at
+        `sound_began_at`: an AMBER window holding for it (_held_for) can close.
+        After the answer is on its queue, never before, or the window could
+        close in the gap and the action run on a "stop" already given.
+        """
+        if sound_began_at is not None:
+            getattr(self, "_judging", set()).discard(sound_began_at)
 
     @staticmethod
     def _is_correction(text: str) -> bool:
@@ -970,7 +1724,12 @@ class Jalen:
         for curly in ("’", "ʼ", "‘", "`"):
             flattened = flattened.replace(curly, "'")
         low = " " + re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", flattened)) + " "
-        return any(marker in low for marker in _CORRECTION_MARKERS)
+        if not any(marker in low for marker in _CORRECTION_MARKERS):
+            return False
+        # "No - actually, yes" is not what to do instead: it is the answer, and
+        # he changed it. What he finished on is nothing but a decision
+        # (_his_last_word), so it goes to _parse_yes_no as one.
+        return Jalen._his_last_word(low, text) is None
 
     @staticmethod
     def _parse_yes_no(text: str) -> Optional[bool]:
@@ -994,6 +1753,20 @@ class Jalen:
         matters more than the lists do - "no, don't send it" contains "send
         it", and a yes-first search would send the email he just refused.
         """
+        # A THUMB. Typed on a phone, the answer to "... Confirm?" is as often an
+        # emoji as a word, and the scrub below turns an emoji into nothing - so
+        # a bare 👍 was "not an answer": asked about again, then cancelled.
+        # Only a message that is NOTHING BUT these counts; "👍 but send it to
+        # Rodion instead" still goes through the words below, where it is a
+        # correction. A mix of yes and no emoji is neither. Speech recognition
+        # never writes one, so this only ever reads typing.
+        bare = "".join(ch for ch in (text or "")
+                       if ch not in _EMOJI_DECORATION and not ch.isspace())
+        if bare and all(ch in _NO_EMOJI for ch in bare):
+            return False
+        if bare and all(ch in _YES_EMOJI for ch in bare):
+            return True
+
         # THE APOSTROPHE SPEECH RECOGNITION ACTUALLY EMITS is U+2019, not
         # U+0027, and the character class below keeps only the straight one.
         # So "don't send it" was scrubbed to " don t send it ", the NO list's
@@ -1007,6 +1780,59 @@ class Jalen:
         if not low.strip():
             return None
 
+        # HE CORRECTED HIMSELF. "No no, I mean yes", "wait - yes, go ahead",
+        # "cancel... on second thought, do it": what he says after the LAST
+        # self-correction is his answer, when it is nothing but an answer.
+        # How narrowly that is read is in _his_last_word.
+        last = Jalen._his_last_word(low, text)
+        if last is not None:
+            return last
+        return Jalen._read_decision(low)
+
+    @staticmethod
+    def _his_last_word(low: str, said: str) -> Optional[bool]:
+        """
+        The answer after his last self-correction, or None to read the whole.
+
+        "He should understand the explanation, even rambling, and come up with
+        the most logical answer." People change their minds out loud: "no no, I
+        mean yes", "wait... yeah, go ahead", "cancel - actually, do it". Read
+        whole, each of those contains a refusal word, and a refusal word always
+        won: the answer he finished on was thrown away and the action cancelled.
+
+        So the words after the LAST marker of a self-correction decide - but
+        only when they are NOTHING BUT an answer (every word in
+        _DECISION_WORDS). "actually, send it to Rodion" is a correction, not a
+        yes, and goes on to be read as one; so does "hang on, let me check".
+        Toward YES it is narrower still: what he finished on must hold a strong
+        yes ("yes", "go ahead", "do it" - not a bare "okay", which follows
+        "wait" in "wait, okay?" as easily as in "wait... okay, go"), and the
+        sentence must not end in a question mark. Toward NO it is as broad as
+        everywhere else here: a refusal he finished on is a refusal.
+        """
+        best_end, best_at = -1, -1
+        for marker in _SELF_CORRECTIONS:
+            at = low.rfind(marker)
+            if at >= 0 and at + len(marker) > best_end:
+                best_end, best_at = at + len(marker), at
+        if best_at < 0:
+            return None
+        tail = " " + low[best_end:].strip() + " "
+        words = tail.split()
+        if not words or not all(word in _DECISION_WORDS for word in words):
+            return None
+        answer = Jalen._read_decision(tail)
+        if answer is True and ((said or "").rstrip().endswith("?")
+                               or not any(yes in tail for yes in _STRONG_YES)):
+            return None
+        return answer
+
+    @staticmethod
+    def _read_decision(low: str) -> Optional[bool]:
+        """
+        _parse_yes_no on a sentence already flattened and padded with spaces:
+        the rules, in their order. Negatives first, always.
+        """
         # --- ONE AGREEMENT THAT IS SPELLED WITH A NEGATIVE WORD ---
         #
         # Neutralised BEFORE either list is searched, because the bare-negation
@@ -1030,11 +1856,23 @@ class Jalen:
         # buying with six other phrases that are not agreement at all — so all
         # seven go back to what they did before, which is refuse.
         #
-        # The cost is the false NO, stated rather than hidden: "yes, no
-        # problem" reads as a refusal. That is unchanged from before this
-        # function was touched, it costs him a sentence, and it is the
-        # direction that cannot send anything.
+        # The cost was the false NO: "yes, no problem" read as a refusal. It is
+        # paid back below for the one case that is not a guess - see BESIDE A
+        # PLAIN YES. On their own, all seven still refuse.
         low = low.replace(" why not ", " yes ")
+        # "I don't mind" is permission, said with a negative: "do you mind if
+        # I...", "I don't mind". Before the bare-negation rule, or n't eats it.
+        for permission in (" i don't mind ", " i dont mind ", " i do not mind "):
+            low = low.replace(permission, " yes ")
+        # BESIDE A PLAIN YES, "no problem" is the yes said twice: "yes, no
+        # problem", "sure, no worries", "okay, not a problem". What the review
+        # above measured was these idioms ALONE becoming approvals ("no rush" is
+        # not permission); next to an explicit yes they are not the answer, the
+        # yes is. Only these, and never "no rush": "yes, no rush" can mean "yes,
+        # but not now". Anything else negative in the sentence still refuses.
+        if any(yes in low for yes in _EXPLICIT_YES):
+            for idiom in _COURTESIES_WITH_A_NEGATIVE:
+                low = low.replace(idiom, " ")
 
         # --- A BARE NEGATION, which the phrase list below never had ---
         #
@@ -1074,9 +1912,34 @@ class Jalen:
             # catch: "I'm good" is "no thanks", and " good " is a YES word.
             # Reproduced as approvals by an independent audit.
             " i'm good ", " im good ", " i'm busy ", " im busy ",
+            # NOT NOW IS NO. "Do it later" contains " do it " and was read as
+            # a yes: the action ran now, which is exactly what he put off. A
+            # RED action is approved for now or not at all, so a deferral is a
+            # refusal and he asks again when the time comes.
+            " later ", " tomorrow ", " tonight ", " another time ",
+            " some other time ", " next time ", " in a minute ", " in a bit ",
+            " in a while ",
+            # Refusals and retractions that are not built from "no" or "not".
+            " no way ", " uh uh ", " nuh uh ", " scratch that ", " scrap that ",
+            " changed my mind ", " change my mind ", " drop it ", " i'll pass ",
+            " ill pass ", " hold it ", " hold up ", " hold off ", " back off ",
+            # "that's wrong" refuses; " wrong " is in no agreement, and
+            # "totally" and "right" beside it otherwise approve.
+            " wrong ",
+            # Never mind, said other ways. Beside a yes the courtesy above is
+            # taken out, and what was left - "yeah, forget about it", "okay no
+            # problem, I'll send it myself" - approved the action (review of
+            # PR #1, finding 1). "...it myself": he will do it, so Jalen must
+            # not - and never a bare " myself ", which "send a copy to myself"
+            # also says.
+            " forget about it ", " forget about that ", " forget that ",
+            " it myself ", " that myself ", " them myself ", " i'll handle it ",
+            " ill handle it ", " i'll take care of it ", " ill take care of it ",
         ):
             if phrase in low:
                 return False
+        if low.strip() in _WHOLE_NO:
+            return False
 
         # --- NOT AN ANSWER: a correction, a question, somebody else's assistant ---
         #
@@ -1115,9 +1978,22 @@ class Jalen:
             " all right ", " why not ", " i agree ", " agreed ", " approve ",
             " approved ", " sounds good ", " perfect ", " great ", " good ",
             " let's do it ", " lets do it ", " make it happen ", " yes please ",
+            # How people actually say it, none of which was here. Each one
+            # checked against the NO list and the corrections above, which
+            # still run first.
+            " uh huh ", " mm hmm ", " mmhmm ", " mhm ", " mm hm ", " yes sir ",
+            " yea ", " yeh ", " yah ", " copy that ", " sounds great ",
+            " sounds fine ", " works for me ", " fine by me ", " that works ",
+            " do that ", " green light ", " greenlight ", " permission granted ",
+            " i confirm ", " delete it ", " close it ", " empty it ", " post it ",
+            " submit it ", " run it ",
         ):
             if phrase in low:
                 return True
+        # Words that are a yes only as the WHOLE answer: "go" is one, "go home"
+        # is not; "please" is one, "please read it first" is not.
+        if low.strip() in _WHOLE_YES:
+            return True
         return None
 
     # ---------------------------------------------------------------- handling
@@ -1185,11 +2061,24 @@ class Jalen:
 
     def _answer_panel(self, text: str) -> None:
         from .bridge.server import get_server, BridgeError
-        try:
-            reply = self._run_coro(self.handle_with_brain(text))
-        except Exception as exc:  # noqa: BLE001
-            self.audit.error("panel.turn", exc)
-            reply = f"Something went wrong handling that: {type(exc).__name__}"
+        # TYPED IN THE PANEL WHILE JALEN IS ASKING SOMETHING is the answer, the
+        # way the same words typed into Telegram are - not a second brain turn
+        # queued behind the one that asked. heard=False: it was typed, so it is
+        # never Jalen's own voice coming back. The panel shows what was done.
+        reply = self._take_as_answer(text, heard=False)
+        if not reply:
+            governor = _governor_of(self)
+            # Typed by him: a new request, like process() - and, like it, only
+            # when nothing else is working. The reset gave a turn still running
+            # forty more actions and asked again the limits he had refused it
+            # (review of PR #1, finding 11).
+            if governor is not None and not self._any_turn_in_flight():
+                governor.new_instruction()
+            try:
+                reply = self._run_coro(self.handle_with_brain(text))
+            except Exception as exc:  # noqa: BLE001
+                self.audit.error("panel.turn", exc)
+                reply = f"Something went wrong handling that: {type(exc).__name__}"
         try:
             get_server().send_command("show_message",
                                       {"role": "jalen", "text": reply}, timeout=10)
@@ -1219,6 +2108,21 @@ class Jalen:
             if not timer.tts_source:
                 timer.tts_source = getattr(self.speaker, "last_source", "") or ""
 
+    # How long after a sentence with his name in it the wake word is still not
+    # trusted over Jalen's voice: the wake model fires at the end of the name,
+    # about 0.77 s into "Hey Jalen" (measured, see the wake branch in run), and
+    # the room carries the speakers a moment after they stop. NOT MEASURED
+    # beyond that.
+    OWN_NAME_TAIL_S = 1.5
+
+    def _saying_its_own_name(self) -> bool:
+        """Is what has been on air in the last OWN_NAME_TAIL_S carrying his name?"""
+        spoken_since = getattr(self.speaker, "spoken_since", None)
+        if not callable(spoken_since):
+            return False
+        on_air = spoken_since(time.monotonic() - self.OWN_NAME_TAIL_S)
+        return isinstance(on_air, str) and says_the_name(on_air)
+
     def _await_playback(self, grace_s: float = 0.5, limit_s: float = 180.0) -> None:
         """
         Block until the reply has actually finished playing.
@@ -1242,12 +2146,15 @@ class Jalen:
         set. The second is the real wait, bounded so a wedged audio device
         can never hang a dispatch thread forever.
         """
+        # On air, not a session open: a turn that answered while another
+        # turn's reply stream was open waited for that whole turn - minutes
+        # holding its slot - though its own line was over in a second.
         deadline = time.monotonic() + grace_s
-        while not self.speaker.speaking and time.monotonic() < deadline:
+        while not _on_air(self.speaker) and time.monotonic() < deadline:
             time.sleep(0.01)
 
         deadline = time.monotonic() + limit_s
-        while self.speaker.speaking and time.monotonic() < deadline:
+        while _on_air(self.speaker) and time.monotonic() < deadline:
             time.sleep(0.02)
 
     def _finish_timing(self, timer: TurnTimer | None) -> None:
@@ -1294,8 +2201,10 @@ class Jalen:
         if signal == "toggle":
             # Speaking? The press means "stop talking" — the same thing
             # barge-in does, for someone who would rather hit a key than
-            # talk over it.
-            if self.speaker.speaking:
+            # talk over it. ON AIR, not a reply's stream open: pressed while a
+            # long task works in silence, it stopped nothing audible, threw
+            # away the answer still to come, and opened no microphone.
+            if _on_air(self.speaker):
                 self.speaker.stop()
                 return False
             if self.muted or self.paused:
@@ -1306,13 +2215,18 @@ class Jalen:
             return True
         return False
 
-    def handle_local(self, intent, *, his_own_words: bool = False) -> Optional[str]:
+    def handle_local(self, intent, *, his_own_words: bool = False,
+                     from_him: bool = True) -> Optional[str]:
         """
         Router hit — execute without ever touching an LLM.
 
         `his_own_words` is True only for a rule that matched what he SAID,
         word for word (process() passes it; nothing else does): see the
         origin note at the classify call below.
+
+        `from_him` is False for speech the microphone admitted WITHOUT his name
+        (the question window, a stitched continuation), which may be the
+        television. It matters to exactly one thing: lifting a lockdown.
         """
         tool = intent.tool
 
@@ -1379,11 +2293,39 @@ class Jalen:
         if tool == "private_mode":
             on = bool(intent.args.get("on"))
             self.audit.set_private_mode(on)
+            # "Nothing is being logged or remembered": memory too.
+            from .tools import memory as memory_tools
+
+            memory_tools.set_private(on)
+            return intent.reply
+        if tool == "new_conversation":
+            # His own conversation, like private mode: Jalen's state, not the
+            # machine's. The next turn starts a new one; the one before is
+            # never resumed after a restart. memory.py's facts are untouched.
+            if self.brain is not None:
+                self.brain.forget_conversation()
+            else:
+                from .brain.agent import forget_saved_conversation
+
+                forget_saved_conversation(self._brain_session_path)
             return intent.reply
         if tool == "set_posture":
             self.safety.posture = intent.args.get("posture", "irreversible_only")
             self.safety.paranoid = self.safety.posture == "paranoid"
             return intent.reply
+        # Handled before the gate, like the controls above: they are Jalen's
+        # own state, and a lockdown that had to pass the gate it is about to
+        # close would be refused by itself. Locking is always safe, so any
+        # source may do it; LIFTING it is the one command here that needs the
+        # sentence to be his - see _lockdown_off.
+        if tool == "jalen_lockdown":
+            return self._lockdown_on()
+        if tool == "jalen_lift_lockdown":
+            return self._lockdown_off(his_own_words and from_him)
+        # "What's wrong with you?" Answered here, from what this process
+        # knows, because the thing that is wrong may be the brain itself.
+        if tool == "what_is_wrong":
+            return self.what_is_wrong()
         if tool == "morning_brief":
             # This rule existed with reply=None and no implementation, so
             # "brief me" produced total silence — indistinguishable from
@@ -1425,6 +2367,8 @@ class Jalen:
             return "The log is on screen."
         if tool in ("cancel", "acknowledge"):
             return intent.reply
+        if tool == "small_talk":
+            return self._small_talk(intent.args.get("kind", "chat"))
         if tool == "greet":
             hour = time.localtime().tm_hour
             part = "Morning" if hour < 12 else "Afternoon" if hour < 18 else "Evening"
@@ -1455,12 +2399,48 @@ class Jalen:
         if verdict.tier is Tier.BLACK:
             self.audit.action(verdict, "blocked")
             return f"I won't do that — {verdict.reason}."
+
+        # A post that will not go is refused before he is asked about it, as in
+        # the brain's hook (messaging.refused_before_asking).
+        from .tools import messaging
+
+        not_going = messaging.refused_before_asking(tool, intent.args)
+        if not_going:
+            self.audit.action(verdict, "cancelled", f"format: {not_going[:160]}")
+            return not_going
+
+        # HOW MANY, and lockdown (jalen/limits.py). After the kind-of-thing
+        # gate above and before its question: an action past a limit asks him
+        # about the limit first, and a refused one never reaches the RED
+        # "Confirm?" below. The brain's hook makes the same call on the same
+        # governor (tests/test_limits_are_enforced_on_both_paths.py).
+        admission = self._admit(verdict)
+        if not admission.allowed:
+            self.audit.action(
+                verdict, "blocked" if admission.outcome in ("locked", "refused") else "cancelled",
+                f"limit: {admission.outcome}")
+            return admission.why
+
+        # ONE QUESTION, NOT TWO. Past a limit he has just been asked a question
+        # that NAMED this action and ended "Confirm?" (limits.Governor._question),
+        # and his yes to it is this action's approval: asking "Confirm?" about
+        # the same thing a second later, or announcing it and waiting for a
+        # "stop" he has in effect already declined to say, is noise. Under the
+        # limit nothing was asked, and the tier asks exactly as it always has.
         if verdict.tier is Tier.RED:
-            approved = self._run_coro(self.confirm(f"{verdict.summary}. Confirm?"))
+            approved = admission.approved_action or self._run_coro(
+                self.confirm(f"{verdict.summary}. Confirm?"))
+            # DANGEROUS ENOUGH TO ASK TWICE (`consequences:` in safety.yaml):
+            # after his yes, what it does that cannot be taken back, and the
+            # question again. A limit's yes stood in for the first question,
+            # never for this one. The brain's hook asks it the same way.
+            second = getattr(verdict, "second_question", "")
+            if approved and second:
+                approved = self._run_coro(self.confirm(second))
             self.audit.action(verdict, "executed" if approved else "cancelled")
             if not approved:
                 return "Cancelled."
-        elif verdict.tier is Tier.AMBER:
+        elif verdict.tier is Tier.AMBER and not admission.approved_action:
             # Router tools used to skip straight to execution here — AMBER's
             # announce+undo-window (spec: "say stop if you don't want that")
             # was only ever wired on the Brain/agent-hook path. Anything
@@ -1476,6 +2456,15 @@ class Jalen:
             except RuntimeError:
                 self.audit.action(verdict, "cancelled")
                 return "Cancelled."
+
+        # Allowed to run: count it. Counted here, after every question that
+        # could still have said no, so a cancelled action does not use up a
+        # limit - and only for a tool that exists, because systools.call below
+        # answers an unknown name (a habit recalled after its tool was removed)
+        # with KeyError, and nothing runs.
+        governor = _governor_of(self)
+        if governor is not None and tool in systools.REGISTRY:
+            governor.record(tool)
 
         try:
             result = systools.call(tool, intent.args)
@@ -1494,6 +2483,64 @@ class Jalen:
         except Exception as exc:
             self.audit.action(verdict, "failed", str(exc))
             return f"That didn't work: {exc}"
+
+    # ----------------------------------------------------- small talk, at once
+    def _answered_without_the_brain(self, text: str) -> bool:
+        """
+        Would the router answer this itself (IntentRouter.would_route)? Such a
+        sentence takes no brain and a moment, so it is never turned away for
+        the turns already in flight. Asked only when a sentence would be: it
+        is a pass over every rule.
+        """
+        router = getattr(self, "router", None)
+        would_route = getattr(router, "would_route", None)
+        if not callable(would_route):
+            return False
+        try:
+            return bool(would_route(text))
+        except Exception as exc:  # noqa: BLE001 - a rule must never cost him the sentence
+            self.audit.error("router.would_route", exc)
+            return False
+
+    # A task this many seconds old is "something running"; the turn asking is
+    # younger than that by the time it is answered - its task is started at
+    # dispatch, and the router answers small talk a few milliseconds later.
+    # NOT MEASURED beyond that: it only has to be longer than that gap.
+    _RUNNING_FOR_S = 2.0
+
+    @classmethod
+    def _longest_running_task(cls):
+        """The oldest live task besides the one just begun, or None."""
+        now = time.time()
+        running = [t for t in conversation.live_tasks()
+                   if now - t.created_at >= cls._RUNNING_FOR_S]
+        return min(running, key=lambda t: t.created_at) if running else None
+
+    @staticmethod
+    def _ago(task) -> str:
+        seconds = max(0, int(time.time() - task.created_at))
+        if seconds < 60:
+            return "a moment ago"
+        if seconds < 120:
+            return "a minute ago"
+        return f"{seconds // 60} minutes ago"
+
+    def _small_talk(self, kind: str) -> str:
+        """
+        "What's up", "are you there": answered here, at once. They went to the
+        brain, and while a long task held it they waited behind it in silence
+        - "taking 10 seconds to respond to what's up", "becoming deaf even
+        after getting my prompt" (2026-10-24). When something is running the
+        answer says so, which is the question behind most of them.
+        """
+        task = self._longest_running_task()
+        who = f", {self.address}" if self.address else ""
+        if task is not None:
+            return (f"I'm here{who}. Still working on what you asked {self._ago(task)} - "
+                    "I'll tell you when it's done.")
+        if kind == "here":
+            return f"I'm here{who}."
+        return f"All good{who}. What do you need?"
 
     async def _start_brain(self) -> None:
         """Construct and connect the Claude client. Idempotent, and guarded
@@ -1560,6 +2607,80 @@ class Jalen:
             return None
         return kind
 
+    def what_is_wrong(self) -> str:
+        """
+        "What's wrong with you?" - what is broken RIGHT NOW, in plain words,
+        and what he can do about each. "As the backup it should be able to
+        explain what is wrong with it, so that I could understand the issue"
+        (2026-10-23).
+
+        It used to run `run.py --check` and read the printout: a minute of
+        package versions and file paths, describing the INSTALL, not this
+        running Jalen - whose sign-in may have expired, whose microphone may
+        have gone quiet, or whose speech recognition may have fallen back to
+        the slow offline model. Those live in this process, so this is
+        answered here, from the router, without the brain - which may be the
+        part that is broken. "Run a diagnostic" still runs the full check.
+        """
+        problems: list[str] = []
+        down = getattr(self, "_brain_down", None)
+        if down:
+            problems.append(self._brain_down_sentence(
+                down, getattr(self, "_brain_down_detail", ""), first=True))
+        mic = getattr(self, "mic", None)
+        # Reopened and not one frame yet is not working either: it may be the
+        # device that opens and stays silent (Microphone._back).
+        if getattr(mic, "_told_it_is_down", False) or getattr(mic, "recovering", False) is True:
+            problems.append("My microphone isn't delivering any sound, so I may not hear "
+                            "you. Check that it's plugged in.")
+        elif getattr(mic, "reopened", 0):
+            times = mic.reopened
+            problems.append(f"My microphone dropped out {times} time{'s' if times != 1 else ''} "
+                            "since I started. It's working now.")
+        stt = getattr(self, "stt", None)
+        engine = getattr(stt, "last_engine", "") or ""
+        primary = getattr(stt, "primary", "") or ""
+        if engine and primary and engine != primary:
+            problems.append(f"Speech recognition fell back to the offline model ({engine}), "
+                            f"which is slower and makes more mistakes: {primary} didn't answer. "
+                            "Check the internet connection.")
+        governor = _governor_of(self)
+        if governor is not None:
+            if governor.locked:
+                problems.append("I'm in lockdown, so I won't act on anything until you say "
+                                "\"Jalen, end the lockdown\".")
+            full = [u for u in governor.usage() if u.get("max") and u.get("used", 0) >= u["max"]]
+            if full:
+                names = ", ".join(str(u.get("label") or u.get("name")) for u in full)
+                problems.append(f"You've reached your limit on {names}, so I'll ask before "
+                                "each one.")
+        if getattr(self, "muted", False):
+            problems.append("I'm muted, so I won't say anything out loud. Press Ctrl+Alt+J "
+                            "or say \"Jalen, unmute\".")
+        if getattr(self, "paused", False):
+            problems.append("I'm paused. Say \"Hey Jalen\" to bring me back.")
+        # How the LAST run ended, as it was read at startup - never the file
+        # now, which holds this run's own "running".
+        record = getattr(self, "_previous_exit", None)
+        if isinstance(record, dict) and record.get("state") == "running":
+            problems.append("My last run ended without shutting down properly. python run.py "
+                            "--why shows what was recorded.")
+        try:
+            import shutil
+
+            free_gb = shutil.disk_usage(str(Path(__file__).resolve().parent.parent)).free / 1e9
+        except OSError:
+            free_gb = None
+        if free_gb is not None and free_gb < 1.0:
+            problems.append(f"Your disk is almost full, {free_gb:.1f} gigabytes left, and "
+                            "things will start to fail.")
+        if not problems:
+            return ("Nothing looks wrong: I can hear you, I can think, and I can speak. If "
+                    "something specific isn't working, tell me what you were doing and I'll "
+                    "look at that.")
+        lead = "One thing is wrong. " if len(problems) == 1 else f"{len(problems)} things are wrong. "
+        return lead + " ".join(problems)
+
     def _brain_down_sentence(self, kind: str, detail: str, first: bool) -> str:
         """
         One sentence per failure he can act on. Never the CLI's raw text,
@@ -1606,6 +2727,21 @@ class Jalen:
             # Known down, and nothing has changed: answer from memory rather
             # than paying a round-trip to be told the same thing again.
             return self._brain_down_sentence(down, self._brain_down_detail, first=False)
+
+        # HOW OFTEN THE MODEL IS ASKED TO THINK (jalen/limits.py). Past the cap
+        # he is asked, like any other limit, and his yes buys this one turn.
+        # Here and not in process() because this is the one place every brain
+        # turn passes - the voice loop, the text and Telegram front doors, the
+        # extension's chat panel and "go on" - and a cap on a door is a cap on
+        # that door only.
+        governor = _governor_of(self)
+        if governor is not None:
+            admission = await governor.admit_brain_turn(self.confirm)
+            if not admission.allowed:
+                self.audit.write("system", summary=f"brain turn not taken: {admission.outcome}",
+                                 outcome="cancelled")
+                return admission.why
+            governor.record_brain_turn()
 
         if self.brain is None:
             try:
@@ -1660,6 +2796,13 @@ class Jalen:
             from .brain.agent import _looks_like_a_dead_client
 
             if _looks_like_a_dead_client(exc):
+                # A conversation it had just resumed and never got a turn out
+                # of is not resumed again by the next brain (Brain.
+                # forget_unproven_resume), or this would repeat every turn.
+                try:
+                    self.brain.forget_unproven_resume()
+                except Exception:  # noqa: BLE001 - whatever it was, it is still stopped
+                    pass
                 try:
                     await self.brain.stop()
                 except Exception:
@@ -1699,6 +2842,56 @@ class Jalen:
             self.audit.write("system", summary="brain signed out at startup")
             self.say(self._brain_down_sentence("authentication_failed", "", first=True))
 
+    # Said at once to a sentence that has to wait for the brain because
+    # another turn has it (speak_brain_reply). Pre-rendered (_COMMON_PHRASES).
+    TAKEN_FOR_LATER = "Got it - that's next, as soon as I finish what I'm on."
+
+    def _brain_is_busy(self) -> bool:
+        """Another turn holds the brain, so a turn asked now waits (Brain.busy)."""
+        busy = getattr(getattr(self, "brain", None), "busy", None)
+        try:
+            return bool(callable(busy) and busy())
+        except Exception:  # noqa: BLE001 - only decides whether to say a line
+            return False
+
+    # WHAT HE HEARS WHILE A LONG TURN WORKS IN SILENCE, and after how many
+    # seconds of it. Measured in data/audit.jsonl (Brain.ask): a brain turn
+    # takes 3.0 s at the median, 8.0 s at p75 and 23.0 s at p90, so a first
+    # line at 20 s is heard on roughly the slowest tenth of turns and never on
+    # an ordinary one. The later two are NOT MEASURED: spaced out so a long
+    # job is accompanied, not narrated. Three at most, and never while a
+    # question of his is open or anything else is being said.
+    STILL_WORKING = ((20.0, "Still working on it."),
+                     (45.0, "Still on it. This one is taking a while."),
+                     (90.0, "Still going. I'll tell you the moment it's done."))
+
+    def _keep_him_company(self, state: dict, push, done: threading.Event,
+                          look_every_s: float = 0.5) -> None:
+        """
+        Say a STILL_WORKING line whenever a brain turn has been silent that
+        long - no words of the answer since the last thing he heard. The quiet
+        is counted from the last sound: words streaming in, Jalen speaking, or
+        a question of his being open (a "Confirm?" is not silence, and a line
+        said over it would be the worst moment for one).
+        """
+        heard_chars, quiet_since, said = state["chars"], time.monotonic(), 0
+        while said < len(self.STILL_WORKING) and not done.wait(look_every_s):
+            # ON AIR, not `speaking`: this turn's own stream holds `speaking`
+            # from its first moment to its last, so every line here waited for
+            # a silence that, by that measure, never came.
+            busy = (getattr(self, "_awaiting_confirmation", False)
+                    or getattr(self, "_awaiting_stop", False)
+                    or getattr(self, "_awaiting_reply", False)
+                    or _on_air(self.speaker)
+                    or not state.get("live", lambda: True)())
+            if state["chars"] != heard_chars or busy:
+                heard_chars, quiet_since = state["chars"], time.monotonic()
+                continue
+            after, line = self.STILL_WORKING[said]
+            if time.monotonic() - quiet_since >= after:
+                push(line)
+                said += 1
+
     def speak_brain_reply(self, user_text: str) -> None:
         """
         Run a brain turn and speak the answer WHILE it is being written.
@@ -1718,6 +2911,16 @@ class Jalen:
             self.say(self._run_coro(self.handle_with_brain(user_text)))
             return
 
+        # ANOTHER TURN HAS THE BRAIN, so this one waits for it (Brain.ask
+        # takes one turn at a time) - and he heard nothing until the first
+        # was over: the dead air of "it becomes deaf after my prompt"
+        # (2026-10-24). He hears at once that it was taken and is next: said
+        # through the stream that is speaking now (Speaker.say), not queued
+        # behind it.
+        queued = self._brain_is_busy()
+        if queued:
+            self.say(self.TAKEN_FOR_LATER)
+        began = time.monotonic()
         stream = self.speaker.open_stream()
         # A new reply starts with nothing handed over. A turn that failed
         # half way never reaches _note_said, which is what clears this.
@@ -1726,7 +2929,15 @@ class Jalen:
         # cap is a default about length, not a rule about what he may hear.
         read_it_all = wants_it_all(user_text)
         max_spoken = float("inf") if read_it_all else self.speaker.max_spoken
-        state = {"chars": 0, "overflowed": False, "warned": False}
+        # `stream` is replaced when he stopped the "Give me a second." or a
+        # STILL_WORKING line before the answer had begun (see push); `live`
+        # is whether it is the stream that can speak now - a queued turn's
+        # is not, and its company lines would be heard after the other
+        # turn's answer, about nothing.
+        state = {"chars": 0, "overflowed": False, "warned": False,
+                 "stream": stream, "answering": False}
+        # `getattr`: a stream double built before `live` is always the one speaking.
+        state["live"] = lambda: getattr(state["stream"], "live", True)
 
         # SAY HOW LONG IT IS, ONCE, when he asked for the whole thing.
         #
@@ -1751,8 +2962,20 @@ class Jalen:
         # over: the address gate compares what the microphone hears against
         # it, and the reply is not filed as `_last_reply_text` until it has
         # finished playing. See _note_voice.
-        def push(piece: str) -> None:
-            stream.push(piece)
+        def push(piece: str, *, answer: bool = False) -> None:
+            current = state["stream"]
+            # HE STOPPED A LINE THAT WAS NOT THE ANSWER. "Hey Jalen" over the
+            # "Give me a second." or a STILL_WORKING line stops the stream,
+            # and the answer arriving a minute later went into a stream that
+            # could no longer speak: lost, after "I'll tell you when it's
+            # done". So the answer gets a stream of its own - unless he said
+            # stop (a kill phrase), which is a stop to all of it, as before.
+            if (answer and getattr(current, "finished", False) and not state["answering"]
+                    and getattr(self, "_killed_at", 0.0) < began):
+                current = state["stream"] = self.speaker.open_stream()
+            if answer:
+                state["answering"] = True
+            current.push(piece)
             self._note_voice(piece)
 
         def maybe_warn_about_length(so_far: int) -> None:
@@ -1763,7 +2986,7 @@ class Jalen:
                 return
             state["warned"] = True
             push(f" This runs to about {round(seconds / 60)} minutes — "
-                 f"say stop whenever you've heard enough. ")
+                 f"say stop whenever you've heard enough. ", answer=True)
 
         def on_text(chunk: str) -> None:
             # Spec B15 still applies: long answers are summarised aloud and
@@ -1786,7 +3009,7 @@ class Jalen:
             room = max_spoken - state["chars"]
             state["chars"] += len(chunk)
             if state["chars"] <= max_spoken:
-                push(chunk)
+                push(chunk, answer=True)
                 maybe_warn_about_length(state["chars"])
                 return
 
@@ -1796,8 +3019,8 @@ class Jalen:
             if cut > 0:
                 head = head[: cut + 1]
             if head.strip():
-                push(head)
-            push(" That's the short version, the full text is on screen.")
+                push(head, answer=True)
+            push(" That's the short version, the full text is on screen.", answer=True)
 
         # A turn that calls tools first produces no text for seconds. Silence
         # reads as "it's broken" — he said exactly that, more than once, in
@@ -1817,12 +3040,24 @@ class Jalen:
 
         ack_timer = threading.Timer(ack_after, acknowledge)
         ack_timer.daemon = True
-        ack_timer.start()
+        # Not for a turn that is waiting: it has just been told it is next,
+        # and its filler could only be heard after the other turn's answer.
+        if not queued:
+            ack_timer.start()
+
+        # AND AFTER THAT, NOT SILENCE. "When I tell it the task it should not
+        # go silent" (2026-10-23). One "Give me a second." and then nothing
+        # for however long the tools took - a minute and more for a delegated
+        # chat or a coding job. See STILL_WORKING for when and what.
+        done = threading.Event()
+        threading.Thread(target=self._keep_him_company, args=(state, push, done),
+                         name="jalen-still-working", daemon=True).start()
 
         try:
             reply = self._run_coro(self.handle_with_brain(user_text, on_text=on_text))
         finally:
             ack_timer.cancel()
+            done.set()
 
         if state["chars"] == 0:
             # Nothing streamed: a tool-only turn, or an SDK build that did
@@ -1837,7 +3072,7 @@ class Jalen:
             timer = self._turn_timer
             if timer is not None:
                 timer.filler_pushed = False
-            stream.abandon()
+            state["stream"].abandon()
             self._voice_so_far = ""
             self.say(reply)
             return
@@ -1852,7 +3087,7 @@ class Jalen:
             # cap exists because a forty-second monologue is unbearable, not
             # because the rest of the answer is worthless.
             self._last_full_text = reply
-        stream.close()
+        state["stream"].close()
         self.audit.utterance(reply, who="jalen")
         self._note_said(reply)
         # Filed whole now; what was kept piece by piece while it streamed is
@@ -1862,31 +3097,33 @@ class Jalen:
         # still on air.
         self._voice_so_far = ""
 
-    def process(self, text: str, *, from_him: bool = True, door: str = "") -> None:
+    def _take_as_answer(self, text: str, *, heard: bool) -> str:
         """
-        Handle one utterance.
+        If this sentence ANSWERS something - the kill switch, a rating he was
+        asked for, an open ask_user question, a "Confirm?", an AMBER "say stop"
+        window - deliver it there and return what was done, in a few words a
+        door can show (the chat panel does). "" means it answers nothing:
+        it is a new instruction.
 
-        `from_him` says whether it is POSITIVELY his: spoken with his name or
-        the wake word, or typed. The microphone loop passes False for speech
-        it admitted without the name - the question window, a stitched
-        continuation - because that may be the television. Every other front
-        door (text mode, the Telegram bot, the extension's chat panel) is
-        text he typed, so the default is True.
+        One implementation for every front door. It was the body of process(),
+        and the extension's chat panel went straight to the brain past it, so a
+        "yes" typed in the panel to a "Confirm?" Jalen had just asked started a
+        second brain turn - which waited behind the first one's lock while the
+        question it was answering ran out of time. `heard` is True only for
+        speech from the microphone, the one place Jalen's own voice can come
+        back; typed text is never its echo (see _hears_its_own_speakers).
         """
-        text = (text or "").strip()
-        if not text:
-            return
-
-        low = text.lower().rstrip(".!?")
-
         # kill switch always wins - over a waiting question too. The same
         # matcher as the address gate's exemption; see is_kill_phrase.
         if is_kill_phrase(text, self.kill_phrases):
             self.audit.utterance(text, who="user")
+            # A stop to all of it: an answer still on its way is not then
+            # given a stream of its own (speak_brain_reply's push).
+            self._killed_at = time.monotonic()
             self.speaker.stop()
             self.kill.set()
             self._answer_q.put(False)
-            return
+            return "Stopped."
 
         # ANSWERS FIRST, and an answer is not an instruction.
         #
@@ -1913,7 +3150,7 @@ class Jalen:
                 self._pending_rating = None      # he moved on; so do we
             elif self._take_rating(text):
                 self.audit.utterance(text, who="user")
-                return
+                return "Thanks - noted."
 
         # A pending open QUESTION takes everything he says as the answer:
         # "open chrome" said in answer to "what's your phone number" is an
@@ -1922,15 +3159,16 @@ class Jalen:
         if self._awaiting_reply:
             self.audit.utterance(text, who="user")
             self._reply_q.put(text)
-            return
+            return "Got it."
 
         # a pending yes/no takes priority over everything else
         if self._awaiting_confirmation:
             # Jalen's own "...Confirm?" coming back through the microphone.
             # Ignored silently: it is not him, so it is neither an answer
-            # nor a new instruction.
-            if self._echoes_the_confirmation(text):
-                return
+            # nor a new instruction. Only for speech from the microphone
+            # (`heard`): typed text is never its echo.
+            if heard and self._echoes_the_confirmation(text):
+                return "(my own voice - ignored)"
             # "Send it to Rodion instead." Not a yes to what was asked - it
             # was approving the ORIGINAL action - and not a plain no either:
             # it is what he wants done. His words go back with it, so the
@@ -1939,12 +3177,16 @@ class Jalen:
             if self._is_correction(text):
                 self.audit.utterance(text, who="user")
                 self._answer_q.put(ConfirmAnswer("correction", text))
-                return
+                return "Got it - passing that on instead."
             answer = self._parse_yes_no(text)
+            if answer is None:
+                # Neither, by rule: a model reads the whole sentence before he is
+                # asked again. Only here, after the rules - see answer_reader.
+                answer = self._read_unclear_answer(text)
             if answer is not None:
                 self.audit.utterance(text, who="user")
                 self._answer_q.put(ConfirmAnswer("yes" if answer else "no", text))
-                return
+                return "Got it."
             # Not readable as either. It used to fall straight through to
             # the router and the brain, starting a second turn while the
             # first was still waiting on him. Asked about ONCE; after that a
@@ -1953,8 +3195,90 @@ class Jalen:
             if not getattr(self, "_confirm_reasked", False):
                 self._confirm_reasked = True
                 self.audit.utterance(text, who="user")
-                self.say("Sorry - was that a yes or a no?")
-                return
+                self._ask_again()
+                return "Sorry - was that a yes or a no?"
+
+        # AN AMBER ANNOUNCEMENT IS WAITING FOR "STOP" ("... Say stop if you
+        # don't want that."). The kill phrases above catch the word itself. A
+        # plain refusal - "no", "don't", "wait", "hold on" - is the same answer
+        # in other words, and while this window is open the address gate lets
+        # his speech in WITHOUT his name precisely so that it can be this answer
+        # (should_act_on). It fell through to the router and the brain as a NEW
+        # instruction instead, and the action it refused went ahead when the
+        # window closed. Agreement - "yes", "go ahead" - became a new turn too;
+        # now it lets the action go at once instead of after the window.
+        # Anything that is neither still falls through, as before.
+        if getattr(self, "_awaiting_stop", False):
+            if heard and self._echoes_the_announcement(text):
+                return "(my own voice - ignored)"
+            answer = self._parse_yes_no(text)
+            if answer is not None and self._answers_the_stop_window(text, answer):
+                self.audit.utterance(text, who="user")
+                self._answer_q.put(answer)      # False stops it; True lets it go now
+                return "Got it."
+
+        return ""
+
+    # How a refusal of an announced action begins. Padded like the sentence.
+    _STOP_OPENERS = (" no ", " nope ", " nah ", " don't ", " dont ", " do not ", " not ",
+                     " never ", " wait ", " hold ", " hang ", " stop ", " cancel ",
+                     " abort ", " i'd rather ", " id rather ", " i would rather ")
+
+    @staticmethod
+    def _answers_the_stop_window(text: str, answer: bool) -> bool:
+        """
+        Is this sentence his answer to "... Say stop if you don't want that"?
+
+        Not every sentence with a yes or no word in it. Any sentence used to be,
+        so "remind me tomorrow to call mom" typed in the window (" tomorrow "
+        reads as a no) stopped the pin and was never acted on, and "open the
+        right folder too" (" right " reads as a yes) let it go and was lost
+        (review of PR #1, finding 8). A refusal is the answer when it is
+        nothing but an answer or begins as a refusal does ("no, the other
+        chat", "wait"); agreement only when it is nothing but agreement ("yes",
+        "go ahead"). Anything else is a new instruction, as it always was.
+        """
+        flat = (text or "").lower()
+        for curly in ("’", "ʼ", "‘", "`"):
+            flat = flat.replace(curly, "'")
+        words = re.findall(r"[a-z']+", flat)
+        if not words:
+            return False
+        if all(word in _DECISION_WORDS for word in words):
+            return True
+        padded = " " + " ".join(words) + " "
+        return answer is False and any(padded.startswith(opener)
+                                       for opener in Jalen._STOP_OPENERS)
+
+    def process(self, text: str, *, from_him: bool = True, door: str = "",
+                sound_began_at: float | None = None) -> None:
+        """
+        Handle one utterance.
+
+        `from_him` says whether it is POSITIVELY his: spoken with his name or
+        the wake word, or typed. The microphone loop passes False for speech
+        it admitted without the name - the question window, a stitched
+        continuation - because that may be the television. Every other front
+        door (text mode, the Telegram bot, the extension's chat panel) is
+        text he typed, so the default is True.
+
+        `sound_began_at` is when the sentence's sound began, for speech from
+        the microphone; an AMBER window may be holding for it (_held_for), and
+        is let go once it has been judged below.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+
+        low = text.lower().rstrip(".!?")
+
+        # Answers first - the kill switch, a rating, an open question, a
+        # "Confirm?", an AMBER stop window. An answer is not an instruction;
+        # see _take_as_answer for why each comes before everything below.
+        taken = self._take_as_answer(text, heard=self._hears_its_own_speakers())
+        self._judged(sound_began_at)
+        if taken:
+            return
 
         # ------------------------------------------------------------------
         # From here on this is a NEW instruction.
@@ -1997,6 +3321,12 @@ class Jalen:
         fresh = from_him and not self._another_turn_in_flight()
         if fresh:
             taint.he_asked_again()
+            # A new request of his: the leash starts again and a limit he said
+            # no to is asked about afresh - the same moment taint clears, for
+            # the same reason (only his own sentence is a new instruction).
+            governor = _governor_of(self)
+            if governor is not None:
+                governor.new_instruction()
 
         # WHAT "IT" MEANS. Expanded before anything routes, because "send it
         # to Saved Messages" reaching the router as literally "it" is how a
@@ -2067,7 +3397,7 @@ class Jalen:
         if self._turn_timer is not None:
             self._turn_timer.route = "router" if intent is not None else "brain"
         if intent is not None:
-            reply = self.handle_local(intent, his_own_words=his_own_words)
+            reply = self.handle_local(intent, his_own_words=his_own_words, from_him=from_him)
             if reply is not None:
                 self.say(reply)
             if intent.tool != "cancel":
@@ -2158,9 +3488,97 @@ class Jalen:
         return f"{len(events)} thing{'s' if len(events) != 1 else ''} on today: {head}{more}."
 
     # -------------------------------------------------------------------- loop
-    def run(self) -> None:
+    # How often standby looks for the wake key, and the stop watcher for the
+    # kill key. NOT MEASURED: a twentieth of a second is under anything he
+    # could notice after pressing a key, and a stat() at that rate costs nothing.
+    KEY_POLL_S = 0.05
+
+    def _wait_in_standby(self) -> bool:
+        """
+        Standby (run.py --standby): everything loaded and warmed - the models,
+        the brain, speech - with the microphone CLOSED and nothing on screen,
+        until the wake key. True when the key was pressed; False when a stop
+        or a quit came first.
+
+        WHY. "Starting the microphone takes at least a minute" (2026-10-23): the
+        kill key ended the process, so the next wake key had to start Python
+        and load every model again. The kill key now ends the process and
+        starts a fresh one in standby (scripts/hotkeys.py on_kill), so the
+        next wake key only has to open the microphone.
+        """
+        self.audit.write("system", summary="standby: loaded, microphone closed until the wake key")
+        while True:
+            if self._quit.is_set():
+                self._exit_reason = "quit-requested"
+                return False
+            if runtime.stop_requested():
+                self._exit_reason = "stop-file"
+                return False
+            if runtime.take_signal() in ("wake", "toggle", "unmute"):
+                self._woken_at = time.monotonic()
+                runtime.set_mode("voice")
+                return True
+            time.sleep(self.KEY_POLL_S)
+
+    def _note_the_microphone_opened(self) -> None:
+        """
+        One row in the audit log: how long after the process started - and,
+        from standby, after the wake key - the microphone was open. "It takes
+        a minute" had no number behind it anywhere in data/; this is it.
+        """
+        detail = {}
+        try:
+            import psutil
+
+            detail["since_process_start_s"] = round(time.time() - psutil.Process().create_time(), 1)
+        except Exception:  # noqa: BLE001 - a measurement must never stop the microphone
+            pass
+        woken = getattr(self, "_woken_at", None)
+        if woken is not None:
+            detail["since_wake_key_s"] = round(time.monotonic() - woken, 2)
+        self.audit.write("system", summary="microphone open", detail=detail)
+
+    def watch_for_the_kill_key(self) -> None:
+        """
+        The kill key stops a running Jalen by asking it to (runtime.request_stop)
+        and the microphone loop sees that at its next frame - unless it is
+        inside a transcription, which can take seconds. This watcher does not
+        wait for the loop: the moment the stop is asked for, the voice stops
+        and the orb goes. The process then ends as it always did. Started by
+        run.py for voice mode; a daemon, so it ends with the process.
+        """
+        def watch() -> None:
+            while not runtime.stop_requested():
+                time.sleep(self.KEY_POLL_S)
+            for step in (self.speaker.stop, self.orb.stop):
+                try:
+                    step()
+                except Exception:  # noqa: BLE001 - shutdown() does the rest
+                    pass
+
+        threading.Thread(target=watch, name="jalen-kill-key", daemon=True).start()
+
+    @staticmethod
+    def _barge_mode(setting) -> tuple[bool, bool]:
+        """
+        conversation.barge_in, read: (only the wake word interrupts him while
+        he speaks, any sustained voice does). "wake_word" ships; true is the
+        old any-voice barge-in; false, "off" or "no" is neither.
+        """
+        word = str(setting).strip().lower()
+        wake_only = word in ("wake_word", "wake-word", "wake")
+        any_voice = bool(setting) and not wake_only and word not in ("false", "off", "no")
+        return wake_only, any_voice
+
+    def run(self, *, standby: bool = False) -> None:
+        """
+        The microphone loop. `standby` (run.py --standby) loads everything
+        and then waits with the microphone CLOSED and no orb on screen until
+        the wake key - see _wait_in_standby.
+        """
         self.running.set()
-        self.orb.start()
+        if not standby:
+            self.orb.start()
         self.orb.set_state("muted" if self.muted else "idle")
 
         self.wake.load()
@@ -2177,6 +3595,7 @@ class Jalen:
         #   "follow_up"  a sound inside the 12 seconds after a reply
         #   "answer"     a sound while a question of Jalen's is open
         #   "barge"      a sound over his own speech
+        #   "wake-over-voice"  the wake word heard over his own speech
         # Set at EVERY place `listening` becomes True - a window opened
         # without saying why would inherit the previous one's, and a barge-in
         # on a cough would walk in on the follow-up window's exemption.
@@ -2197,7 +3616,8 @@ class Jalen:
         sound_began_at = time.monotonic()
         follow_up_until = 0.0
         follow_up_s = float(self.cfg.get_path("conversation.follow_up_timeout_s", 12))
-        barge_in = bool(self.cfg.get_path("conversation.barge_in", True))
+        barge_on_the_wake_word, barge_in = self._barge_mode(
+            self.cfg.get_path("conversation.barge_in", True))
         barge_threshold = float(self.cfg.get_path("conversation.barge_in_threshold", 0.75))
         barge_grace_s = float(self.cfg.get_path("conversation.barge_in_grace_s", 1.2))
         barge_frames = int(self.cfg.get_path("conversation.barge_in_frames", 6))
@@ -2205,11 +3625,25 @@ class Jalen:
         # Barge-in has already fired for the CURRENT playback. Re-armed when
         # the speaker actually falls silent - see the latch in the loop.
         barge_fired = False
+        # Whether his voice was on air at the last frame. The speaker tells
+        # the orb when a session opens and closes; inside a reply's stream it
+        # goes quiet and speaks again with no session change, and the orb
+        # said "speaking" through every minute of tools in between.
+        was_on_air = False
+        # A wake word ignored over Jalen saying his own name is written down
+        # once per stretch of speech, not once per frame it fired on.
+        own_name_noted = False
 
         self.audit.write("system", summary=f"Jalen started (session {self.session_id})")
+        if not standby:
+            # In standby nothing is said until he asks for Jalen: the notes are
+            # said when the wake key opens the microphone, below.
+            for note in self.startup_notes():
+                self.say(note)
 
         def dispatch_turn(text: str, turn_id: int, timer: TurnTimer,
-                          from_him: bool = True, door: str = "") -> None:
+                          from_him: bool = True, door: str = "",
+                          sound_began_at: float | None = None) -> None:
             """
             Run process() on its own thread so this loop keeps reading mic
             frames while a turn is in flight — including while it's stuck
@@ -2235,13 +3669,19 @@ class Jalen:
             task_id = conversation.start_task(text[:80], conversation.THINKING)
             try:
                 with systools.com_initialized():
-                    self.process(text, from_him=from_him, door=door or "")
+                    self.process(text, from_him=from_him, door=door or "",
+                                 sound_began_at=sound_began_at)
                 conversation.update_task(task_id, state=conversation.COMPLETED)
             except BaseException as exc:      # noqa: BLE001
                 conversation.update_task(task_id, state=conversation.FAILED,
                                          error=f"{type(exc).__name__}: {exc}")
                 raise
             finally:
+                # process() lets go of an AMBER window holding for this
+                # sentence as soon as it has judged it; this is for the turn
+                # that never got that far (it raised first, or the text was
+                # blank), which would otherwise hold it to the end of its cap.
+                self._judged(sound_began_at)
                 self._await_playback()
                 self._finish_timing(timer)
                 with self._turn_lock:
@@ -2290,8 +3730,34 @@ class Jalen:
 
         self.prewarm()
 
+        if standby:
+            # STANDBY: everything is loaded and warming, and nothing listens.
+            # The wake key is the wake word (the hotkey branch below does the
+            # same): the microphone opens straight into a window for him.
+            if not self._wait_in_standby():
+                return
+            self.muted = False
+            self.orb.start()
+            listening = True
+            wake_initiated = True
+            opened_by = "wake"
+            vouched_by = None
+            sound_began_at = time.monotonic()
+            self.orb.set_state("listening")
+            for note in self.startup_notes():
+                self.say(note)
+
         frames_seen = 0
+        # The microphone reopens itself when its device goes quiet and says so
+        # out loud (Microphone._reopen_if_stalled) - forced, because "I can't
+        # hear you" is worth breaking a mute for. Written down too.
+        def _the_microphone_says(sentence: str) -> None:
+            self.audit.write("system", summary=f"microphone: {sentence}")
+            self.say(sentence, force=True)
+
+        self.mic.notify = _the_microphone_says
         with self.mic:
+            self._note_the_microphone_opened()
             for frame in self.mic.frames():
                 # `python run.py --stop` (and the spoken "quit") set this. We
                 # check it here, in the loop that owns the microphone, so the
@@ -2350,6 +3816,10 @@ class Jalen:
                     # brings it back. Deafening it entirely would make the
                     # spoken "resume" impossible to hear, which is how you
                     # end up with an assistant you can't turn back on.
+                    #
+                    # Nothing is being heard while paused, so nothing is on
+                    # its way for an AMBER window to wait for (_held_for).
+                    self._hearing_since = None
                     if self.wake.feed(frame):
                         self.paused = False
                         listening = True
@@ -2392,12 +3862,73 @@ class Jalen:
                 #
                 # Real speech over the top clears all three in about a fifth
                 # of a second, which still feels immediate.
-                if not self.speaker.speaking:
+                # ON AIR, NOT MERELY A SESSION OPEN (Speaker.on_air). A brain
+                # reply's stream is open for the whole turn, through every
+                # tool call, so `speaking` stayed true for minutes with nothing
+                # playing - and both branches below heard nothing but the wake
+                # word all that time: his "what's up" and the "yes" to its own
+                # "Confirm?" were never heard, and "Hey Jalen" stopped a reply
+                # that was not playing, losing its answer. "It is still
+                # becoming deaf even after getting my prompt" (2026-10-24).
+                on_air = _on_air(self.speaker)
+                if on_air != was_on_air:
+                    was_on_air = on_air
+                    self._refresh_orb(listening=listening)
+                if not on_air:
                     # Playback is over, so the latch below re-arms for the
                     # next reply.
                     barge_fired = False
+                    own_name_noted = False
 
-                if barge_in and self.speaker.speaking:
+                # ONLY "HEY JALEN" INTERRUPTS HIM (conversation.barge_in:
+                # wake_word). His words, 2026-10-23: "while it is working it
+                # should be able to hear only my Hey Jalen word, nothing else
+                # should interrupt it". Any sustained voice used to: the
+                # television, a cough, someone else in the room - and Jalen's
+                # own voice, which is what the three dials below were tuned
+                # against. The wake model is the one detector here that is
+                # about HIM saying the name, not about sound. Ctrl+Alt+J still
+                # stops him mid-sentence, and Ctrl+Alt+K stops everything.
+                if barge_on_the_wake_word and on_air:
+                    if not self.wake.feed(frame) or barge_fired:
+                        continue
+                    # HIS NAME IN JALEN'S OWN MOUTH. Playback reaches the wake
+                    # model in this mode, and a sentence of Jalen's with the
+                    # name in it - "until you say "Jalen, end the lockdown"",
+                    # a message that opens "Hey Jalen" - can fire it: he cut
+                    # himself off, and the window that opened was counted as
+                    # him (review of PR #1, finding 5). Not trusted while that
+                    # is on air; Ctrl+Alt+J still stops him.
+                    if self._saying_its_own_name():
+                        if not own_name_noted:
+                            own_name_noted = True
+                            self.audit.write(
+                                "system",
+                                summary="the wake word fired while I was saying my own name - "
+                                        "not taken as him")
+                        continue
+                    barge_fired = True
+                    self.audit.write(
+                        "system",
+                        summary=(f"the wake word stopped playback after "
+                                 f"{self.speaker.speaking_for():.1f}s"),
+                    )
+                    self.speaker.stop()
+                    listening = True
+                    # The wake word: he called, so this window is his - unlike
+                    # the sound-triggered barge-in below, which vouches for
+                    # nothing. But it was heard OVER HIS OWN VOICE, so the
+                    # address gate checks what it hears against that voice
+                    # before it is taken: the model may have heard the speakers.
+                    wake_initiated = True
+                    opened_by = "wake-over-voice"
+                    vouched_by = None
+                    sound_began_at = time.monotonic()
+                    self.orb.set_state("listening")
+                    self.collector._reset()
+                    continue
+
+                if barge_in and on_air:
                     if self.speaker.speaking_for() < barge_grace_s:
                         barge_run = 0
                         continue
@@ -2529,9 +4060,20 @@ class Jalen:
                         if self.mic.queued_seconds() > STALE_AUDIO_S:
                             self.mic.drain()
                         self.collector._reset()
+                    # WHAT IS ON ITS WAY, for an AMBER window deciding whether
+                    # to wait for it (_held_for): the sentence a window has
+                    # just opened for, from its very first frame - or, when
+                    # none opened, nothing, because whatever was being heard
+                    # has by now been dropped or handed on to process().
+                    self._hearing_since = sound_began_at if listening else None
                     continue
 
                 self.orb.set_level(float(np.abs(frame).mean() * 12))
+                # Still on its way - and the first word of it for a window the
+                # barge-in or the hotkey opened above. Stays set through the
+                # transcription and the gate below; cleared, or handed on to
+                # _judging, when the sentence leaves this thread.
+                self._hearing_since = sound_began_at
                 utterance = self.collector.feed(frame)
                 if utterance is None:
                     continue
@@ -2758,10 +4300,19 @@ class Jalen:
                 # answer starts no work; it releases work already waiting.
                 answering = (self._awaiting_confirmation or self._awaiting_reply
                              or self._awaiting_stop or self._rating_is_pending())
-                if in_flight >= MAX_IN_FLIGHT_TURNS and not answering:
+                # NEVER FOR WHAT THE ROUTER ANSWERS ITSELF either: "what's
+                # up", "are you done", "pause", "what time is it" take no
+                # brain and a moment, and refusing them while a long task ran
+                # was the "it becomes deaf after my prompt" of 2026-10-24.
+                # Asked only past the limit: it is a pass over every rule.
+                quick = in_flight >= MAX_IN_FLIGHT_TURNS and self._answered_without_the_brain(text)
+                if in_flight >= MAX_IN_FLIGHT_TURNS and not answering and not quick:
                     with self._turn_lock:
                         self._active_turns.discard(turn_id)
-                    self.say("I'm still on the last one — give me a second.")
+                    # Said so it is plain the sentence was NOT taken: "give
+                    # me a second" read as if it had been, and it never ran.
+                    self.say("I'm still working on two things, so I didn't take that one "
+                             "- say it again in a moment.")
                     self._refresh_orb()
                     continue
                 # The speaker's first-audio callback needs to find THIS
@@ -2769,9 +4320,14 @@ class Jalen:
                 # Overlapping turns overwrite it deliberately: the newest
                 # turn is the one whose silence he is currently sitting in.
                 self._turn_timer = timer
+                # Handed on: an AMBER window waiting for this sentence keeps
+                # waiting until process() has judged it. Added BEFORE the next
+                # frame clears _hearing_since, so there is no moment at which
+                # the sentence is on its way and neither says so.
+                self._judging.add(sound_began_at)
                 threading.Thread(
-                    target=dispatch_turn, args=(text, turn_id, timer, from_him, door), daemon=True,
-                    name=f"jalen-turn-{turn_id}",
+                    target=dispatch_turn, args=(text, turn_id, timer, from_him, door, sound_began_at),
+                    daemon=True, name=f"jalen-turn-{turn_id}",
                 ).start()
 
         # Falling out of the loop without a reason means the mic generator
@@ -2892,6 +4448,13 @@ class Jalen:
         trip the window open again.
         """
         if wake_initiated:
+            # THE WAKE WORD HEARD OVER HIS OWN VOICE: the model may have heard
+            # the speakers, so the window is his only if what it heard is not
+            # that voice coming back (review of PR #1, finding 5). Under three
+            # words nothing is echo, so "stop" and "yes" are always his.
+            if opened_by == "wake-over-voice" and self._sounds_like_its_own_voice(
+                    text, began_at=began_at):
+                return False
             return True
         # THE QUESTION'S OWN ENDING is not the answer to it. process() asks
         # this too, but only with the clock of the moment it is asked; here
@@ -3213,6 +4776,19 @@ class Jalen:
                                        kind="bare-wake")
         finally:
             self._refresh_orb()
+
+    def _any_turn_in_flight(self) -> bool:
+        """
+        Is ANY turn working - one the microphone started (_active_turns), or one
+        from another door holding the brain? For a door whose own turn is not
+        in _active_turns: the chat panel.
+        """
+        lock = getattr(self, "_turn_lock", None)
+        if lock is not None:
+            with lock:
+                if getattr(self, "_active_turns", None):
+                    return True
+        return self._brain_is_busy()
 
     def _another_turn_in_flight(self) -> bool:
         """
@@ -3621,7 +5197,7 @@ class Jalen:
         """Recompute what the orb should show from what is actually true."""
         if self.muted or self.paused:
             state = "muted"
-        elif self.speaker.speaking:
+        elif _on_air(self.speaker):
             state = "speaking"
         elif self._active_turns:
             state = "thinking"
@@ -3775,7 +5351,11 @@ class Jalen:
 
         if self.brain is not None and self._loop is not None:
             try:
-                self._run_coro(self.brain.stop())
+                # Bounded: the brain is a Claude Code child process, and one
+                # that does not answer used to hold the whole shutdown - and
+                # the kill key - until the hotkey's grace ran out and it was
+                # force-killed. The child dies with this process either way.
+                self._run_coro(self.brain.stop(), timeout=BRAIN_STOP_TIMEOUT_S)
             except Exception:
                 pass
         try:

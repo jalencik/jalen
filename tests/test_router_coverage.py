@@ -367,6 +367,17 @@ def test_every_new_rule_targets_a_real_registered_tool(router):
         "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_quit", "jalen_pause", "jalen_ack", "jalen_timing",  "jalen_read_all",
         "jalen_resume", "jalen_restart", "private_mode", "set_posture", "morning_brief",
         "audit_digest", "cancel", "acknowledge", "greet", "reload_config",
+        # Hands off / end the lockdown (jalen/limits.py): Jalen's own state,
+        # handled in handle_local before the gate.
+        "jalen_lockdown", "jalen_lift_lockdown",
+        # "What's wrong with you?" - read from this process's own state.
+        "what_is_wrong",
+        # "New conversation" - lets go of the conversation the brain would
+        # otherwise resume after a restart (Brain.forget_conversation).
+        "new_conversation",
+        # "What's up", "are you there" - answered here, at once, saying what
+        # is running if anything is (Jalen._small_talk).
+        "small_talk",
         # Hand-gesture orb resizing. App-level for the same reason
         # jalen_orb_size is: it needs the orb and the camera controller this
         # process owns, and a camera toggle must not depend on the network.

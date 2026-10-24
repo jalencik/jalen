@@ -193,8 +193,12 @@ def test_while_a_question_is_open_everything_he_says_is_the_answer():
 
     from jalen.app import Jalen
 
+    # The answer branches live in _take_as_answer (shared with the chat panel
+    # since 2026-10-23); process() asks it before anything can route.
     source = inspect.getsource(Jalen.process)
-    assert source.index("_awaiting_reply") < source.index("self.router.route")
+    assert source.index("self._take_as_answer(") < source.index("self.router.route")
+    answers = inspect.getsource(Jalen._take_as_answer)
+    assert "if self._awaiting_reply:" in answers and "self._reply_q.put(text)" in answers
 
 
 def test_the_mic_stays_open_while_a_question_is_pending():

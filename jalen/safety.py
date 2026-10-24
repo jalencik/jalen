@@ -33,10 +33,21 @@ class Verdict:
     announce: bool
     blocked: bool
     detail: dict[str, Any]
+    # For a RED action dangerous enough to say what it does that cannot be
+    # taken back, and ask a second time (`consequences:` in safety.yaml);
+    # "" for every other verdict. Both gate paths ask it after the first yes.
+    consequence: str = ""
 
     @property
     def allowed_immediately(self) -> bool:
         return self.tier is Tier.GREEN
+
+    @property
+    def second_question(self) -> str:
+        """The question asked after his first yes, or "" when there is none."""
+        if not self.consequence:
+            return ""
+        return f"{self.consequence} Still want it? Confirm?"
 
 
 # Argument names that carry a program or a window: open_app(name=),
@@ -290,10 +301,181 @@ def _voice_note_summary(args: dict[str, Any]) -> str:
             "internet, to be turned into words")
 
 
+def _spoken_words(text: str, limit: int) -> str:
+    """Every line of a message as it will be READ ALOUD, joined, clipped at `limit`."""
+    import html as _html
+
+    plain = _html.unescape(_MARKUP.sub("", str(text or "")))
+    plain = _ADDRESS.sub("a link", plain)
+    words = " ".join(plain.split())
+    return words if len(words) <= limit else words[:limit].rsplit(" ", 1)[0] + " ... and more"
+
+
+def _text_message_summary(args: dict[str, Any], app: str) -> str:
+    """
+    The question before a text goes out as him: WHO and WHAT. "send telegram
+    message: Ali" named a person and said nothing about what would be said
+    in his name - so a message the brain had worded for him ("tell Ali I'll
+    be late, nicely") was approved without being heard. A voice message has
+    said its words since it was built (_voice_message_summary); a text now
+    says them too, as they will be read (tags out, a link said as "a link",
+    its host named after), up to 300 characters.
+    """
+    to = _said(args.get("to"), 90) or "someone"
+    head = f"send {to} a {app} message"
+    if later := _when_said(args.get("schedule_at")):
+        head += f", to go out {later},"
+    if str(args.get("reply_to") or "").strip():
+        head += " as a reply"
+    if topic := _said(args.get("topic"), 60):
+        head += f" in the topic {topic}"
+    words = _spoken_words(args.get("text"), 300)
+    if not words:
+        return head
+    hosts = _link_hosts(str(args.get("text") or ""))
+    links = f", with links to {', '.join(hosts[:3])}" if hosts else ""
+    return f'{head} saying "{words}"{links}'
+
+
+# How he says "send it now" for a time, and "the one going out first" for a
+# scheduled post. One list each, for the question he is asked and for what the
+# tool then does (messaging.send_telegram_message, reschedule_telegram_post,
+# _which_scheduled): they were written out twice and could drift, and "now"
+# was read by the question and refused by the send after he had said yes
+# (review of PR #1, finding 13).
+RIGHT_NOW_WORDS = frozenset({"now", "right now", "immediately", "straight away", "at once"})
+NEXT_SCHEDULED_WORDS = frozenset({
+    "next", "the next one", "next one", "the next post", "next post", "soonest",
+    "the soonest", "first", "the first one",
+})
+
+
+def _when_said(raw: Any) -> str:
+    """
+    A scheduled time as he will hear it - "tomorrow at 09:00" - read by the
+    same rules the tool uses (jalen/when.py), so the question and the post
+    cannot disagree; quoted as given when it cannot be read (the tool then
+    refuses it). "" when nothing is scheduled.
+    """
+    said = " ".join(str(raw or "").split())
+    if not said:
+        return ""
+    if said.lower() in RIGHT_NOW_WORDS:
+        return "now"
+    from . import when
+
+    moment, _why = when.parse(said)
+    return when.say(moment) if moment is not None else f'at "{_said(said, 40)}"'
+
+
+def _which_scheduled_said(args: dict[str, Any]) -> str:
+    which = _said(args.get("message"), 50)
+    number = which.lstrip("#").strip()
+    if number.isdigit():
+        return f"scheduled post number {number}"
+    plain = " ".join(which.lower().split())
+    if plain in LAST_MESSAGE_WORDS:
+        return "the scheduled post"
+    if plain in NEXT_SCHEDULED_WORDS:
+        return "the next scheduled post"
+    return f'the scheduled post with "{which}"'
+
+
+def _cancel_scheduled_summary(args: dict[str, Any]) -> str:
+    return f"cancel {_which_scheduled_said(args)} in {_in_chat(args)}, so it never goes out"
+
+
+def _reschedule_summary(args: dict[str, Any]) -> str:
+    later = _when_said(args.get("schedule_at"))
+    which, where = _which_scheduled_said(args), _in_chat(args)
+    if later == "now":
+        return f"send {which} in {where} now, instead of when it was scheduled"
+    return f"move {which} in {where} to {later or 'another time'}"
+
+
+def _email_summary(args: dict[str, Any]) -> str:
+    """WHO and the subject - "send email: prof@uni.edu" said neither what nor why."""
+    to = _said(args.get("to"), 90) or "someone"
+    subject = _said(args.get("subject"), 120)
+    return f'send an email to {to}, subject "{subject}"' if subject else f"send an email to {to}"
+
+
+# How he names "the newest message" when he gives neither its number nor its
+# words - and leaving the message out means the same. One list for the
+# question he is asked and for the message the tool then acts on
+# (messaging._which_message), so the two cannot name different messages.
+LAST_MESSAGE_WORDS = frozenset({
+    "", "last", "latest", "newest", "last one", "the last one", "the latest one",
+    "the last message", "the latest message", "last message", "latest message",
+    "my last message", "my latest message", "my last post", "my latest post",
+    "the last post", "the latest post", "last post", "it", "that", "that one",
+    "this", "this one",
+})
+
+
+def _message_said(args: dict[str, Any], *, his: bool, pinned: bool = False) -> str:
+    """Which message a Telegram action is about, as he hears it in the question."""
+    which = _said(args.get("message"), 50)
+    if " ".join(which.lower().split()) in LAST_MESSAGE_WORDS:
+        if pinned:
+            return "the pinned message"
+        return "your last message" if his else "the last message"
+    number = which.lstrip("#").strip()
+    if number.isdigit():
+        return f"message number {number}"
+    return f'the message with "{which}"'
+
+
+def _in_chat(args: dict[str, Any]) -> str:
+    return _said(args.get("chat"), 60) or "that chat"
+
+
+def _edit_summary(args: dict[str, Any]) -> str:
+    """The question before an edit: which message, where, and what it will say."""
+    head = f"change {_message_said(args, his=True)} in {_in_chat(args)}"
+    first = _first_spoken_line(str(args.get("text") or ""))
+    return f'{head} so it starts "{first}"' if first else head
+
+
+def _delete_message_summary(args: dict[str, Any]) -> str:
+    head = f"delete {_message_said(args, his=True)} in {_in_chat(args)}"
+    return head if _is_self_chat(args.get("chat", "")) else f"{head} for everyone"
+
+
+def _forward_summary(args: dict[str, Any]) -> str:
+    to = _said(args.get("to"), 60) or "another chat"
+    return f"forward {_message_said(args, his=False)} from {_in_chat(args)} to {to}"
+
+
+def _pin_summary(args: dict[str, Any]) -> str:
+    if args.get("unpin"):
+        return f"unpin {_message_said(args, his=False, pinned=True)} in {_in_chat(args)}"
+    told = ", and notify everyone there" if args.get("notify") else ""
+    return f"pin {_message_said(args, his=False)} in {_in_chat(args)}{told}"
+
+
+def _reaction_summary(args: dict[str, Any]) -> str:
+    emoji = _said(args.get("emoji"), 12)
+    which = _message_said(args, his=False)
+    if not emoji:
+        return f"take your reaction off {which} in {_in_chat(args)}"
+    return f"react {emoji} to {which} in {_in_chat(args)}"
+
+
 # Tools whose question or announcement has to say more than "<tool>: <to>".
 _SUMMARIES = {
     "send_voice_message": _voice_message_summary,
     "transcribe_voice_note": _voice_note_summary,
+    "send_telegram_message": lambda args: _text_message_summary(args, "Telegram"),
+    "send_whatsapp_message": lambda args: _text_message_summary(args, "WhatsApp"),
+    "send_email": _email_summary,
+    "cancel_scheduled_post": _cancel_scheduled_summary,
+    "reschedule_telegram_post": _reschedule_summary,
+    "edit_telegram_message": _edit_summary,
+    "delete_message": _delete_message_summary,
+    "forward_telegram_message": _forward_summary,
+    "pin_telegram_message": _pin_summary,
+    "react_to_telegram_message": _reaction_summary,
 }
 
 
@@ -413,6 +595,11 @@ class SafetyEngine:
         self._reasons = {
             t: (tiers.get(t.value) or {}).get("reason", "") for t in Tier
         }
+        # RED actions dangerous enough to say what they do that cannot be
+        # taken back, and ask a second time - see Verdict.consequence.
+        self._consequences: dict[str, str] = {
+            str(tool): str(text) for tool, text in (tiers.get("consequences") or {}).items()
+            if text}
         never = tiers.get("never_touch") or {}
         self._never_paths = [self._norm(p) for p in never.get("paths", [])]
         # ...and each as Windows resolves it, so a profile reached through a
@@ -450,6 +637,16 @@ class SafetyEngine:
             for h in (guard.get("allow_unseen_urls_on_hosts", []) or []) if str(h).strip())
         self._acts_on_the_world = frozenset(guard.get("refuse_from_content", []) or [])
 
+        # HOW MANY, as opposed to what kind (jalen/limits.py). It lives on the
+        # engine for the reason the engine is the gate at all: the router path
+        # and the brain's hook already share this ONE object, so a limit that
+        # hangs off it cannot be enforced on one path and forgotten on the
+        # other. In memory only until Jalen.__init__ attaches a file, so
+        # building an engine in a test or a script writes nothing.
+        from .limits import Governor
+
+        self.governor = Governor.from_config(tiers.get("limits"), acting=self.is_acting)
+
         self.posture = cfg.get_path("safety.posture", "irreversible_only")
         self.paranoid = bool(cfg.get_path("safety.paranoid_first_week", True))
 
@@ -460,6 +657,21 @@ class SafetyEngine:
             _simplify(name)
             for name in (cfg.get_path("telegram.personal.send_without_asking_to", []) or [])
         ]
+
+    def is_acting(self, tool: str) -> bool:
+        """
+        Does this tool CHANGE something or reach somebody, as opposed to
+        reading? The set the injection guard already curated: everything
+        listed AMBER or RED, the GREEN tools on refuse_from_content, and any
+        tool nobody has classified (unclassified-AMBER is not read-only).
+        Judged from the tier in the file, not the posture: "autonomous" turns
+        AMBER into GREEN, and it does not make closing a window a read.
+        Used by the governor for the leash and for lockdown.
+        """
+        base = self._tier_map.get(tool)
+        if base is Tier.BLACK:
+            return False        # never runs, so there is nothing to hold back
+        return base is None or base in (Tier.AMBER, Tier.RED) or tool in self._acts_on_the_world
 
     # ------------------------------------------------------------------ utils
     @staticmethod
@@ -879,7 +1091,31 @@ class SafetyEngine:
             announce=tier is Tier.AMBER,
             blocked=False,
             detail=detail,
+            consequence=self._consequence(tool, args) if tier is Tier.RED else "",
         )
+
+    def _consequence(self, tool: str, args: dict[str, Any]) -> str:
+        """
+        What this RED action does that cannot be taken back, in his words to
+        hear, from `consequences:` in safety.yaml - or "" when it is not listed.
+        A {name} is filled from the action's arguments (redacted as the audit
+        log has them), and one it does not have is spoken as "it" rather than
+        as a brace.
+        """
+        template = self._consequences.get(tool, "")
+        if not template:
+            return ""
+
+        class _Filled(dict):
+            def __missing__(self, key):
+                return "it"
+
+        values = _Filled({k: str(v) for k, v in self._redact(args).items()})
+        try:
+            return template.format_map(values).strip()
+        except (ValueError, IndexError, AttributeError):
+            # A brace the template did not mean as a field: said without it.
+            return re.sub(r"[{}]", "", template).strip()
 
     # --------------------------------------------------- pre-approved sends
     # tool -> which argument carries the destination.
@@ -896,6 +1132,13 @@ class SafetyEngine:
     # chat it sends to, exactly as for a text. It is NOT in
     # _SAFE_TO_OWN_CHAT_UNDER_TAINT below: after a read, a voice message is
     # refused even to Saved Messages.
+    #
+    # An edit changes what a chat reads, so it is decided like a send to the
+    # same place: his channel announced first, his Saved Messages without a
+    # question. A forward posts into `to` too, but only his own Saved Messages
+    # is ever pre-approved for it (_is_preapproved): what it posts is somebody
+    # else's message, unheard. delete_message is NOT here: a deletion is asked
+    # twice wherever it is (`consequences:`).
     _DESTINATION_ARG = {
         "send_telegram_message": "to",
         "save_telegram_draft": "to",
@@ -903,6 +1146,8 @@ class SafetyEngine:
         "send_telegram_file": "to",
         "send_sticker": "to",
         "send_voice_message": "to",
+        "edit_telegram_message": "chat",
+        "forward_telegram_message": "to",
     }
 
     # What may still go to his OWN Saved Messages after Jalen has read
@@ -956,9 +1201,17 @@ class SafetyEngine:
             text = str(args.get("caption") or "")
             head = f"send the file {name} to {where}" if name else f"send a file to {where}"
             joined = text
+        elif tool == "edit_telegram_message":
+            where = _said(args.get("chat"), 60) or "your channel"
+            text = str(args.get("text") or "")
+            head = f"change {_message_said(args, his=True)} in {where} to a new version"
+            joined = text
         else:
             text = str(args.get("text") or "")
-            head = f"post to {where}"
+            # A scheduled post is announced with WHEN it goes out: the stop
+            # window is now, the post is later, and he has to know which.
+            later = _when_said(args.get("schedule_at"))
+            head = f"schedule a post to {where} for {later}" if later else f"post to {where}"
             joined = text
         first = _first_spoken_line(text)
         hosts = _link_hosts(joined)
@@ -1009,6 +1262,14 @@ class SafetyEngine:
             return False
         if _is_self_chat(raw) and self._self_chat_preapproved:
             return True
+        # A FORWARD POSTS SOMEBODY ELSE'S WORDS, UNHEARD. What the message says
+        # is not known until it is fetched, and "the last message" is whichever
+        # one arrived a moment before - spam, a phishing link. Into his own
+        # Saved Messages that reaches nobody; anywhere else it is asked first,
+        # never pre-approved: his channel got it after a two-second window
+        # that never said what it said (review of PR #1, finding 9).
+        if tool == "forward_telegram_message":
+            return False
         return any(allowed and target == allowed and allowed not in SELF_CHAT_ALIASES
                    for allowed in self._preapproved)
 

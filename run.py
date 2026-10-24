@@ -30,6 +30,9 @@ def main() -> int:
     parser.add_argument("--status", action="store_true", help="say whether Jalen is running, and exit")
     parser.add_argument("--why", action="store_true", help="why did Jalen stop last time? prints the exit record and recent crashes")
     parser.add_argument("--restart", action="store_true", help="stop the running Jalen, then start fresh")
+    parser.add_argument("--standby", action="store_true",
+                        help="load everything, keep the microphone closed, and start listening "
+                             "the moment the wake key (Ctrl+Alt+J) is pressed")
     args = parser.parse_args()
 
     if args.check:
@@ -66,7 +69,23 @@ def main() -> int:
     # on the same devices — which is what "I saw two Jalen instances" and
     # the doubled/competing replies actually were.
     mode = "telegram" if args.telegram else "text" if args.text else "voice"
-    already = runtime.acquire(mode)
+    # A standby instance says so in the lock until the wake key makes it a
+    # voice one (Jalen._wait_in_standby): the kill key ends a standby instance
+    # for good, and replaces a voice one with a fresh standby (scripts/hotkeys.py).
+    already = runtime.acquire("standby" if (args.standby and mode == "voice") else mode)
+    # A STANDBY JALEN IS NOT IN THE WAY: it is what the kill key leaves behind
+    # (scripts/hotkeys.py), loaded, with the microphone closed. While it waited,
+    # every other way of starting Jalen refused - "Jalen is already running
+    # (mode standby)" - and none of them woke it (review of PR #1, finding 10).
+    # A plain start wakes it, as Ctrl+Alt+J does; text and Telegram mode end it
+    # and take its place.
+    if already is not None and already.mode == "standby" and not args.standby:
+        if mode == "voice":
+            runtime.send_signal("wake")
+            print("Jalen was waiting in standby - it is listening now.")
+            return 0
+        print(runtime.stop_running_instance())
+        already = runtime.acquire(mode)
     if already is not None:
         print(f"Jalen is already running (pid {already.pid}, mode {already.mode}).")
         print("  stop it:     python run.py --stop")
@@ -159,6 +178,10 @@ def _serve(args) -> int:
             except (AttributeError, ValueError):
                 pass  # not a real console (piped, redirected); nothing to fix
         print("Jalen — text mode. Ctrl+C to quit.\n")
+        # A lockdown he left on, or a limit that could not be read: said at
+        # the top, where he cannot miss it (voice mode says them by speaking).
+        for note in jalen.startup_notes():
+            print(f"jalen > {note}\n")
         jalen.muted = True
         jalen.orb.start()
         try:
@@ -220,6 +243,8 @@ def _serve(args) -> int:
         from jalen.integrations.telegram_bot import run_bot
 
         print("Jalen — Telegram mode. Ctrl+C to quit.\n")
+        for note in jalen.startup_notes():
+            print(f"jalen > {note}\n")
         jalen.muted = True
         jalen.orb.start()
         try:
@@ -241,8 +266,11 @@ def _serve(args) -> int:
     print(f"  stop:     say \"{name}, quit\"  ·  Ctrl+C  ·  python run.py --stop")
     print(f"  pause:    say \"{name}, pause\" (stops listening, stays running)")
     print("  status:   python run.py --status\n")
+    # The kill key silences him the moment it is pressed, not when the
+    # microphone loop next looks (Jalen.watch_for_the_kill_key).
+    jalen.watch_for_the_kill_key()
     try:
-        jalen.run()
+        jalen.run(standby=args.standby)
     except KeyboardInterrupt:
         jalen._exit_reason = "keyboard-interrupt"
         print("\nStopping…")

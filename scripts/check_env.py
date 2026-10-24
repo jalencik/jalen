@@ -103,15 +103,7 @@ def main() -> int:
     try:
         from jalen.config import SECRETS
 
-        checks = [
-            ("GROQ_API_KEY", SECRETS.groq_api_key, True, "speech recognition"),
-            ("TELEGRAM_BOT_TOKEN", SECRETS.telegram_bot_token, False, "Telegram control"),
-            ("GEMINI_API_KEY", SECRETS.gemini_api_key, False, "free-tier offload"),
-            ("TELEGRAM_API_ID", SECRETS.telegram_api_id, False, "reading your own chats"),
-            ("GITHUB_TOKEN", SECRETS.github_token, False, "GitHub"),
-            ("NOTION_TOKEN", SECRETS.notion_token, False, "Notion"),
-        ]
-        for name, value, required, why in checks:
+        for name, value, required, why in _credential_checks(SECRETS):
             if value:
                 print(f"{OK}{name} set")
             else:
@@ -204,6 +196,7 @@ def main() -> int:
             counts[tier.value] = counts.get(tier.value, 0) + 1
         print(f"{OK}safety tiers loaded: {counts}")
         print(f"{OK}posture: {engine.posture}, paranoid: {engine.paranoid}")
+        problems += _check_limits(engine)
         print(f"{OK}voice: {CONFIG.get_path('tts.voice')}")
         print(f"{OK}wake word: {CONFIG.get_path('identity.wake_word')}")
     except Exception as exc:
@@ -221,6 +214,69 @@ def main() -> int:
     print("\n" + ("All good — start it with:  .\\jalen.ps1" if problems == 0
                   else f"{problems} blocking problem(s) above."))
     return 1 if problems else 0
+
+
+def _credential_checks(secrets) -> list[tuple[str, str, bool, str]]:
+    """
+    (what, its value, required, what it is for) for every key Jalen can use.
+    Only "set" or "missing" is ever printed, never a value.
+
+    The two delegation keys were missing, so "make sure Hermes has been
+    working" (2026-10-23) had nothing to look at: the one place he is told
+    to run first said nothing about whether Hermes - or ChatGPT - could be
+    reached. agents.py reads both from the environment, as here.
+    """
+    import os
+
+    return [
+        ("GROQ_API_KEY", secrets.groq_api_key, True, "speech recognition"),
+        ("TELEGRAM_BOT_TOKEN", secrets.telegram_bot_token, False, "Telegram control"),
+        ("GEMINI_API_KEY", secrets.gemini_api_key, False, "free-tier offload"),
+        ("TELEGRAM_API_ID", secrets.telegram_api_id, False, "reading your own chats"),
+        ("GITHUB_TOKEN", secrets.github_token, False, "GitHub"),
+        ("NOTION_TOKEN", secrets.notion_token, False, "Notion"),
+        ("HERMES_API_KEY or OPENROUTER_API_KEY",
+         os.getenv("HERMES_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", ""),
+         False, "asking Hermes"),
+        ("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""), False, "asking ChatGPT"),
+    ]
+
+
+def _check_limits(engine) -> int:
+    """
+    The usage limits (jalen/limits.py) and the lockdown, in the one place he is
+    told to look first. Returns the number of BLOCKING problems.
+
+    A lockdown is the case this exists for: "Jalen refuses everything" is
+    indistinguishable from "Jalen is broken" until something says he asked for
+    it. It is a warning and not a problem, because it is a state he chose, and
+    it names both ways out.
+
+    Read-only: the lock is looked for, not loaded into a governor, and nothing
+    is written. A limit in safety.yaml that could not be read IS a problem -
+    it reads as protection and is not.
+    """
+    from jalen import limits
+
+    problems = 0
+    governor = engine.governor
+    rows = governor.usage()
+    if governor.problems:
+        for problem in governor.problems:
+            print(f"{BAD}limits: {problem}")
+        problems += 1
+    elif not governor.enabled:
+        print(f"{WARN}limits: switched off in config/safety.yaml - nothing caps how many")
+    else:
+        print(f"{OK}limits: {len(rows)} in force, leash of {governor.leash} actions per request")
+    try:
+        locked = Path(limits.LOCK_PATH).exists()
+    except OSError:
+        locked = False
+    if locked:
+        print(f"{WARN}LOCKDOWN is on ({limits.LOCK_PATH.name}): Jalen only reads and answers. "
+              "Say \"Jalen, end the lockdown\", or delete that file.")
+    return problems
 
 
 def _print_sign_in_fix(claude_path: str) -> None:

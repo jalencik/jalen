@@ -42,6 +42,10 @@ DRAFT = (
     "• Build a small on-device model\n\n"
     "<b>Requirements:</b> " + CLAP + "\n\n"
     "• Leave a reaction to this post\n\n"
+    "<blockquote expandable><b>Most Asked Questions</b>\n\n"
+    "<b>1</b> What will you get?\n— A shipped model\n\n"
+    "<b>2</b> Who should apply?\nStudents who are competent in:\n— Python\n\n"
+    "<b>3</b> How are applicants selected?\nBy a short task.\n</blockquote>\n\n"
     "Interested? Don't hesitate to dm me " + POINT + ":\n"
     "@Iht_student"
 )

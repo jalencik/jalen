@@ -554,6 +554,21 @@ class _Clock:
         return self.now
 
 
+class _BargeIn:
+    """CONFIG with conversation.barge_in fixed for one room."""
+
+    def __init__(self, base, barge_in):
+        self.base, self.barge_in = base, barge_in
+
+    def get_path(self, key, default=None):
+        if key == "conversation.barge_in":
+            return self.barge_in
+        return self.base.get_path(key, default)
+
+    def get(self, *args, **kwargs):
+        return self.base.get(*args, **kwargs)
+
+
 class Room:
     """
     Jalen.run() with everything it touches replaced by a fake: scripted
@@ -562,8 +577,13 @@ class Room:
     """
 
     def __init__(self, monkeypatch, script, *, barge=False, speaker=None, sync_turns=False,
-                 wake_first=False):
+                 wake_first=False, barge_in=True):
         """
+        `barge_in`: conversation.barge_in for this room. These tests were
+        written for `true` - any sustained voice interrupts - and keep it;
+        "wake_word" (shipped since 2026-10-23) has its own tests in
+        test_only_his_name_interrupts_him.py.
+
         `barge`: Jalen is mid-sentence when the microphone hears him, so the
         window that opens is the barge-in one - the only way, in this harness,
         to get a window with no question open behind it.
@@ -612,7 +632,7 @@ class Room:
         jalen = Jalen.__new__(Jalen)
         self.audit = _Audit()
         self.collector = _Collector(script, self.clock)
-        jalen.cfg = CONFIG
+        jalen.cfg = _BargeIn(CONFIG, barge_in)
         jalen.running = type("E", (), {"set": lambda s: None})()
         jalen.orb = _Orb()
         jalen.wake = _Wake(fires=1 if wake_first else 0)
@@ -639,6 +659,8 @@ class Room:
         jalen._turn_lock = _t.Lock()
         jalen._turn_seq = 0
         jalen._active_turns = set()
+        jalen._hearing_since = None
+        jalen._judging = set()
         jalen._awaiting_confirmation = False
         jalen._awaiting_stop = False
         jalen._awaiting_reply = False
@@ -654,8 +676,8 @@ class Room:
         jalen._follow_up_s = float(CONFIG.get_path("conversation.follow_up_timeout_s", 12))
         jalen.kill_phrases = set(CONFIG.get_path("safety.kill_phrases"))
         if sync_turns:
-            jalen.process = lambda text, from_him=True, door="": self.processed.append(
-                (text, from_him, door))
+            jalen.process = lambda text, from_him=True, door="", sound_began_at=None: \
+                self.processed.append((text, from_him, door))
             jalen._await_playback = lambda *a, **k: None
             jalen._finish_timing = lambda *a, **k: None
             jalen._check_the_plan = lambda *a, **k: None

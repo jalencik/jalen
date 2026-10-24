@@ -78,6 +78,68 @@ def _every_test_starts_and_ends_untainted():
 
 
 @pytest.fixture(autouse=True)
+def _every_test_starts_unlocked_with_an_empty_budget():
+    """
+    A lockdown and a usage count are files (jalen/limits.py), and a file is
+    process-wide: the same shape as taint above. One test that locks a Jalen
+    and ends before lifting it would make every later `Jalen()` start in
+    lockdown and refuse its actions - and a test asserting that an action
+    RUNS would fail by file order, which is the failure that is hardest to
+    trace back. The module's installed governor is the same kind of leftover.
+    """
+    from jalen import limits
+
+    def forget() -> None:
+        for path in (limits.STATE_PATH, limits.LOCK_PATH):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        limits.install(None)
+
+    forget()
+    yield
+    forget()
+
+
+@pytest.fixture(autouse=True)
+def _every_test_starts_with_no_conversation_to_resume():
+    """
+    The conversation a Brain resumes is a file (brain.session_path), and a
+    file is process-wide like taint: one test's recorded session would be
+    resumed by the next test's Brain.start(), by file order.
+    """
+    from jalen.brain.agent import forget_saved_conversation, saved_session_path
+    from jalen.config import CONFIG
+
+    def forget() -> None:
+        path = saved_session_path(CONFIG)
+        # Only ever the scratch copy (_keep_tests_out_of_real_data): deleting
+        # his real one would end his conversation because a test ran.
+        if "jarvis-test-data" in str(path):
+            forget_saved_conversation(path)
+
+    forget()
+    yield
+    forget()
+
+
+@pytest.fixture(autouse=True)
+def _every_test_starts_out_of_private_mode():
+    """
+    Memory's private switch (memory.set_private) is process-wide like taint,
+    and every real Jalen() sets it from its audit log: one test that turned
+    private mode on would make memory refuse to store anything in every test
+    after it, by file order.
+    """
+    from jalen.tools import memory
+
+    memory.set_private(False)
+    yield
+    memory.set_private(False)
+
+
+@pytest.fixture(autouse=True)
 def _every_test_starts_with_no_form_read():
     """
     The form inspect_form last read (webforms._FORM_READ) is process-wide,
@@ -254,9 +316,33 @@ def _keep_tests_out_of_real_data(tmp_path_factory):
     saved_speech_cache = Speaker.CACHE_DIR
     Speaker.CACHE_DIR = scratch / "tts_cache"
 
+    # --- usage counts and the lockdown record ----------------------------
+    # Every test that builds a real Jalen() attaches the governor, which loads
+    # data/jalen-usage.json and data/jalen-lockdown.json. A lockdown written
+    # by one test and left on his disk would refuse every action he asked for
+    # the next morning, and counts from a gate run would eat his real budget.
+    # Governor.attach reads these two module attributes at call time.
+    from jalen import limits as limits_module
+
+    saved_limits = (limits_module.STATE_PATH, limits_module.LOCK_PATH)
+    limits_module.STATE_PATH = scratch / "jalen-usage.json"
+    limits_module.LOCK_PATH = scratch / "jalen-lockdown.json"
+
+    # --- the conversation to resume: data/brain-session.json --------------
+    # Every Brain writes the session of a good turn there and resumes it on
+    # start (jalen/brain/agent.py). A test's session in his file would be what
+    # his next real start tried to resume - and, failing, forgot along with
+    # the real one. Brain reads the key in __init__, so this moves them all.
+    brain_cfg = CONFIG.setdefault("brain", {})
+    saved_brain = dict(brain_cfg)
+    brain_cfg["session_path"] = str(scratch / "brain-session.json")
+
     try:
         yield scratch
     finally:
+        brain_cfg.clear()
+        brain_cfg.update(saved_brain)
+        limits_module.STATE_PATH, limits_module.LOCK_PATH = saved_limits
         Speaker.CACHE_DIR = saved_speech_cache
         (bridge_server_module.BRIDGE_FILE, native_host_module.BRIDGE_FILE,
          was) = saved_bridge

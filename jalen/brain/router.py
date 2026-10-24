@@ -164,6 +164,22 @@ def addressed_to_jalen(text: str) -> bool:
     return bool(_ADDRESSED.match(text or ""))
 
 
+_SAYS_THE_NAME = None
+
+
+def says_the_name(text: str) -> bool:
+    """
+    Is his name - Jalen or Jarvis, in any pronunciation _NAME covers -
+    anywhere in `text`? Asked of what JALEN is saying: while that is on air,
+    the wake model hearing the name may be hearing the speakers (app.py, the
+    wake word over his own voice).
+    """
+    global _SAYS_THE_NAME
+    if _SAYS_THE_NAME is None:
+        _SAYS_THE_NAME = re.compile(r"(?<![\w])" + _NAME + r"(?![\w])", re.I)
+    return bool(_SAYS_THE_NAME.search(text or ""))
+
+
 # ----------------------------------------------------------------------------
 # THREE MORE WAYS A SENTENCE IS PLAINLY FOR HIM, and the gate refused all of
 # them - which, from his chair, is Jalen pretending to be deaf.
@@ -1027,6 +1043,17 @@ def _rules() -> list[Rule]:
         # work, the only remaining exit is killing the process by hand.
         (R(r"^(mute|be quiet|shut up|silence)( yourself)?$", re.I),
          "jalen_mute", n, "Muted."),
+        # The conversation now survives a restart (jalen/brain/agent.py), so
+        # there has to be a way to let it go. Up here because "start a new
+        # conversation" otherwise reaches open_target's "start X" and is
+        # opened as an app. Only sentences that say "conversation" or "chat":
+        # a bare "start over" is as often about the task in hand, and wiping
+        # the context that task needs would be the opposite of what he meant.
+        (R(r"^(?:let'?s )?(?:start )?(?:a )?(?:new|fresh) (?:conversation|chat)$"
+           r"|^(?:forget|clear|end) (?:this|our|the) (?:conversation|chat)$", re.I),
+         "new_conversation", n,
+         "New conversation. What I remember about you stays; what we were "
+         "just talking about is gone."),
         # "talk" is here because "you can talk" NEVER REACHED THIS RULE. The
         # politeness stripper above removes a leading "you can", so the rule's
         # own "you can talk" alternative was dead on arrival — normalisation
@@ -1070,6 +1097,35 @@ def _rules() -> list[Rule]:
          "jalen_resume", n, "Listening again."),
         (R(r"^(restart|reboot|reload)( " + _NAME + r"| yourself)?$", re.I),
          "jalen_restart", n, "Restarting."),
+        # ---- hands off, and what has been used (jalen/limits.py) -------------
+        # LOCKDOWN stops every acting tool until he lifts it; reading goes on.
+        # Generous on the way IN, because the one phrase he needs when
+        # something is going wrong must not depend on remembering a wording.
+        # "stop" alone is not here: it is the kill phrase and stops speech.
+        (R(r"^(?:lock ?down|go into (?:a )?lock ?down|lock ?down mode|hands off"
+           r"|freeze|freeze everything|freeze all actions|stop acting"
+           r"|don'?t touch anything|do not touch anything)"
+           r"( " + _NAME + r")?$", re.I),
+         "jalen_lockdown", n, None),
+        # ...and strict on the way OUT. These only reach the lift when the
+        # sentence is his word for word and was said with his name
+        # (Jalen._lockdown_off), so a phrase added here widens what he may
+        # say, never who may say it.
+        (R(r"^(?:(?:end|lift|finish|remove|cancel|turn off|disable)(?: the| your| this)? "
+           r"lock ?down|lock ?down (?:off|over|ended|is over)|hands on|unfreeze"
+           r"(?: everything)?|act again|start acting again)"
+           r"( " + _NAME + r")?$", re.I),
+         "jalen_lift_lockdown", n, None),
+        # "my limits", not "your limits": he also asks Jalen about its own
+        # limits in the sense of what it cannot do, and that is the brain's.
+        (R(r"^(?:what(?:'?s| are| is)|show(?: me)?|tell me|read(?: out)?|give me)"
+           r"(?: all)?(?: of)? (?:my |the )?(?:usage )?limits"
+           r"(?: so far| used| status| usage)?\??$"
+           r"|^(?:usage report|limits? report|limits? status|usage status|usage)\??$"
+           r"|^how (?:much|many things) (?:have|did) you (?:used?|done|do|taken)"
+           r"(?: so far| today| this hour)?\??$"
+           r"|^what have you used(?: so far| today)?\??$", re.I),
+         "usage_report", n, None),
         # A bare name with nothing after it. STT produces this constantly:
         # the wake word fires, he starts to speak, and the endpointer closes
         # on just "Jalen". Without a rule it is a full LLM round-trip to
@@ -1176,8 +1232,27 @@ def _rules() -> list[Rule]:
            r"|^how (?:far|much longer|is it going)(?: are you)?\??$"
            r"|^(?:are you|you) still (?:working|going|on it)\??$"
            r"|^(?:any )?progress\??$|^status\??$"
-           r"|^(?:what.?s|what is) (?:happening|going on)\??$", re.I),
+           r"|^(?:what.?s|what is) (?:happening|going on)\??$"
+           # "It is even taking 10 seconds" (2026-10-24): every one of these
+           # went to the brain - which, while a long task holds it, waits.
+           r"|^(?:are you|you) (?:done|finished|ready)(?: yet)?\??$"
+           r"|^is it (?:done|finished|ready)(?: yet)?\??$"
+           r"|^how long (?:will|is) it (?:going to )?take\??$", re.I),
          "what_are_you_doing", lambda m: {}, None),
+        # SMALL TALK, ANSWERED HERE. "What's up" went to the brain - a model
+        # round trip for two words, and while a long task held the brain it
+        # waited behind it in silence, which is how "it takes 10 seconds to
+        # answer what's up" and "it goes deaf after my prompt" sounded
+        # (2026-10-24). Answered locally, and when something is running the
+        # answer says so (Jalen._small_talk).
+        # "hear me" too: the politeness stripper has taken "can you" off
+        # "can you hear me" before any rule sees it.
+        (R(r"^(?:are you (?:there|listening|awake|with me|alive)"
+           r"|(?:you|u) (?:there|listening|awake)|(?:can you )?hear me)\??$", re.I),
+         "small_talk", lambda m: {"kind": "here"}, None),
+        (R(r"^(?:what'?s up|whats up|wassup|wazzup|sup|yo|how are you|how are things"
+           r"|how have you been|how'?s everything|how'?s life)\??$", re.I),
+         "small_talk", lambda m: {"kind": "chat"}, None),
         (R(r"^cancel (?:that|it|the task|this)$"
            r"|^stop (?:that|the task|what (?:you.?re|you are) doing)$"
            r"|^forget (?:that|this) task$", re.I),
@@ -1229,9 +1304,22 @@ def _rules() -> list[Rule]:
            r"|^how are you (?:doing|feeling)\??$"
            r"|^(?:your|self) health$", re.I),
          "own_health", n, None),
+        # "What's wrong with you?" - what is broken in THIS running Jalen, in
+        # plain words (Jalen.what_is_wrong): the sign-in, the microphone, the
+        # speech recognition, a lockdown, a limit. It used to run the full
+        # install check below and read out its printout. Above it, so that
+        # this wording is taken first; "run a diagnostic" still reaches it.
+        (R(r"^(?:what.?s|what is) (?:wrong|the (?:problem|matter)|up) with you\??$"
+           r"|^(?:is )?(?:something|anything) wrong(?: with you)?\??$"
+           r"|^(?:tell me|explain) what.?s wrong\??$|^explain what is wrong\??$"
+           r"|^why (?:aren.?t|are not|can.?t|cannot|don.?t|do not) you "
+           r"(?:work(?:ing)?|hear(?:ing)? me|listen(?:ing)?(?: to me)?|answer(?:ing)?(?: me)?"
+           r"|respond(?:ing)?(?: to me)?)\??$"
+           r"|^why are you (?:silent|so quiet|not working|deaf|broken)\??$"
+           r"|^what happened to you\??$", re.I),
+         "what_is_wrong", n, None),
         (R(r"^(?:run |do )?(?:your |a )?(?:self.?)?diagnos(?:e|tics?)(?: yourself)?$"
-           r"|^diagnose yourself$"
-           r"|^what.?s wrong with you\??$", re.I),
+           r"|^diagnose yourself$", re.I),
          "self_diagnose", n, None),
         (R(r"^open (?:your|the) (?:own )?(?:code|source|project)(?: in vs ?code)?$"
            r"|^open yourself in vs ?code$", re.I),
@@ -1529,6 +1617,27 @@ def _rules() -> list[Rule]:
          lambda m: {"on": True}, "Private mode on. Nothing is being logged or remembered."),
         (R(r"^(private mode off|end private mode|resume logging)$", re.I),
          "private_mode", lambda m: {"on": False}, "Private mode off."),
+
+        # ---- memory ("constant memory", 2026-10-23) ------------------------
+        # A fact he asks Jalen to remember is stored in his own words, at
+        # once and for nothing; until now only the brain could store one,
+        # when it chose to (report.md: the memory table had never held a
+        # row). Not "remember to ..." - a reminder, not a fact - and not
+        # "remember this/that/it" or "remember when": what those mean is in
+        # the conversation, which only the brain has.
+        (R(r"^(?:please )?remember(?: that)? (?!to |this$|that$|it$|me$|when )(.{4,}?)[.!]?$",
+           re.I),
+         "remember", lambda m: {"text": m.group(1).strip()}, None),
+        # About HIM: the facts are in his words ("my sister is ..."), so the
+        # search is for those, not for the word "me". Before the rule below,
+        # which would take "about me" as a search for "me".
+        (R(r"^what do you (?:remember|know) about me\??$", re.I),
+         "recall_memory", lambda m: {"query": "about me: my life, my work, the people "
+                                              "I know and what I like"}, None),
+        # "Remember" only: "what do you know about quantum computing" is a
+        # question for the brain, not a search of what he told Jalen.
+        (R(r"^(?:what do you remember about|do you remember) (?!when )(.{2,}?)\??$", re.I),
+         "recall_memory", lambda m: {"query": m.group(1).strip()}, None),
         (R(r"^(reload|refresh) (config|configuration|settings)$", re.I),
          "reload_config", n, "Config reloaded."),
         (R(r"^what did you do (today|yesterday)\??$", re.I),
@@ -2009,10 +2118,37 @@ class IntentRouter:
                 break
         return text.strip()
 
+    def would_route(self, text: str) -> bool:
+        """
+        Would route() answer this here, without the brain? Asked by the
+        microphone loop before it turns a sentence away for being busy, so it
+        counts nothing and logs no miss: route() does both when asked for real.
+        """
+        if not self.enabled or not text:
+            return False
+        return self._match(text)[0] is not None
+
     def route(self, text: str) -> Intent | None:
         """Return an Intent if this is a known command, else None -> send to Claude."""
         if not self.enabled or not text:
             return None
+        intent, norm = self._match(text)
+        if intent is not None:
+            self.hits += 1
+            return intent
+
+        self.misses += 1
+        if self.log_misses:
+            try:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                with open(self._miss_log, "a", encoding="utf-8") as fh:
+                    fh.write(norm + "\n")
+            except OSError:
+                pass
+        return None
+
+    def _match(self, text: str) -> tuple[Intent | None, str]:
+        """The first rule that takes `text`, and the normalised text - nothing counted."""
         norm = self._normalise(text)
         # Matched on the lowercased form (every alternation list in _rules is
         # written lowercase), but ARGUMENTS come from the cased form. A
@@ -2047,18 +2183,8 @@ class IntentRouter:
             ):
                 continue
 
-            self.hits += 1
-            return Intent(tool=tool, args=args, reply=reply)
-
-        self.misses += 1
-        if self.log_misses:
-            try:
-                DATA_DIR.mkdir(parents=True, exist_ok=True)
-                with open(self._miss_log, "a", encoding="utf-8") as fh:
-                    fh.write(norm + "\n")
-            except OSError:
-                pass
-        return None
+            return Intent(tool=tool, args=args, reply=reply), norm
+        return None, norm
 
     @property
     def hit_rate(self) -> float:

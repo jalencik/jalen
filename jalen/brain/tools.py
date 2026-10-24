@@ -536,11 +536,112 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "shows it) or a few of its words; a message that cannot be found, or "
         "fits two, sends nothing and says so. In a forum group, topic names "
         "the topic. For a DM he has not seen drafted first, use "
-        "save_telegram_draft and send only after he says yes.",
+        "save_telegram_draft and send only after he says yes. A post in his "
+        "channel's format is checked against it before it goes: bullets, "
+        "bold and the Q&A block are put right and the reply says so; a "
+        "missing section, wrong questions or a changed sign-off sends nothing "
+        "and the reply says exactly what to fix - fix it and send again. "
+        "as_written=true only when he asked for a different layout. "
+        "schedule_at posts it LATER instead (\"post it tomorrow at 9\"): his "
+        "local time as '2026-10-25 09:00', or 'tomorrow 09:00' / 'today 18:00'. "
+        "If you are not sure what today's date is, call get_time first. It is "
+        "gated exactly like a send now, and the question and the reply both "
+        "say the day and the time - say them back to him.",
         {"to": ("string", "chat name, @username, or 'Saved Messages'", True),
          "text": ("string", "the message to send", True),
          "reply_to": ("string", "the message being answered: its number, or a few of its words", False),
-         "topic": ("string", "in a forum group, the topic to post in", False)},
+         "topic": ("string", "in a forum group, the topic to post in", False),
+         "as_written": ("boolean", "send exactly as written, skipping the channel-format "
+                        "check - only when he asked for a different layout", False),
+         "schedule_at": ("string", "send it later instead: '2026-10-25 09:00' or "
+                         "'tomorrow 09:00', his local time; empty sends it now", False)},
+    ),
+    "scheduled_telegram_posts": (
+        "What is scheduled to go out in one Telegram chat, soonest first: when, "
+        "its number, and its words. Read-only; comes back fenced like any chat "
+        "content. Use it for 'what's scheduled in my channel', and before "
+        "cancelling or moving a post when you do not know its number.",
+        {"chat": ("string", "the chat or channel: its name, @username, or 'Saved Messages'", True)},
+    ),
+    "cancel_scheduled_post": (
+        "Cancel a scheduled Telegram post before it goes out. Announced first. "
+        "message is its number from scheduled_telegram_posts, a few of its "
+        "words, 'next' for the soonest, or empty when it is the only one "
+        "scheduled there; with several, the reply asks which - ask him. To "
+        "change a scheduled post's WORDS, cancel it and schedule the corrected "
+        "one.",
+        {"chat": ("string", "the chat or channel it is scheduled in", True),
+         "message": ("string", "its number, a few of its words, or 'next'; empty when only one is scheduled", False)},
+    ),
+    "reschedule_telegram_post": (
+        "Move a scheduled Telegram post to another time, or with schedule_at "
+        "'now' send it at once. Announced first, with the new time. message is "
+        "chosen as for cancel_scheduled_post. schedule_at is his local time as "
+        "'2026-10-25 09:00' or 'tomorrow 09:00' (call get_time first if you "
+        "are not sure of today's date), or 'now'.",
+        {"chat": ("string", "the chat or channel it is scheduled in", True),
+         "schedule_at": ("string", "the new time, or 'now'", True),
+         "message": ("string", "its number, a few of its words, or 'next'; empty when only one is scheduled", False)},
+    ),
+    "edit_telegram_message": (
+        "Change one of HIS Telegram messages in place - fix a typo in a post "
+        "that already went out, correct a time. Only his own messages (or "
+        "posts in a channel he runs) can be edited. message is its number "
+        "(#4821, as read_telegram shows it), a few of its words, or 'last' "
+        "for his newest message in that chat. text is the WHOLE new message, "
+        "not the change: read the old one first if you need to keep the rest "
+        "of it. Same formatting, premium emoji and channel-format check as "
+        "send_telegram_message, and gated like a send to the same chat: his "
+        "channel is read out first, Saved Messages just goes, anyone else is "
+        "asked. If it says 'Not confirmed', check the chat before trying again.",
+        {"chat": ("string", "the chat the message is in: name, @username, or 'Saved Messages'", True),
+         "text": ("string", "the whole new message, in Telegram HTML like a send", True),
+         "message": ("string", "its number, a few of its words, or 'last' for his newest; defaults to last", False),
+         "as_written": ("boolean", "skip the channel-format check - only when he asked for a different layout", False)},
+    ),
+    "delete_message": (
+        "Delete a Telegram message for everyone. It cannot be brought back, "
+        "so the safety gate asks him, says what cannot be undone and asks a "
+        "second time; do not ask him yourself as well. message is its number "
+        "(#4821), a few of its words, or 'last' for HIS newest message in "
+        "that chat. Someone else's message is deleted only where Telegram "
+        "allows it (a private chat, or a group or channel he runs); "
+        "otherwise it says so and deletes nothing.",
+        {"chat": ("string", "the chat the message is in: name, @username, or 'Saved Messages'", True),
+         "message": ("string", "its number, a few of its words, or 'last' for his newest; defaults to last", False)},
+    ),
+    "forward_telegram_message": (
+        "Forward one Telegram message from one chat to another, showing who "
+        "wrote it. It reaches whoever 'to' is, so it is gated like a send "
+        "there: his channel is read out first, Saved Messages just goes, "
+        "anyone else is asked. message is its number (#4821), a few of its "
+        "words, or 'last' for the newest message in that chat. If it says "
+        "'Not confirmed', check the destination before trying again.",
+        {"chat": ("string", "the chat the message is in", True),
+         "to": ("string", "where it goes: chat name, @username, or 'Saved Messages'", True),
+         "message": ("string", "its number, a few of its words, or 'last'; defaults to last", False)},
+    ),
+    "pin_telegram_message": (
+        "Pin a Telegram message at the top of a chat, or with unpin=true take "
+        "it down. Announced first. message is its number (#4821), a few of "
+        "its words, or 'last' - which, for an unpin, means the message pinned "
+        "there now. notify=true tells everyone in the chat; leave it off "
+        "unless he asks, because in his channel that notifies every member.",
+        {"chat": ("string", "the chat to pin in", True),
+         "message": ("string", "its number, a few of its words, or 'last'; defaults to last", False),
+         "unpin": ("boolean", "take the pin down instead", False),
+         "notify": ("boolean", "notify everyone in the chat - only when he asks", False)},
+    ),
+    "react_to_telegram_message": (
+        "Put his reaction on a Telegram message - exactly one emoji, such as "
+        "a thumbs-up, a heart or a fire - or with an empty emoji take his "
+        "reaction off. Announced first. message is its number (#4821), a few "
+        "of its words, or 'last' for the newest message in that chat. A chat "
+        "can limit which reactions it allows; if Telegram refuses one, say so "
+        "and offer another.",
+        {"chat": ("string", "the chat the message is in", True),
+         "emoji": ("string", "one emoji; empty takes his reaction off", True),
+         "message": ("string", "its number, a few of its words, or 'last'; defaults to last", False)},
     ),
     "send_voice_message": (
         "Send a Telegram VOICE MESSAGE AS HIM to a person, in a DM or a group. "
@@ -586,11 +687,16 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "a reply to a DM is prepared: write it as him (voice_guide first), "
         "save it with reply_to naming the message it answers, read it back "
         "to him, and let him say send it. A draft in a person's chat reaches "
-        "nobody.",
+        "nobody. A post in his channel's format is checked exactly as a send "
+        "is: slips are put right and said, a structural mistake saves nothing "
+        "and says what to fix - fix it and save the draft again. as_written="
+        "true only when he asked for a different layout.",
         {"to": ("string", "chat or channel name, @username, or 'Saved Messages'", True),
          "text": ("string", "the full post in Telegram HTML; a short DM reply is plain text", True),
          "reply_to": ("string", "the message being answered: its number, or a few of its words", False),
-         "topic": ("string", "in a forum group, the topic to draft in", False)},
+         "topic": ("string", "in a forum group, the topic to draft in", False),
+         "as_written": ("boolean", "save exactly as written, skipping the channel-format "
+                        "check - only when he asked for a different layout", False)},
     ),
     "community_post_guide": (
         "The layout rules for his AI Engineering & Machine Learning channel: "
@@ -1068,7 +1174,10 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         {},
     ),
     "delegate_task": (
-        "Hand a task to another AI: gemini, or chatgpt (needs an API key). "
+        "Hand a task to another AI: gemini, chatgpt (needs an OpenAI key), or "
+        "hermes - Nous Research's Hermes 4, a genuinely different model for a "
+        "second opinion on a hard problem, reached through OpenRouter (needs "
+        "an OpenRouter key). When he says 'ask Hermes', this is it. "
         "The `brief` must be a FULL engineered brief - context, objective, "
         "what success looks like, constraints, what to do if something is "
         "unclear, and the output format. A thin brief is REFUSED and you "
@@ -1076,7 +1185,7 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "HE actually wants, in his words, so the answer can be judged later "
         "against his request rather than against its own summary.",
         {
-            "agent": ("string", "gemini or chatgpt", True),
+            "agent": ("string", "gemini, chatgpt or hermes", True),
             "brief": ("string", "the full engineered brief", True),
             "expectation": ("string", "what he asked for, in his words", False),
         },
@@ -1122,6 +1231,14 @@ TOOL_SPECS: dict[str, tuple[str, dict[str, tuple[str, str, bool]]]] = {
         "A two-sentence answer to 'are you alright' - disk, last shutdown, "
         "tools loaded. Use this for a spoken answer; self_diagnose is the "
         "full version for the screen.",
+        {},
+    ),
+    "usage_report": (
+        "How much of each usage limit has been used (emails, messages, deletions, "
+        "coding jobs, thinking turns...) and whether he has put you in lockdown. "
+        "Use for 'what are my limits' or 'how many messages have you sent'. You "
+        "can only read it: raising a limit or ending a lockdown is his, by voice "
+        "or by editing config/safety.yaml.",
         {},
     ),
     "open_own_project": ("Open Jalen's own source code in VS Code.", {}),

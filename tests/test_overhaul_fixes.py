@@ -356,7 +356,8 @@ def test_self_controls_are_never_gated():
     engine = SafetyEngine(CONFIG)
     controls = ["jalen_quit", "jalen_pause", "jalen_resume", "jalen_restart",
                 "jalen_mute", "jalen_unmute", "jalen_sleep", "jalen_ack", "jalen_timing",  "jalen_read_all", "private_mode",
-                "set_posture", "reload_config", "audit_digest", "morning_brief"]
+                "set_posture", "reload_config", "audit_digest", "morning_brief",
+                "jalen_lockdown", "jalen_lift_lockdown"]
     gated = {}
     for tool in controls:
         verdict = engine.classify(tool, {})

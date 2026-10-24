@@ -162,7 +162,9 @@ def test_run_carries_the_door_to_the_turn():
     import inspect
 
     source = inspect.getsource(Jalen.run)
-    assert "args=(text, turn_id, timer, from_him, door)" in source
+    # The door, then (since 2026-10-23) the sentence's onset for an AMBER
+    # window that may be holding for it - see test_saying_stop_stops_it.py.
+    assert "args=(text, turn_id, timer, from_him, door, sound_began_at)" in source
     assert "door=door" in source
 
 

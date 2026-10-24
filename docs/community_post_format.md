@@ -210,6 +210,37 @@ random one.
 
 ---
 
+## What the send checks
+
+`send_telegram_message` checks a post in this format before it goes out
+(`jalen/tools/post_format.py`):
+
+- **Typing is put right, and the reply says so:** `-` or `*` bullets become
+  `•`, `**bold**` becomes `<b>bold</b>`, a Q&A `<blockquote>` becomes
+  `<blockquote expandable>`, "1." / "Question 1:" becomes `<b>1</b>`,
+  bullets inside the Q&A become `—`, and a title or section heading with
+  nothing after its `</b>` gets its emoji from the table above (🖊 or 🚀 by
+  template, 🛣, 📌, 👏). A heading with anything after it - a premium emoji,
+  another emoji, words - is left as written.
+- **Structure is not guessed at:** a missing `Research Areas:` / `Project:`
+  or `Requirements:` section, questions that are not exactly the three
+  above, a missing `Students who are competent in:`, a missing
+  `Leave a reaction to this post`, a title that is not bold, or last two
+  lines that are not exactly the sign-off send NOTHING. The reply lists what
+  to fix; fix it and send again.
+- **When he asks for a different layout on purpose**, send it with
+  `as_written` set, and it goes exactly as written.
+- **A post already in the channel is fixed with `edit_telegram_message`**,
+  never by sending it again: `message` is "last" (his newest post) or its
+  number, and `text` is the whole corrected post, checked exactly like a send.
+- **A post for later** goes with `schedule_at` ("2026-10-25 09:00", his local
+  time) and is checked exactly like a post now. It waits in Telegram's own
+  queue: `scheduled_telegram_posts` lists it, `reschedule_telegram_post` moves
+  it (or sends it now), `cancel_scheduled_post` takes it out. To change its
+  words, cancel it and schedule the corrected one.
+
+---
+
 ## Telegram HTML: what is actually supported
 
 Only these tags, and every one of them arrives as formatting:

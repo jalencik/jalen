@@ -350,7 +350,13 @@ conversation:
   # sentence starting with "and" is treated as a new thought.
   stitch_window_s: 8
   end_phrases: ["that's all", "thats all", "that is all", "thank you jalen", "we're done", "nothing else"]
-  barge_in: true                   # C20 you can talk over it
+  # C20 you can talk over it - but since 2026-10-23 only by saying his name.
+  # "While it is working it should be able to hear only my Hey Jalen word,
+  # nothing else should interrupt it." wake_word: only "Hey Jalen" stops him
+  # mid-sentence (and Ctrl+Alt+J, and Ctrl+Alt+K). true: any sustained voice
+  # does, through the three dials below - the television and his own echo
+  # included, which is what they were tuned against. false: nothing does.
+  barge_in: wake_word
   # HE WAS INTERRUPTING HIMSELF. Measured in data/audit.jsonl: 17 replies
   # ended far earlier than their text needed, and six of them stopped at
   # 747-764ms — the same instant every time. Nothing random clusters like
@@ -414,6 +420,20 @@ brain:
   # keeps its own conversation context, which is what actually applies.
   context_window_turns: 20         # how much conversation it keeps in working memory
 
+  # THE CONVERSATION OUTLIVES A RESTART ("constant memory ... save up the
+  # conversation", 2026-10-23). After every turn that ends well the SDK
+  # session id is written to session_path, and the next start resumes that
+  # session - so a restart, or Ctrl+Alt+K and Ctrl+Alt+J, picks up where the
+  # talk left off. A session that cannot be resumed is forgotten and a new
+  # one starts; a session that had a turn in private mode is never written
+  # down; "new conversation" forgets it on purpose. (jalen/brain/agent.py)
+  session_path: "data/brain-session.json"
+  # How old the last good turn may be and still be picked up. 12 hours: a
+  # restart the same day, or the next morning after a late evening, carries
+  # on; a conversation from two days ago does not come back uninvited.
+  # NOT MEASURED - chosen, not tuned. 0 turns resuming off.
+  resume_within_s: 43200
+
   # ---- LATENCY ----
   # Reasoning effort. Both effort and extended thinking buy accuracy with
   # time spent BEFORE the first token exists, and out loud that time is
@@ -469,7 +489,37 @@ safety:
                                    # Set false once you trust it. This is the one dial
                                    # to turn when confirmations get annoying.
   undo_window_s: 2                 # AMBER actions announce, then wait this long for "stop"
+  # By voice that is shorter than a spoken "stop" takes to arrive - 3.2s after
+  # the sound ends at the median (the 1.4s endpoint, then 1.8s of transcription)
+  # - so a sentence he BEGAN before it ran out is waited for until process()
+  # has judged it, at most app.ANSWER_HOLD_S (12s) from when it began. Silence
+  # still goes at 2s. See Jalen._held_for.
+  # The same, when "stop" has to be TYPED or TAPPED (run.py --text, the Telegram
+  # bot). Two seconds is shorter than the time it takes to read the message, so
+  # the stop window existed on paper and the action simply ran. NOT MEASURED:
+  # ten seconds is a guess at "looking at the phone"; revise it from the first
+  # month of AMBER rows in telegram mode. Voice is unchanged.
+  undo_window_typed_s: 10
   confirm_timeout_s: 20            # RED actions cancel if you don't answer in time
+  # The same, when the answer is TYPED (run.py --text, the Telegram bot). A
+  # question that arrives as a phone notification is read when the phone is
+  # picked up and answered with a thumb; twenty seconds cancelled it before it
+  # could have been seen. NOT MEASURED: five minutes is a guess at "a phone
+  # left on a desk", and the first month of data/audit.jsonl "No answer" rows
+  # in telegram mode is where it should be revised. Voice is unchanged. The
+  # brain's tool hook is given a timeout derived from this (agent.py
+  # Brain._hook_timeout_s); the SDK would otherwise cut it off at 60 seconds.
+  confirm_timeout_typed_s: 300
+  # AN ANSWER TO "Confirm?" THE RULES CANNOT READ ("yeah so basically what I
+  # want is for you to just do it") is read by this model on Groq, under the
+  # GROQ_API_KEY transcription already uses, before he is asked again. Only
+  # what the rules left unclear ever reaches it: a yes, a no or a correction
+  # they read is final, so it can never turn a refusal into approval. ""
+  # turns it off. See jalen/answer_reader.py. NOT MEASURED: the model and the
+  # 2.5 s are a fast model's ordinary latency, not a timing taken on his line;
+  # a slower answer is treated as unclear and he is asked again, as before.
+  answer_reader_model: "llama-3.3-70b-versatile"
+  answer_reader_timeout_s: 2.5
   # F47 "both" — hotkey and voice. The listener is scripts/hotkeys.py, a
   # separate process installed by scripts/install_autostart.py.
   #
@@ -562,6 +612,12 @@ startup:
   #
   # Install with: python scripts\install_autostart.py
   wake_hotkey: "ctrl+alt+j"
+  # After the kill key (Ctrl+Alt+K) ends a listening Jalen, start a fresh one
+  # in STANDBY: everything loaded, microphone closed, nothing on screen, so the
+  # next Ctrl+Alt+J opens the microphone at once instead of loading for about
+  # a minute (his report, 2026-10-23). The kill key on a standby instance ends
+  # it for good. false = the kill key just ends him, as it used to.
+  standby_after_kill: true
 
   # [NOT IMPLEMENTED] no tray icon exists.
   minimise_to_tray: true
@@ -591,6 +647,16 @@ ui:
   transcript_window: true          # C15 long content appears here instead of being read out
   show_transcript: true            # small caption under the orb showing the last thing
                                     # Jalen heard (the STT transcript); auto-hides after ~8s
+  # How often the orb is redrawn. Moving states (listening, thinking,
+  # speaking, blocked) every frame_ms - 40 is 25 frames a second - and idle
+  # and muted every idle_frame_ms, ~7 a second, because little moves there
+  # and this laptop is short on headroom. A change of colour between states
+  # (0.25 s, eased - jalen/ui/orb.py) always draws at frame_ms. Lower both
+  # for a smoother orb at the cost of CPU: NOT MEASURED on this laptop either
+  # way. Each frame is now timed from its own start, so the number is what
+  # you get rather than the number plus the time spent drawing.
+  frame_ms: 40
+  idle_frame_ms: 150
   theme:
     # idle WAS "#161c24" — near-black, from an earlier "black when stopped"
     # instruction. He then reported the orb as simply not appearing, "no

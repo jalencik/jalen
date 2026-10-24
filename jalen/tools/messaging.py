@@ -49,7 +49,7 @@ from typing import Any, NamedTuple
 
 from ..config import CONFIG
 from ..integrations.telegram_user import RUNTIME, TelegramNotConnected, have_session
-from ..safety import SafetyEngine
+from ..safety import LAST_MESSAGE_WORDS, NEXT_SCHEDULED_WORDS, RIGHT_NOW_WORDS, SafetyEngine
 
 _MAX_BODY_CHARS = 3000
 
@@ -478,7 +478,7 @@ def _unknown_emoji_sentence(unknown: list[int]) -> str:
     )
 
 
-async def _read_back(client, entity, sent, promised: list[int]) -> str:
+async def _read_back(client, entity, sent, promised: list[int], scheduled: bool = False) -> str:
     """
     One sentence about how many of the `promised` premium emoji are in the
     message Telegram actually stored.
@@ -487,6 +487,10 @@ async def _read_back(client, entity, sent, promised: list[int]) -> str:
     that is not Premium: it accepts the message and drops them, so the send
     "succeeds" and the post is not what he approved. Nothing in the send
     reports it. The only way to know is to ask Telegram for the message.
+
+    A SCHEDULED message is asked for among the scheduled ones. Its id is in
+    their own numbering, so get_messages(ids=) would read whatever ordinary
+    message in the chat happens to have that number, and count its emoji.
     """
     from collections import Counter
 
@@ -495,7 +499,14 @@ async def _read_back(client, entity, sent, promised: list[int]) -> str:
     stored = None
     if message_id is not None:
         try:
-            stored = await client.get_messages(entity, ids=message_id)
+            if scheduled:
+                from telethon import functions
+
+                found = await client(functions.messages.GetScheduledMessagesRequest(
+                    peer=entity, id=[message_id]))
+                stored = next(iter(getattr(found, "messages", None) or []), None)
+            else:
+                stored = await client.get_messages(entity, ids=message_id)
         except Exception:  # noqa: BLE001 - not worth failing a delivered send over
             stored = None
     if stored is None:
@@ -587,11 +598,41 @@ def _rejected(exc: Exception) -> bool:
 def _error_code(exc: Exception) -> str:
     # The error CODE, not str(exc): Telegram's descriptions are long free
     # text, and this is spoken.
-    return getattr(exc, "message", None) or type(exc).__name__
+    #
+    # Telethon raises every error it knows as its own class
+    # (MessageNotModifiedError), and that class's `.message` is its FAMILY's
+    # - "BAD_REQUEST" - not Telegram's code: checked on Telethon 1.45, where
+    # 515 codes have a class. Only a code it has no class for keeps its own
+    # `.message`. So every known refusal used to be spoken as "BAD_REQUEST",
+    # and nothing could tell "it already says that" from "you're not an admin
+    # there". The class is looked up in Telethon's own table first.
+    return (_telethon_codes().get(type(exc)) or getattr(exc, "message", None)
+            or type(exc).__name__)
+
+
+@lru_cache(maxsize=1)
+def _telethon_codes() -> dict:
+    """Telethon's error classes -> Telegram's code for each ("MESSAGE_NOT_MODIFIED")."""
+    try:
+        from telethon.errors.rpcerrorlist import rpc_errors_dict
+    except Exception:  # noqa: BLE001 - without it, .message is still something
+        return {}
+    return {cls: code for code, cls in rpc_errors_dict.items()}
 
 
 def _rejected_note(exc: Exception) -> str:
     return f"Telegram rejected the markup ({_error_code(exc)})"
+
+
+# Refusals of the WORDS, which no retry without formatting can get past.
+# Telegram's limits: 4,096 characters a message; a caption 1,024, or 2,048
+# from a Premium account.
+_TOO_LONG = {
+    "MESSAGE_TOO_LONG": ("it's longer than one Telegram message can be (4,096 "
+                         "characters), so shorten it"),
+    "MEDIA_CAPTION_TOO_LONG": ("the caption is longer than Telegram allows (1,024 "
+                               "characters, 2,048 with Premium), so shorten it"),
+}
 
 
 async def _deliver(send, post: _Formatted) -> tuple[str | None, str]:
@@ -614,6 +655,13 @@ async def _deliver(send, post: _Formatted) -> tuple[str | None, str]:
         if not _rejected(exc):
             raise
         first = exc
+    code = _error_code(first)
+    if (said := _TOO_LONG.get(code) or _TELEGRAM_REFUSALS.get(code)) is not None:
+        # The message was refused, not its formatting - too long, a person
+        # who blocked him, a chat he left: each retry below would be refused
+        # the same way, a round trip apiece, and the reply then blamed the
+        # formatting. Every code there is about the message or the chat.
+        return None, said
     if not post.entities:
         return None, f"Telegram refused it ({_error_code(first)})"
     # A premium emoji is the likeliest thing for Telegram to refuse (an id it
@@ -883,15 +931,22 @@ def _media_kind(message) -> tuple[str, str]:
     return "", ""
 
 
-def _describe_message(message) -> str:
+def _describe_message(message, plain: bool = False) -> str:
     """
     One message as one thing to read: its text, or what it is, or both.
 
     A text message comes back exactly as written. Anything else is named in
     square brackets with its caption after it: "[voice note, 0:23]",
     "[photo] look at this", "[file: cv.pdf, 2.1 MB]".
+
+    `plain` takes the words without their markup - for a search by words and
+    for a reply that is SPOKEN. Under the client's default parse mode .text is
+    markdown, so a bold name reads "**Lee Language Lab**": a search for "with
+    the Lee Language Lab" missed it across the asterisks, and a reply naming
+    the post had TTS read them out.
     """
-    text = getattr(message, "text", None) or ""
+    text = ((getattr(message, "raw_text", None) if plain else None)
+            or getattr(message, "text", None) or getattr(message, "message", None) or "")
     kind, label = _media_kind(message)
     forwarded = _forwarded(message)
     if not kind and not text.strip():
@@ -1885,9 +1940,108 @@ def _found_in(message, searched=None) -> str:
 
 
 # --------------------------------------------------------------------- send
-def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "") -> str:
+def _house_handle() -> str:
+    """The sign-off handle of his channel posts (personal.channel_handle)."""
+    from . import post_format
+
+    try:
+        from ..config import CONFIG
+
+        return CONFIG.get_path("personal.channel_handle", "") or post_format.DEFAULT_HANDLE
+    except Exception:  # noqa: BLE001 - the default is his
+        return post_format.DEFAULT_HANDLE
+
+
+def _his_channel(name) -> bool:
+    """
+    Is `name` his channel: a chat he sends to without being asked
+    (telegram.personal.send_without_asking_to) that is not his own Saved
+    Messages? Matched the way the gate matches it (safety._simplify).
+    """
+    from ..safety import _is_self_chat, _simplify
+
+    if not str(name or "").strip() or _is_self_chat(name):
+        return False
+    target = _simplify(str(name))
+    listed = CONFIG.get_path("telegram.personal.send_without_asking_to", []) or []
+    return any(target == _simplify(str(chat)) for chat in listed if not _is_self_chat(chat))
+
+
+def _in_house_format(text: str, as_written: bool,
+                     again: str = "send it again", to: str = "") -> tuple[str, str, str]:
+    """
+    A channel post checked against his format (post_format.py) before it
+    goes: (the text to send, a note of what was tidied or "", why it must not
+    go or ""). Anything that is not a house post - and anything he asked to
+    be sent as written - passes untouched.
+
+    ONLY WHAT GOES TO HIS CHANNEL (`to`). The check is about his channel's
+    posts, and it ran on every send, draft and edit to anyone: a message to a
+    friend with "Requirements:" and "dm me" in it was refused for not
+    following the channel's format (review of PR #1, finding 12).
+
+    `again` is what to do once it is fixed, in the words of the action that
+    was refused. A draft or an edit told to "send it again" is how a second
+    copy of a post ends up in his channel.
+    """
+    from . import post_format
+
+    if as_written or not _his_channel(to):
+        return text, "", ""
+    tidied, changes, wrong = post_format.check(
+        text, lambda markup: _formatted(markup).text, _house_handle())
+    if wrong:
+        return text, "", ("the post doesn't follow your channel's format yet: "
+                          + "; ".join(wrong)
+                          + f". Fix that and {again} (or pass as_written if he "
+                            "asked for a different layout)")
+    note = ("Tidied to the channel format: " + ", ".join(changes) + ".") if changes else ""
+    return tidied, note, ""
+
+
+# The tools whose post is checked against his channel's format, the argument
+# that names where it goes, and what to do once it is fixed.
+_FORMAT_CHECKED = {
+    "send_telegram_message": ("to", "send it again", "Nothing sent"),
+    "save_telegram_draft": ("to", "save the draft again", "Nothing saved"),
+    "edit_telegram_message": ("chat", "make the edit again", "Nothing changed"),
+}
+
+
+def refused_before_asking(tool: str, args: dict) -> str:
+    """
+    The sentence the tool would refuse this post with, or "": asked by the gate
+    on both paths (the brain's hook, Jalen.handle_local) after classify() and
+    before any question or limit.
+
+    The format check ran inside the tool, AFTER the gate: a channel post that
+    failed it had already been announced or confirmed, and counted against the
+    "messages" limit and the leash - so every fix and retry asked again and
+    counted again (review of PR #1, finding 12). The tool still checks too.
+    """
+    checked = _FORMAT_CHECKED.get(tool)
+    if checked is None or not isinstance(args, dict):
+        return ""
+    where, again, nothing = checked
+    as_written = args.get("as_written") in (True, 1, "true", "True")
+    try:
+        _text, _tidied, off_format = _in_house_format(
+            str(args.get("text") or ""), as_written, again, to=str(args.get(where) or ""))
+    except Exception:  # noqa: BLE001 - the tool checks again; a gate step must not break the gate
+        return ""
+    return f"{nothing} — {off_format}." if off_format else ""
+
+
+def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "",
+                          as_written: bool = False, schedule_at: str = "") -> str:
     """
     Send a Telegram message as him. RED tier — asks out loud first.
+
+    `schedule_at` sends it LATER instead: Telegram holds it and posts it at
+    that moment ("2026-10-25 09:00" or "tomorrow 09:00", his local time -
+    jalen/when.py reads it strictly). The gate decides exactly as for a send
+    now, and the question names the day and the time; the reply says them
+    back. A time that has passed, or is unreadable, sends nothing.
 
     "Saved Messages" (or "me") targets his own notes, which is the only safe
     destination for a first test: it reaches nobody else.
@@ -1897,8 +2051,26 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
     Neither widens anything: the gate decides on `to` alone, a reply is no
     more pre-approved than the message it answers, and a message or topic
     that cannot be found, or fits two, sends nothing and asks which.
+
+    A post in his channel's format is checked against it first
+    (_in_house_format): typing slips are put right and said, a structural
+    mistake sends nothing and says what to fix. `as_written` sends it exactly
+    as written, for when he asked for a different layout.
     """
     _enabled()
+    text, tidied, off_format = _in_house_format(text, as_written, to=to)
+    if off_format:
+        return f"Nothing sent — {off_format}."
+    later = None
+    # "Now" is no schedule at all: the question said "to go out now", and he
+    # said yes to that (safety.RIGHT_NOW_WORDS).
+    when_said = " ".join(str(schedule_at or "").lower().split())
+    if when_said and when_said not in RIGHT_NOW_WORDS:
+        from .. import when
+
+        later, problem = when.parse(schedule_at)
+        if later is None:
+            return f"Nothing sent — {problem}."
 
     async def work(client):
         entity = await _resolve(client, to)
@@ -1928,6 +2100,8 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
             # parse_mode=None AND explicit entities: Telethon's markdown
             # default must never see this text. See _formatted().
             extra = {} if thread.reply_id is None else {"reply_to": thread.reply_id}
+            if later is not None:
+                extra["schedule"] = later
             sent = await client.send_message(
                 entity, words, formatting_entities=entities, parse_mode=None, **extra
             )
@@ -1946,22 +2120,40 @@ def send_telegram_message(to: str, text: str, reply_to: str = "", topic: str = "
         # refusal the retry carries none, and the note already says so.
         check = ""
         if went_out and (promised := _custom_emoji_ids(went_out[-1][0])):
-            check = " " + await _read_back(client, entity, went_out[-1][1], promised)
+            check = " " + await _read_back(client, entity, went_out[-1][1], promised,
+                                           scheduled=later is not None)
         # The PARSED text, not the raw HTML: this reply is spoken, and the
         # tags are how the post is formatted, not what it says. It starts
         # "Sent to" whenever the post went out, and only then: that opening
         # is what drafting.send_posts reads, never the quoted post.
+        # What the house-format check put right, said after the post: it is
+        # what went out, and he should know it is not word for word.
+        also = f" {tidied}" if tidied else ""
+        if later is not None:
+            # "Scheduled", never "Sent": nothing is in the chat yet, and he
+            # hears the day and the clock it will be, read back from the
+            # moment Telegram was given.
+            from .. import when
+
+            if note.startswith(PREMIUM_DROPPED):
+                how = f", but the premium emoji went as ordinary emoji — {note}."
+            elif note:
+                how = f", but WITHOUT formatting — {note}."
+            else:
+                how = ":"
+            return (f"Scheduled for {when.say(later)} in {name}{thread.where}{how} "
+                    f"{message!r}{check}{also}")
         if note.startswith(PREMIUM_DROPPED):
             return (
                 f"Sent to {name}{thread.where}, but the premium emoji went as ordinary emoji "
-                f"— {note}. The rest of the formatting is intact. {message!r}"
+                f"— {note}. The rest of the formatting is intact. {message!r}{also}"
             )
         if note:
             return (
                 f"Sent to {name}{thread.where}, but WITHOUT formatting — {note}. "
-                f"Worth checking it: {message!r}"
+                f"Worth checking it: {message!r}{also}"
             )
-        return f"Sent to {name}{thread.where}: {message!r}{check}"
+        return f"Sent to {name}{thread.where}: {message!r}{check}{also}"
 
     attempted = _Attempt()
     return _run_send(work, to, attempted)
@@ -2011,6 +2203,14 @@ def _run_send(work, to: str, attempted: _Attempt) -> str:
                 f"to {to} may already be there. Check the chat before sending "
                 "it again.")
     except Exception as exc:  # noqa: BLE001 - spoken, not raised
+        # Telegram ANSWERED, with a refusal - a 400, a 403 such as "you can't
+        # post in that chat", or "wait": nothing went out, whenever it was
+        # handed over. It used to be "Not confirmed ... the connection
+        # failed" after the hand-over, which sent him to check a chat that
+        # could not have it, and counted the post as maybe-sent in a batch.
+        reason = _refused_by_telegram(exc)
+        if reason is not None:
+            return f"Nothing sent — {reason}."
         if attempted:
             return (f"Not confirmed — the connection failed ({type(exc).__name__}) "
                     f"after I sent it to {to}, so it may already be there. Check "
@@ -2018,7 +2218,8 @@ def _run_send(work, to: str, attempted: _Attempt) -> str:
         return f"Nothing sent — I couldn't reach Telegram ({type(exc).__name__}: {exc})."
 
 
-def save_telegram_draft(to: str, text: str, reply_to: str = "", topic: str = "") -> str:
+def save_telegram_draft(to: str, text: str, reply_to: str = "", topic: str = "",
+                        as_written: bool = False) -> str:
     """
     Put text into a chat's draft box WITHOUT sending it.
 
@@ -2045,8 +2246,18 @@ def save_telegram_draft(to: str, text: str, reply_to: str = "", topic: str = "")
     rather than silently losing the post - unless it holds a spoiler, which
     plain text would show. Markup that is not Telegram's is refused, not
     saved; see _formatted().
+
+    A post in his channel's format is checked like a send (_in_house_format)
+    - this is the path the brain is told to use for a channel post, and it
+    was the one path that skipped the check, so the post he opened on his
+    phone to press send could carry "- " bullets or two questions instead of
+    three. `as_written` skips it, as for a send.
     """
     _enabled()
+    text, tidied, off_format = _in_house_format(text, as_written, "save the draft again", to=to)
+    if off_format:
+        return f"Nothing saved — {off_format}."
+    also = f" {tidied}" if tidied else ""
 
     async def work(client):
         from telethon.tl.functions.messages import SaveDraftRequest
@@ -2087,7 +2298,7 @@ def save_telegram_draft(to: str, text: str, reply_to: str = "", topic: str = "")
                 return f"Couldn't save the draft to {title}: {inner}"
             return (
                 f"Saved a draft to {title}{thread.where}, but WITHOUT formatting — {post.note}. "
-                "Worth checking before you post it. Nothing was sent."
+                f"Worth checking before you post it. Nothing was sent.{also}"
             )
 
         try:
@@ -2111,7 +2322,7 @@ def save_telegram_draft(to: str, text: str, reply_to: str = "", topic: str = "")
                 return f"Couldn't save the draft to {title}: {inner}"
             return (
                 f"Saved a draft to {title}{thread.where}, but WITHOUT formatting — "
-                f"{_rejected_note(exc)}. Worth checking before you post it."
+                f"{_rejected_note(exc)}. Worth checking before you post it.{also}"
             )
 
         # The PARSED text, not the raw HTML. This string is spoken aloud, and
@@ -2124,7 +2335,7 @@ def save_telegram_draft(to: str, text: str, reply_to: str = "", topic: str = "")
             f"Saved as a draft in {title}{thread.where} — nothing was sent. It starts "
             f"\"{preview}\", {len(plain)} characters with "
             f"{len(entities)} pieces of formatting. Open the chat to read it, "
-            "and press send yourself. Saving another draft there replaces this one."
+            f"and press send yourself. Saving another draft there replaces this one.{also}"
         )
 
     return RUNTIME.run(work)
@@ -2296,14 +2507,15 @@ async def _find_topic(client, entity, chat: str, wanted: str) -> tuple[int | Non
     return None, "", f"{shown} has no topic called {key!r}. Its topics are: {names}."
 
 
-async def _reply_target(client, entity, wanted: str, scope: int | None):
+async def _reply_target(client, entity, wanted: str, scope: int | None, keep=None):
     """
     The one message he means to answer: (message, "") or (None, why not).
 
     By number (#4821, as read_telegram prints it) or by a few of its words,
     searched in the latest messages - of one topic, when there is one. A
     phrase that fits two messages is a question, not a choice. His own words
-    are repeated back, never the stranger's.
+    are repeated back, never the stranger's. `keep`, when given, narrows the
+    words search to the messages it accepts (his own, for an edit).
     """
     number = wanted.lstrip("#").strip()
     if number.isdigit():
@@ -2318,7 +2530,8 @@ async def _reply_target(client, entity, wanted: str, scope: int | None):
         asks["reply_to"] = scope
     pool = await client.get_messages(entity, **asks)
     needle = " ".join(wanted.lower().split())
-    hits = [m for m in (pool or []) if needle in " ".join(_describe_message(m).lower().split())]
+    hits = [m for m in (pool or []) if (keep is None or keep(m))
+            and needle in " ".join(_describe_message(m, plain=True).lower().split())]
     said = _one_line(wanted, 60)
     if not hits:
         return None, f"none of the last {_REPLY_LOOKBACK} messages there has the words {said!r}."
@@ -2943,7 +3156,586 @@ async def _chat_name(client, entity) -> str:
     return _title_of(entity)
 
 
+# ----------------------------------------------- acting on a message already sent
+#
+# "It should be able to take any action in the telegram as well" (2026-10-23).
+# It could read, search, send, draft and mark read, and nothing else: a typo in
+# a post that had already gone out could not be fixed, a wrong message could
+# not be taken down, and nothing could be pinned, forwarded or reacted to.
+# Five tools, each tiered in config/safety.yaml:
+#
+#   edit_telegram_message      RED - what others read under his name changes.
+#                              His pre-approved destinations work as for a
+#                              send: his channel is read aloud first, his
+#                              Saved Messages just go (_DESTINATION_ARG).
+#   delete_message             RED, never pre-approved, and asked twice
+#                              (`consequences:`)
+#   forward_telegram_message   RED - it reaches whoever `to` is; pre-approved
+#                              destinations as for a send
+#   pin_telegram_message       AMBER - announced, and undone by unpinning
+#   react_to_telegram_message  AMBER - announced, and undone by reacting again
+#
+# All five are refused after Jalen has read something, like every RED and
+# AMBER tool, so nothing he read can make them act.
+#
+# A STRANGER'S WORDS ARE NEVER REPEATED BACK. These replies are sentences
+# Jalen composes, not fenced content, so a message that is not his is named
+# by when it was sent and its number (_called) - the way a reply names the
+# message it answers.
+
+
+class _Refused(Exception):
+    """The action was ruled out before anything happened; the text says why."""
+
+
+# What Telegram's refusals mean, in his words. Keyed by Telegram's own code
+# (_error_code), and only codes that say the action did NOT happen.
+_TELEGRAM_REFUSALS = {
+    "MESSAGE_NOT_MODIFIED": "it already says exactly that",
+    "MESSAGE_AUTHOR_REQUIRED": "that message isn't yours",
+    "MESSAGE_EDIT_TIME_EXPIRED": "it's too old for Telegram to let it be edited",
+    "MESSAGE_DELETE_FORBIDDEN": "Telegram doesn't let you delete that one",
+    "MESSAGE_ID_INVALID": "that message is gone, or can't be reached",
+    "MESSAGE_TOO_LONG": "it's too long for one message",
+    "MEDIA_CAPTION_TOO_LONG": "it's too long for a caption",
+    "CHAT_ADMIN_REQUIRED": "you're not an admin there",
+    "CHAT_WRITE_FORBIDDEN": "you can't post in that chat",
+    "CHAT_FORWARDS_RESTRICTED": "that chat doesn't allow forwarding",
+    "PIN_RESTRICTED": "pinning isn't allowed there",
+    "REACTION_INVALID": "that chat doesn't allow that reaction",
+    "REACTIONS_TOO_MANY": "that message already has as many different reactions as it can take",
+    "USER_IS_BLOCKED": "that person has blocked you",
+    "YOU_BLOCKED_USER": "you've blocked that person",
+    "CHANNEL_PRIVATE": "that chat is private, or you're no longer in it",
+}
+
+
+def _refused_by_telegram(exc: Exception) -> str | None:
+    """
+    Why Telegram refused the request itself - a 400, a 403, or "wait" - so
+    that nothing happened; None for anything else, which may have happened.
+    """
+    try:
+        from telethon.errors import BadRequestError, FloodError, ForbiddenError
+    except Exception:  # noqa: BLE001
+        return None
+    if isinstance(exc, FloodError):
+        seconds = getattr(exc, "seconds", None)
+        return (f"Telegram asked to wait {seconds} seconds first" if seconds
+                else "Telegram asked to wait before the next one")
+    if not isinstance(exc, (BadRequestError, ForbiddenError)):
+        return None
+    code = _error_code(exc)
+    return _TELEGRAM_REFUSALS.get(code, f"Telegram refused it ({code})")
+
+
+def _nothing_done(nothing: str, reason: str) -> str:
+    """ "Nothing deleted — <reason>." - the reason's own question mark kept."""
+    reason = reason.strip()
+    stop = "" if reason.endswith((".", "?", "!")) else "."
+    return f"{nothing[:1].upper()}{nothing[1:]} — {reason}{stop}"
+
+
+def _runs_channel(entity, right: str) -> bool:
+    """A channel he created, or one where he is an admin with `right`."""
+    if not getattr(entity, "broadcast", False):
+        return False
+    if getattr(entity, "creator", False):
+        return True
+    return bool(getattr(getattr(entity, "admin_rights", None), right, False))
+
+
+def _his(message, entity, right: str) -> bool:
+    """
+    Is this message his to change? His own (Telethon's `out`); anything in
+    his Saved Messages; or any post in a channel he runs - a channel's posts
+    are the channel's, and Telegram lets its creator, or an admin with
+    `right`, edit and delete every one.
+
+    SAVED MESSAGES IS ALL HIS, whatever `out` says. Telethon marks what he
+    FORWARDS there as incoming (out=False), so "delete the last one" in Saved
+    Messages skipped the newest item - a forward he had just saved - and the
+    question "delete your last message in Saved Messages" was answered by
+    deleting an older note.
+    """
+    if getattr(message, "out", False) or getattr(entity, "is_self", False):
+        return True
+    return _runs_channel(entity, right)
+
+
+def _called(message, entity) -> str:
+    """
+    How a message is named in a reply. His own by its words; anyone else's -
+    and anything forwarded, which is someone else's words - by when it was
+    sent and its number.
+    """
+    own = getattr(message, "out", False) or _runs_channel(entity, "post_messages")
+    if own and not getattr(message, "fwd_from", None):
+        words = _one_line(_describe_message(message, plain=True), 60)
+        return f"your message {words!r}" if words else "your message"
+    head = _head(message)
+    return f"the message from {head}" if head else "that message"
+
+
+def _is_the_last_one(wanted: Any) -> bool:
+    return " ".join(str(wanted or "").lower().split()) in LAST_MESSAGE_WORDS
+
+
+async def _which_message(client, entity, wanted: str, *, last=None, only=None,
+                         verb: str = "change"):
+    """
+    The one message meant: (message, "") or (None, why not). By its number
+    (#4821), by a few of its words, or - "the last one", or not named at all -
+    the newest one there.
+
+    `last` narrows what counts as the newest (his own, for a delete: "delete
+    that" is the message he just sent, not the answer that came in after it).
+    `only` is what every message must be (his own, for an edit, which Telegram
+    allows only to the author). Messages like "Ali joined" are never meant.
+    """
+    if _is_the_last_one(wanted):
+        keep = last or only
+        pool = await client.get_messages(entity, limit=_REPLY_LOOKBACK)
+        for message in pool or []:
+            if getattr(message, "action", None):
+                continue
+            if keep is None or keep(message):
+                return message, ""
+        if keep is None:
+            return None, "there are no messages there"
+        return None, f"none of the last {_REPLY_LOOKBACK} messages there is yours"
+    found, why = await _reply_target(client, entity, str(wanted), None, keep=only)
+    if found is None:
+        return None, why
+    if only is not None and not only(found):
+        return None, f"that message isn't yours, so Telegram won't let you {verb} it"
+    return found, ""
+
+
+def _act(chat: str, nothing: str, act, attempted: _Attempt, may_have: str,
+         look: str = "") -> str:
+    """
+    Run `act(client, entity)` on the chat he called `chat`, and answer in his
+    words: what was done; what ruled it out (_Refused, or Telegram refusing
+    the request); or "Not confirmed" when the request went out and no answer
+    came back - `may_have` says what may have happened, and `look` (the chat,
+    unless given) where to check. A timeout is never "nothing happened": the
+    work keeps running on the Telegram loop (_run_send), and doing it again
+    blindly could forward a message twice.
+    """
+    async def work(client):
+        entity = await _resolve(client, chat)
+        if entity is None:
+            return await _unresolved(client, chat, nothing)
+        try:
+            return await act(client, entity)
+        except _Refused as exc:
+            return _nothing_done(nothing, str(exc))
+        except Exception as exc:  # noqa: BLE001 - a refusal is a sentence; the rest is below
+            reason = _refused_by_telegram(exc)
+            if reason is None:
+                raise
+            return _nothing_done(nothing, reason)
+
+    where = _one_line(look or chat, 40)
+    try:
+        return RUNTIME.run(work)
+    except TelegramNotConnected:
+        raise
+    except TimeoutError:
+        return (f"Not confirmed — Telegram didn't answer in time, so {may_have}. "
+                f"Check {where} before asking again.")
+    except Exception as exc:  # noqa: BLE001 - spoken, not raised
+        if attempted:
+            return (f"Not confirmed — the connection failed ({type(exc).__name__}) "
+                    f"after I asked Telegram, so {may_have}. Check {where} "
+                    "before asking again.")
+        return _nothing_done(nothing, f"I couldn't reach Telegram ({type(exc).__name__}: {exc})")
+
+
+def edit_telegram_message(chat: str, text: str, message: str = "last",
+                          as_written: bool = False) -> str:
+    """
+    Change one of HIS messages in place - a post with a typo, a message with
+    the wrong time. RED: what other people read under his name changes, so
+    it is asked about like a send, with the same pre-approved destinations.
+
+    `message` is its number (#4821), a few of its words, or "last" for his
+    newest message there. `text` is the WHOLE new message, formatted like a
+    send, and a post in his channel's format is checked like a send
+    (as_written skips that).
+    """
+    _enabled()
+    if not str(text or "").strip():
+        return "Nothing changed — say what the message should say now."
+    text, tidied, off_format = _in_house_format(text, as_written, "make the edit again", to=chat)
+    if off_format:
+        return f"Nothing changed — {off_format}."
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        mine = lambda m: _his(m, entity, "edit_messages")  # noqa: E731
+        target, why = await _which_message(client, entity, message, only=mine, verb="edit")
+        if target is None:
+            raise _Refused(why)
+        post = _formatted(text)
+        if post.refusal:
+            raise _Refused(post.refusal)
+        if not post.text.strip():
+            raise _Refused("once the formatting is taken out, there are no words in it")
+        if wanted := _custom_emoji_ids(post.entities):
+            if unknown := await _unknown_premium_emoji(client, wanted):
+                raise _Refused(_unknown_emoji_sentence(unknown))
+
+        went_out: list[tuple[list, Any]] = []
+
+        async def edit(words, entities):
+            try:
+                edited = await client.edit_message(
+                    entity, target.id, words, formatting_entities=entities, parse_mode=None)
+            except Exception as exc:  # noqa: BLE001
+                # A refusal of the EDIT ends it here. _deliver retries a
+                # refusal without the premium emoji and then plain, which is
+                # right for a refused format - but "it already says exactly
+                # that" retried plain would strip the post of its bold.
+                code = _error_code(exc)
+                if code in _TELEGRAM_REFUSALS:
+                    raise _Refused(_TELEGRAM_REFUSALS[code]) from exc
+                raise
+            went_out.append((entities, edited))
+
+        attempted.set()
+        words, note = await _deliver(edit, post)
+        if words is None:
+            raise _Refused(note)
+        name = await _chat_name(client, entity)
+        check = ""
+        if went_out and (promised := _custom_emoji_ids(went_out[-1][0])):
+            check = " " + await _read_back(client, entity, went_out[-1][1], promised)
+        also = f" {tidied}" if tidied else ""
+        lead = f"Edited your message in {name}" + (f", but {note}" if note else "")
+        return f"{lead}. It now reads: {words!r}{check}{also}"
+
+    return _act(chat, "nothing changed", act, attempted,
+                "it may already read the new way")
+
+
+def delete_message(chat: str, message: str = "last") -> str:
+    """
+    Delete a message for everyone. RED, never pre-approved, and asked twice:
+    it cannot be brought back (`consequences:` in safety.yaml).
+
+    `message` is its number (#4821), a few of its words, or "last" for HIS
+    newest message there. Someone else's goes only where Telegram allows it -
+    a private chat, or a group or channel he runs.
+    """
+    _enabled()
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        target, why = await _which_message(
+            client, entity, message, last=lambda m: _his(m, entity, "delete_messages"))
+        if target is None:
+            raise _Refused(why)
+        what = _called(target, entity)
+        attempted.set()
+        affected = await client.delete_messages(entity, [target.id], revoke=True)
+        if not sum(getattr(a, "pts_count", 0) or 0 for a in affected or []):
+            raise _Refused("Telegram deleted nothing, so it may be gone already, "
+                           "or not be yours to delete")
+        name = await _chat_name(client, entity)
+        return f"Deleted {what} in {name}."
+
+    return _act(chat, "nothing deleted", act, attempted, "it may be gone already")
+
+
+def forward_telegram_message(chat: str, to: str, message: str = "last") -> str:
+    """
+    Forward one message from `chat` to `to`, showing who wrote it. RED: it
+    reaches whoever `to` is, with the pre-approved destinations of a send.
+    `message` is its number (#4821), a few of its words, or "last".
+    """
+    _enabled()
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        target, why = await _which_message(client, entity, message)
+        if target is None:
+            raise _Refused(why)
+        destination = await _resolve(client, to)
+        if destination is None:
+            return await _unresolved(client, to, "nothing forwarded")
+        attempted.set()
+        await client.forward_messages(destination, target.id, from_peer=entity)
+        where = await _chat_name(client, destination)
+        return f"Forwarded {_called(target, entity)} to {where}."
+
+    return _act(chat, "nothing forwarded", act, attempted,
+                f"it may already be in {_one_line(to, 40)}", look=to)
+
+
+def pin_telegram_message(chat: str, message: str = "last", unpin: bool = False,
+                         notify: bool = False) -> str:
+    """
+    Pin a message at the top of a chat, or with `unpin` take it down. AMBER:
+    announced, and undone the other way round.
+
+    `message` is its number (#4821), a few of its words, or "last" - which,
+    for an unpin, is the message pinned there now. `notify` tells everyone in
+    the chat; off unless he asks, because in his channel that is a
+    notification to every member.
+    """
+    _enabled()
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        if unpin and _is_the_last_one(message):
+            from telethon import types
+
+            target = await client.get_messages(entity, ids=types.InputMessagePinned())
+            if isinstance(target, list):
+                target = target[0] if target else None
+            if target is None:
+                raise _Refused("nothing is pinned there")
+        else:
+            target, why = await _which_message(client, entity, message)
+            if target is None:
+                raise _Refused(why)
+        attempted.set()
+        if unpin:
+            await client.unpin_message(entity, target.id)
+        else:
+            await client.pin_message(entity, target.id, notify=bool(notify))
+        name = await _chat_name(client, entity)
+        what = _called(target, entity)
+        if unpin:
+            return f"Unpinned {what} in {name}."
+        told = ", and everyone there was told" if notify else ", without a notification"
+        return f"Pinned {what} in {name}{told}."
+
+    return _act(chat, "nothing unpinned" if unpin else "nothing pinned", act, attempted,
+                "it may be done already")
+
+
+def react_to_telegram_message(chat: str, emoji: str, message: str = "last") -> str:
+    """
+    Put his reaction - one emoji, like a thumbs-up or a heart - on a message,
+    or with an empty `emoji` take it off. AMBER: other people see it, and
+    reacting again changes it. `message` is its number (#4821), a few of its
+    words, or "last".
+    """
+    _enabled()
+    # Telegram names its reactions without the emoji presentation selector
+    # (U+FE0F): the Bot API's list of reaction emoji has the heart as U+2764
+    # alone, and the selector most keyboards add would make the same heart a
+    # reaction Telegram does not know.
+    emoji = str(emoji or "").strip().replace(chr(0xFE0F), "")
+    if emoji and not _is_one_emoji(emoji):
+        return "No reaction — a reaction is one emoji, like a thumbs-up or a heart."
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        from telethon import functions, types
+
+        target, why = await _which_message(client, entity, message)
+        if target is None:
+            raise _Refused(why)
+        attempted.set()
+        await client(functions.messages.SendReactionRequest(
+            peer=entity, msg_id=target.id,
+            reaction=[types.ReactionEmoji(emoticon=emoji)] if emoji else []))
+        name = await _chat_name(client, entity)
+        what = _called(target, entity)
+        if emoji:
+            return f"Reacted {emoji} to {what} in {name}."
+        return f"Took your reaction off {what} in {name}."
+
+    return _act(chat, "no reaction", act, attempted, "it may be there already")
+
+
+# ------------------------------------------------------------- scheduled posts
+#
+# "Add the scheduled posts too" (2026-10-24). send_telegram_message's
+# schedule_at puts a post in Telegram's own queue for later; these three see
+# that queue, take a post out of it, and move one - to another time, or out
+# now. Scheduled posts have their own numbering, separate from the chat's, so
+# they are only ever looked up among the scheduled ones (_which_scheduled):
+# "#5" here is never message 5 of the chat.
+#
+#   scheduled_telegram_posts   GREEN - reads, and fences what it reads
+#   cancel_scheduled_post      AMBER - announced; nobody has seen the post
+#   reschedule_telegram_post   AMBER - announced; its words were approved
+#                              when it was scheduled, only WHEN changes
+
+# What "the next one" is called: the soonest scheduled post.
+# The words are the gate's, so the question and the tool name the same post.
+_THE_NEXT_ONE = NEXT_SCHEDULED_WORDS
+
+
+async def _scheduled(client, entity) -> list:
+    """
+    The posts waiting to go out in this chat, soonest first.
+
+    Through Telethon's own get_messages(scheduled=True), never the raw
+    request: a raw message's .text is None until Telethon finishes it, so the
+    list read as posts with no words and no search by words could match one.
+    And limit=None, because get_messages given no limit returns ONE.
+    """
+    found = await client.get_messages(entity, scheduled=True, limit=None)
+    waiting = [m for m in (found or []) if getattr(m, "date", None)]
+    return sorted(waiting, key=lambda m: m.date)
+
+
+async def _which_scheduled(client, entity, wanted: str):
+    """
+    The one scheduled post meant: (message, "") or (None, why not). By its
+    number (as scheduled_telegram_posts shows it), by a few of its words, as
+    "the next one" (the soonest) - or, said as "it" or not named at all, the
+    only one there. With several, which is a question that names them by
+    their times, never a choice.
+    """
+    from .. import when
+
+    posts = await _scheduled(client, entity)
+    if not posts:
+        return None, "nothing is scheduled there"
+    said = " ".join(str(wanted or "").lower().split())
+    number = said.lstrip("#").strip()
+    if number.isdigit():
+        hit = [m for m in posts if m.id == int(number)]
+        return (hit[0], "") if hit else (None, f"no scheduled post there is number {number}")
+    if said in _THE_NEXT_ONE:
+        return posts[0], ""
+
+    def listed(found) -> str:
+        return ", ".join(f"#{m.id} {when.say(m.date)}" for m in found[:5])
+
+    if said in LAST_MESSAGE_WORDS:
+        if len(posts) == 1:
+            return posts[0], ""
+        return None, f"{len(posts)} posts are scheduled there ({listed(posts)}). Which one do you mean?"
+    hits = [m for m in posts if said in " ".join(_describe_message(m, plain=True).lower().split())]
+    if not hits:
+        return None, f"no scheduled post there has the words {_one_line(wanted, 60)!r}"
+    if len(hits) > 1:
+        return None, (f"{len(hits)} scheduled posts fit {_one_line(wanted, 60)!r} "
+                      f"({listed(hits)}). Which one do you mean?")
+    return hits[0], ""
+
+
+def scheduled_telegram_posts(chat: str) -> str:
+    """
+    What is waiting to go out in one chat, soonest first: when, its number
+    (which cancel_scheduled_post and reschedule_telegram_post take) and its
+    words. Read-only. Fenced like any chat content - in a channel another
+    admin can schedule posts too - so it marks the turn as having read.
+    """
+    _enabled()
+
+    async def work(client):
+        from .. import when
+
+        entity = await _resolve(client, chat)
+        if entity is None:
+            return await _unresolved(client, chat)
+        posts = await _scheduled(client, entity)
+        name = await _chat_name(client, entity)
+        if not posts:
+            return f"Nothing is scheduled in {name}."
+        lines = [f"#{m.id} {when.say(m.date)}: {_one_line(_describe_message(m, plain=True), 160)}"
+                 for m in posts]
+        head = (f"{len(posts)} post{'' if len(posts) == 1 else 's'} scheduled in {name}, "
+                "soonest first:")
+        body = _fence("\n".join(lines), f"scheduled posts in {name}")
+        return f"{head}\n{body}"
+
+    return RUNTIME.run(work)
+
+
+def cancel_scheduled_post(chat: str, message: str = "") -> str:
+    """
+    Take a scheduled post out of Telegram's queue before it goes out. AMBER:
+    announced; nobody has seen it. `message` is its number from
+    scheduled_telegram_posts, a few of its words, "next" for the soonest, or
+    empty when it is the only one there.
+    """
+    _enabled()
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        from telethon import functions
+
+        from .. import when
+
+        target, why = await _which_scheduled(client, entity, message)
+        if target is None:
+            raise _Refused(why)
+        attempted.set()
+        await client(functions.messages.DeleteScheduledMessagesRequest(
+            peer=entity, id=[target.id]))
+        name = await _chat_name(client, entity)
+        return (f"Cancelled {_called(target, entity)}, which was scheduled for "
+                f"{when.say(target.date)} in {name}. It won't go out.")
+
+    return _act(chat, "nothing cancelled", act, attempted, "it may already be cancelled")
+
+
+# The gate's words for "now", so the question and the send cannot disagree.
+_RIGHT_NOW = RIGHT_NOW_WORDS
+
+
+def reschedule_telegram_post(chat: str, schedule_at: str, message: str = "") -> str:
+    """
+    Move a scheduled post to another time - or, with schedule_at "now", send
+    it at once. AMBER: announced; its words were approved when it was
+    scheduled, and only WHEN changes. `message` is chosen as for
+    cancel_scheduled_post.
+    """
+    _enabled()
+    now_please = " ".join(str(schedule_at or "").lower().split()) in _RIGHT_NOW
+    later = None
+    if not now_please:
+        from .. import when
+
+        later, problem = when.parse(schedule_at)
+        if later is None:
+            return f"Nothing moved — {problem}."
+    attempted = _Attempt()
+
+    async def act(client, entity):
+        from telethon import functions
+
+        from .. import when
+
+        target, why = await _which_scheduled(client, entity, message)
+        if target is None:
+            raise _Refused(why)
+        name = await _chat_name(client, entity)
+        what = _called(target, entity)
+        was = when.say(target.date)
+        attempted.set()
+        if now_please:
+            await client(functions.messages.SendScheduledMessagesRequest(
+                peer=entity, id=[target.id]))
+            return f"Sent {what} to {name} now, instead of {was}."
+        # Only the time: no text and no parse mode, so Telegram keeps the
+        # words and their formatting exactly as they were scheduled.
+        await client.edit_message(entity, target.id, None, parse_mode=None, schedule=later)
+        return f"Moved {what} in {name} from {was} to {when.say(later)}."
+
+    return _act(chat, "nothing moved", act, attempted,
+                "it may already have gone out" if now_please else "it may already have moved")
+
+
 REGISTRY: dict[str, Any] = {
+    "scheduled_telegram_posts": scheduled_telegram_posts,
+    "cancel_scheduled_post": cancel_scheduled_post,
+    "reschedule_telegram_post": reschedule_telegram_post,
+    "edit_telegram_message": edit_telegram_message,
+    "delete_message": delete_message,
+    "forward_telegram_message": forward_telegram_message,
+    "pin_telegram_message": pin_telegram_message,
+    "react_to_telegram_message": react_to_telegram_message,
     "telegram_status": telegram_status,
     "list_telegram_chats": list_telegram_chats,
     "read_telegram": read_telegram,

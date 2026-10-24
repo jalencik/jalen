@@ -367,6 +367,27 @@ AGENTS = {
     "hermes": _ask_hermes,
     "nous": _ask_hermes,
 }
+# What each route is called back to him, and stored as, whichever name reached it.
+_CANONICAL = {"gpt": "chatgpt", "openai": "chatgpt", "nous": "hermes"}
+
+
+def _agent_named(agent: str) -> tuple[str, Any]:
+    """
+    (the route's name, the function that asks it), or (what was said, None).
+
+    The brain passes the name the way he said it - "Hermes", "Hermes 4",
+    "Nous Research", "chat gpt", "Gemini 2.5 Pro" - and the exact lookup this
+    replaced turned every one of those but the first into "I don't have a
+    route", in a reply whose list of routes did not name Hermes either. So:
+    the whole name, then the name with its spaces taken out, then its first
+    word.
+    """
+    said = " ".join(str(agent or "").lower().replace("-", " ").replace("_", " ").split())
+    for key in (said, said.replace(" ", ""), said.split(" ")[0] if said else ""):
+        if key in AGENTS:
+            name = _CANONICAL.get(key, key)
+            return name, AGENTS[name]
+    return said, None
 
 
 # ---------------------------------------------------------------------------
@@ -380,13 +401,12 @@ def delegate_task(agent: str, brief: str, expectation: str = "") -> str:
     feature: he asked for prompt-engineer quality, and the only thing that
     reliably produces it is not accepting less.
     """
-    name = (agent or "").strip().lower()
-    ask = AGENTS.get(name)
+    name, ask = _agent_named(agent)
     if ask is None:
         return (
             f"I don't have a route to '{agent}'. I can reach: gemini, "
-            "chatgpt (needs an API key), claude code, and the Claude desktop "
-            "app via cowork."
+            "chatgpt (needs an OpenAI key), hermes (needs an OpenRouter key), "
+            "claude code, and the Claude desktop app via cowork."
         )
 
     problems = _brief_problems(brief)

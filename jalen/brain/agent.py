@@ -16,8 +16,11 @@ SDK would otherwise auto-approve — which is why we use a hook rather than the
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -25,6 +28,46 @@ from ..safety import SafetyEngine, Tier
 
 ConfirmFn = Callable[[str], Awaitable[bool]]
 AnnounceFn = Callable[[str], Awaitable[None]]
+
+_REPO = Path(__file__).resolve().parents[2]
+
+# ---------------------------------------------------------------------------
+# THE CONVERSATION OUTLIVES A RESTART
+#
+# "Constant memory ... save up the conversation" (2026-10-23). Facts he tells
+# Jalen survive in memory.py, but the conversation did not: the SDK holds it
+# in the CLI child, so every restart - and every Ctrl+Alt+K, which ends the
+# process - began the next turn knowing nothing that had been said.
+#
+# So the session id of every turn that ended well is written down
+# (brain.session_path), and the next Brain resumes it with the SDK's own
+# `resume` - by that exact id, never `continue_conversation`, which picks up
+# the newest session in the working folder: his own Claude Code session on
+# this repo, if he was working on Jalen there.
+#
+# Never at the cost of the brain: a session that cannot be resumed - its
+# transcript gone, made from another folder - is forgotten and a fresh one
+# starts (Brain.start). Not in private mode: a session that had a private
+# turn is never written down, so a restart does not bring it back. "New
+# conversation" forgets it on purpose (Brain.forget_conversation).
+#
+# Only ids shaped like the CLI's (a UUID) are passed on: the value becomes a
+# command-line argument of the child.
+_SESSION_ID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+
+
+def saved_session_path(cfg) -> Path:
+    """Where the conversation to resume is written down (brain.session_path)."""
+    path = Path(str(cfg.get_path("brain.session_path", "data/brain-session.json")))
+    return path if path.is_absolute() else _REPO / path
+
+
+def forget_saved_conversation(path: Path) -> None:
+    """Never resume the conversation written down at `path`."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 MCP_SERVER_NAME = "jalen"
 # SDK MCP tools are reported to PreToolUse hooks as "mcp__<server>__<tool>",
@@ -454,6 +497,17 @@ SPOKEN_STYLE = (
 
 
 class Brain:
+    # The conversation-resume state, defaulted at class level so that a Brain
+    # built without __init__ (Brain.__new__, as several tests do) neither
+    # resumes anything nor writes anything down.
+    _session_path: Path | None = None
+    _resume_within_s = 0.0
+    _epoch = 0
+    _fresh = False
+    _private_sessions: frozenset[str] = frozenset()
+    _unproven = False
+    resumed = ""
+
     def __init__(
         self,
         cfg,
@@ -473,6 +527,13 @@ class Brain:
         self._client = None
         self._lock = asyncio.Lock()
         self.model = cfg.get_path("brain.model_default", "claude-sonnet-5")
+        # The conversation, carried across a restart (see the note at the top).
+        self._session_path = saved_session_path(cfg)
+        self._resume_within_s = float(cfg.get_path("brain.resume_within_s", 43200) or 0)
+        self._epoch = 0                     # bumped by forget_conversation()
+        self._fresh = False                 # the next turn starts a new conversation
+        self._private_sessions = frozenset()  # sessions that had a private turn
+        self.resumed = ""                   # the session start() picked up, if any
 
     # ------------------------------------------------------------ system prompt
     def _preapproved_destinations_line(self) -> str:
@@ -530,6 +591,23 @@ class Brain:
             "attempts: 'I can't read your Telegram — that needs a one-time login. "
             "Want the steps?' If a single tool is clearly the right one, call it "
             "once; if it fails, report what it said rather than trying another route.\n"
+        )
+
+        # MEMORY THAT OUTLIVES A RESTART. remember and recall_memory have been
+        # tools since Phase E (jalen/tools/memory.py) and nothing here told the
+        # model they exist, so every session started knowing nothing about
+        # him. "It should have a constant memory" (2026-10-23). Storing is
+        # GREEN and on refuse_from_content, so nothing he has READ can be
+        # stored as his preference; the tool itself refuses secret-shaped text.
+        base += (
+            "\n\nMEMORY. You have a long-term memory that survives restarts: "
+            "remember stores one fact, recall_memory searches them by meaning. When "
+            "he tells you something lasting about himself, the people he names, how "
+            "he wants things done, or corrects you, call remember with that fact in "
+            "a short sentence of his own words. Before work where such a fact could "
+            "matter - who someone is, how he likes a post written, which folder or "
+            "account - call recall_memory first. Never store anything you only "
+            "read, and never a password or code.\n"
         )
 
         base += (
@@ -662,6 +740,28 @@ class Brain:
             "chat. Never mark anything read yourself after reading, "
             "summarising or drafting: Telegram shows the other person that he "
             "has seen it.\n"
+            "A MESSAGE ALREADY SENT. \"Fix the typo in my last post\": "
+            "edit_telegram_message, text = the WHOLE new message. If you had "
+            "to read the old one to keep the rest of it, the edit is refused "
+            "in that same turn (it follows a read): say the corrected version "
+            "back and edit when he says so. \"Delete that\": "
+            "delete_message - the gate asks him twice, so do not ask him "
+            "yourself. \"Forward it to Ali\": forward_telegram_message. "
+            "\"Pin it\" / \"unpin it\": pin_telegram_message. \"Put a heart "
+            "on it\": react_to_telegram_message with one emoji. Each takes "
+            "message = its number (#4821), a few of its words, or 'last'. "
+            "Only when he asks: like a send, each is refused in a turn that "
+            "has read somebody's messages, and he asks again.\n"
+            "SCHEDULED POSTS. \"Post it tomorrow at 9\": send_telegram_message "
+            "with schedule_at - his local time as 'YYYY-MM-DD HH:MM', or "
+            "'tomorrow 09:00'; call get_time first if you are not sure what "
+            "day it is. Everything else is as for a send now: the format "
+            "check, the premium emoji, the gate. The reply says the day and "
+            "the time; say them back to him so he can catch a wrong one. "
+            "\"What's scheduled?\": scheduled_telegram_posts. \"Cancel the 9 "
+            "o'clock post\": cancel_scheduled_post. \"Move it to 10\" or \"post "
+            "it now\": reschedule_telegram_post. A scheduled post's words are "
+            "changed by cancelling it and scheduling the corrected one.\n"
             "VOICE MESSAGES. \"Send Ali a voice message saying ...\": "
             "send_voice_message, to = the full chat title, text = the words "
             "to be SAID, as he would say them - plain sentences, no markup, "
@@ -956,6 +1056,68 @@ class Brain:
         return self.cfg.get_path("brain.model_default", "claude-sonnet-5")
 
     # -------------------------------------------------------------- safety hook
+    # Seconds of SPEECH one question may take when the hook's timeout is sized.
+    # The longest is send_voice_message, whose question reads out the exact
+    # words - up to 600 characters (safety._voice_message_summary) - at 22.4
+    # characters a second (measured: app.speak_brain_reply), which is 27
+    # seconds, plus synthesis. 40 leaves room for that and nothing longer.
+    _QUESTION_SPEECH_S = 40.0
+    # The most questions one tool call can put to him, in a row: a limit and
+    # the leash (jalen/limits.py), the action's own "Confirm?", and for an
+    # action dangerous enough to name its consequence, that second question
+    # (`consequences:` in config/safety.yaml).
+    _QUESTIONS_PER_CALL = 4
+
+    def _hook_timeout_s(self) -> float:
+        """
+        How long the SDK may wait for the PreToolUse callback before cutting
+        it off. It is the callback that ASKS him, so it has to outlive every
+        question it can ask in a row.
+
+        The SDK's default is 60 seconds (HookMatcher.timeout, "default: 60"),
+        which Jalen never overrode. One spoken question fits: 20 s of waiting
+        plus a few of speaking. It stopped fitting the moment a second question
+        could precede the first - a limit he is asked about (jalen/limits.py),
+        then the leash, then the action's own "Confirm?" - and it never fit
+        an answer typed on a phone (safety.confirm_timeout_typed_s, 300 s).
+
+        What a timeout does, read in the bundled CLI's PreToolUse dispatcher
+        (2026-10-23): the tool call is STOPPED and the model is handed an
+        error, "Execution stopped by hook" - so it fails closed, and nothing
+        ran unapproved. What it broke was the question: the CLI gave up while
+        Jalen was still asking, so his answer, given after the cut-off, went to
+        a call that was already refused, and the RED path logged it "executed"
+        if he said yes. Sized so that it never happens: every question one call
+        can ask (_QUESTIONS_PER_CALL), each at its longest, and ten seconds over.
+
+        A question at its longest: by voice its window is held for an answer
+        of his on its way (app.ANSWER_HOLD_S, 12 s); and a "Confirm?" whose
+        answer was neither yes nor no is asked once more in full, with the
+        whole window again (Jalen._ask_again) - two windows, two speeches. An
+        AMBER announcement is a question too, so a config with short
+        confirmations cannot leave it uncovered.
+        """
+        from ..app import answer_hold_s       # app builds the brain; not the reverse
+
+        hold = answer_hold_s(self.cfg)
+        spoken = float(self.cfg.get_path("safety.confirm_timeout_s", 20))
+        typed = float(self.cfg.get_path("safety.confirm_timeout_typed_s", 300))
+        confirm = 2 * (max(spoken + hold, typed) + self._QUESTION_SPEECH_S)
+        announced = (max(float(self.cfg.get_path("safety.undo_window_s", 4)) + hold,
+                         float(self.cfg.get_path("safety.undo_window_typed_s", 10)))
+                     + self._QUESTION_SPEECH_S)
+        return self._QUESTIONS_PER_CALL * max(confirm, announced) + 10.0
+
+    def _hook_matcher(self, matcher_class):
+        """The PreToolUse matcher, given its timeout where the SDK has one."""
+        hook = self._make_hook()
+        try:
+            return matcher_class(matcher=None, hooks=[hook], timeout=self._hook_timeout_s())
+        except TypeError:
+            # An SDK from before HookMatcher.timeout existed: the default
+            # stands, as it always did, rather than the brain not starting.
+            return matcher_class(matcher=None, hooks=[hook])
+
     def _make_hook(self):
         async def pre_tool_use(input_data: dict, tool_use_id: str, context: Any):
             raw_tool = input_data.get("tool_name") or input_data.get("name") or "unknown"
@@ -985,11 +1147,70 @@ class Brain:
                     }
                 }
 
+            # A POST THAT WILL NOT GO IS REFUSED BEFORE HE IS ASKED ABOUT IT:
+            # off his channel's format, the tool sends nothing, and it used to
+            # say so only after he had been asked and the limit counted it
+            # (messaging.refused_before_asking). The router path does the same.
+            from ..tools import messaging
+
+            not_going = messaging.refused_before_asking(tool, args)
+            if not_going:
+                self.audit.action(verdict, "cancelled", f"format: {not_going[:160]}")
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": not_going,
+                    }
+                }
+
+            # HOW MANY, and lockdown (jalen/limits.py): the same governor, on
+            # the same engine, that the router path asks in app.handle_local.
+            # After the kind-of-thing gate and before its question, so an
+            # action past a limit asks about the limit first and a refused
+            # one never reaches the RED "Confirm?" below.
+            governor = getattr(self.safety, "governor", None)
+            # Set when the governor asked him a question that NAMED this action
+            # and he said yes: then that yes is the action's approval, and the
+            # tier does not ask "Confirm?" (or announce it) a second time.
+            approved_by_limit = False
+            if governor is not None:
+                admission = await governor.admit(verdict, self.confirm)
+                approved_by_limit = admission.approved_action
+                if not admission.allowed:
+                    self.audit.action(
+                        verdict,
+                        "blocked" if admission.outcome in ("locked", "refused") else "cancelled",
+                        f"limit: {admission.outcome}")
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": admission.for_model,
+                        }
+                    }
+
+            def allowed_to_run() -> dict:
+                # Counted here, after every question that could still say no,
+                # so a cancelled action does not use up a limit.
+                if governor is not None:
+                    governor.record(tool)
+                return {}
+
             if verdict.tier is Tier.RED:
                 template = (
                     self.cfg.get_path("safety_tiers.red.confirm_template", "{summary}. Confirm?")
                 )
-                approved = await self.confirm(template.format(summary=verdict.summary))
+                approved = approved_by_limit or await self.confirm(
+                    template.format(summary=verdict.summary))
+                # DANGEROUS ENOUGH TO ASK TWICE (`consequences:` in
+                # safety.yaml): after his yes, what it does that cannot be
+                # taken back, and the question again - asked the same way by
+                # the router path (app.handle_local). A limit's yes stood in
+                # for the first question, never for this one.
+                second = getattr(verdict, "second_question", "")
+                if approved and second:
+                    approved = await self.confirm(second)
                 self.audit.action(verdict, "executed" if approved else "cancelled")
                 if not approved:
                     return {
@@ -999,9 +1220,9 @@ class Brain:
                             "permissionDecisionReason": _deny_reason(approved),
                         }
                     }
-                return {}
+                return allowed_to_run()
 
-            if verdict.tier is Tier.AMBER:
+            if verdict.tier is Tier.AMBER and not approved_by_limit:
                 template = self.cfg.get_path(
                     "safety_tiers.amber.announce_template",
                     "{summary}. Say stop if you don't want that.",
@@ -1023,10 +1244,10 @@ class Brain:
                         }
                     }
                 self.audit.action(verdict, "executed")
-                return {}
+                return allowed_to_run()
 
             self.audit.action(verdict, "executed")
-            return {}
+            return allowed_to_run()
 
         return pre_tool_use
 
@@ -1120,17 +1341,106 @@ class Brain:
             permission_mode="bypassPermissions",
             max_turns=int(self.cfg.get_path("brain.max_turns_per_request", 12)),
             mcp_servers=self._mcp_servers(),
-            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[self._make_hook()])]},
+            hooks={"PreToolUse": [self._hook_matcher(HookMatcher)]},
             # Emit token deltas as they are produced instead of only whole
             # messages. This is what lets ask() start SPEAKING sentence one
             # while the model is still writing sentence three -- see the
             # comment on ask() for why that is the single biggest latency
             # win on this path.
             include_partial_messages=True,
+            # The conversation before the restart, when there is one to pick
+            # up (_session_to_resume); None - the SDK's default - otherwise.
+            resume=self._session_to_resume(),
             **self._speed_options(),
         )
         self._client = ClaudeSDKClient(options=options)
-        await self._client.__aenter__()
+        try:
+            await self._client.__aenter__()
+        except Exception:
+            if not options.resume:
+                raise
+            # A conversation that cannot be picked up again must never cost
+            # him the brain: forget it, and start a new one.
+            import dataclasses
+
+            failed, self._client = self._client, None
+            try:
+                await failed.__aexit__(None, None, None)
+            except Exception:  # noqa: BLE001 - it already failed once
+                pass
+            forget_saved_conversation(self._session_path)
+            options = dataclasses.replace(options, resume=None)
+            self._client = ClaudeSDKClient(options=options)
+            await self._client.__aenter__()
+        self.resumed = options.resume or ""
+        # Unproven until a turn ends well on it (_remember_session).
+        self._unproven = bool(options.resume)
+
+    def forget_unproven_resume(self) -> None:
+        """
+        A resumed conversation whose first turn did not end well is let go.
+        Without this, a session that kills the CLI child on every turn would
+        be resumed again by each restart - every turn "my connection to Claude
+        dropped", for good. Called wherever a dead child is replaced.
+        """
+        if self._unproven and self._session_path is not None:
+            forget_saved_conversation(self._session_path)
+        self._unproven = False
+
+    def _session_to_resume(self) -> str | None:
+        """
+        The conversation to pick up: the one the last good turn was in, when
+        that was within brain.resume_within_s. None when there is none, when
+        it is older, when he asked for a new conversation, and when the record
+        cannot be read - a guess here would resume something else.
+        """
+        if self._session_path is None or self._resume_within_s <= 0 or self._fresh:
+            return None
+        try:
+            saved = json.loads(self._session_path.read_text(encoding="utf-8"))
+            session, at = str(saved["session_id"]), float(saved["at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if not _SESSION_ID.fullmatch(session) or session in self._private_sessions:
+            return None
+        if not 0 <= time.time() - at <= self._resume_within_s:
+            return None
+        return session
+
+    def _remember_session(self, session_id: str, epoch: int) -> None:
+        """
+        Write down the conversation a turn that ended well was in, so the next
+        start picks it up. Not when "new conversation" was said while the turn
+        ran (`epoch`), and never a session that had a turn in private mode.
+        """
+        if (self._session_path is None or not session_id or epoch != self._epoch
+                or not _SESSION_ID.fullmatch(session_id)):
+            return
+        self._unproven = False
+        if getattr(self.audit, "private", False):
+            self._private_sessions = self._private_sessions | {session_id}
+        if session_id in self._private_sessions:
+            forget_saved_conversation(self._session_path)
+            return
+        try:
+            self._session_path.parent.mkdir(parents=True, exist_ok=True)
+            spare = self._session_path.with_suffix(".tmp")
+            spare.write_text(json.dumps({"session_id": session_id, "at": time.time()}),
+                             encoding="utf-8")
+            os.replace(spare, self._session_path)
+        except OSError:
+            pass
+
+    def forget_conversation(self) -> None:
+        """
+        "New conversation": the next turn starts one, and the one before is
+        never resumed. Safe from any thread - it only sets what the next turn
+        reads, and a turn still running is not recorded when it ends.
+        """
+        self._epoch += 1
+        self._fresh = True
+        if self._session_path is not None:
+            forget_saved_conversation(self._session_path)
 
     def _speed_options(self) -> dict:
         """
@@ -1213,12 +1523,12 @@ class Brain:
         that propagate would turn a recoverable reconnect into the same
         permanent failure it exists to fix.
 
-        The conversation itself does not survive. The SDK holds context in
-        the subprocess, so a new one starts fresh — the turn in flight is
-        answered correctly, but earlier turns are forgotten. That is worth
-        saying plainly rather than pretending nothing happened, and it is
-        still enormously better than every subsequent turn failing.
+        The conversation survives it when it can: the new child resumes the
+        session the last good turn was in (_session_to_resume), and only when
+        that fails does a new one start fresh, earlier turns forgotten. Either
+        is enormously better than every subsequent turn failing.
         """
+        self.forget_unproven_resume()
         try:
             await self.stop()
         except Exception:
@@ -1226,6 +1536,15 @@ class Brain:
         await self.start()
 
     # -------------------------------------------------------------------- ask
+    def busy(self) -> bool:
+        """
+        A turn is in ask() now, so another one asked waits for it to finish:
+        the turns of one conversation are taken one at a time (`_lock`). The
+        app says so at once rather than leave him in silence behind it.
+        """
+        lock = getattr(self, "_lock", None)
+        return bool(lock is not None and lock.locked())
+
     async def ask(self, text: str, on_text=None) -> str:
         """
         One conversational turn. Returns what Jalen should say out loud.
@@ -1251,6 +1570,14 @@ class Brain:
         from claude_agent_sdk import AssistantMessage, ResultMessage
 
         async with self._lock:
+            # Read before the turn: a "new conversation" said while it runs
+            # must not be undone by this turn writing its session down.
+            epoch = self._epoch
+            if self._fresh:
+                # "New conversation". The client still holds the old one.
+                self._fresh = False
+                if self._client is not None:
+                    await self._restart_client()
             if self._client is None:
                 await self.start()
 
@@ -1342,6 +1669,8 @@ class Brain:
                     turns_used = getattr(message, "num_turns", 0) or 0
                     if subtype == "success" and not getattr(message, "is_error", False):
                         final = getattr(message, "result", "") or ""
+                        self._remember_session(
+                            str(getattr(message, "session_id", "") or ""), epoch)
                     elif subtype == "success":
                         # is_error with a "success" subtype is how the CLI
                         # reports an API failure it could not attribute to
