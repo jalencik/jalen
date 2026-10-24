@@ -61,6 +61,19 @@ def item(done: bool, title: str, minutes: str, command: str,
     return True, title
 
 
+def _rehearsal_flows() -> int:
+    """How many flows scripts/rehearse.py walks him through - its own list, not a number here."""
+    import importlib.util
+
+    try:
+        spec = importlib.util.spec_from_file_location("rehearse_steps", ROOT / "scripts" / "rehearse.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return len(module.STEPS)
+    except Exception:  # noqa: BLE001 - a count is not worth failing the whole report over
+        return 6
+
+
 def _track(left: list[str], result: tuple[bool, str]) -> None:
     outstanding, title = result
     if outstanding:
@@ -128,22 +141,24 @@ def main() -> int:
     # ------------------------------------------------------------- rehearsal
     record = ROOT / "data" / "rehearsal.md"
     passed = record.read_text(encoding="utf-8").count("- [x]") if record.exists() else 0
+    flows = _rehearsal_flows()
     _track(left, item(
-        done=passed >= 6,
-        title=f"3. Drive the six real flows  ({passed} of 6 done)",
-        minutes="one sitting, maybe 20 minutes",
+        done=passed >= flows,
+        title=f"3. Drive the {flows} real flows  ({min(passed, flows)} of {flows} done)",
+        minutes="one sitting, maybe 40 minutes",
         command=".\\jalen.ps1 rehearse",
         what_happens=[
-            "It walks you through six things one at a time.",
+            f"It walks you through {flows} things one at a time.",
             "For each: it tells you what to say to Jalen, you say it, then it",
             "asks what you ACTUALLY SAW. It will not accept a bare 'yes' -",
             "you have to describe what happened.",
             "Type 'skip' for any you do not want to do now.",
         ],
         why=(
-            "These six reach other people - a real email, a real chat, a real "
-            "login page. They are unit-tested but have never been driven end "
-            "to end by a person. Most likely place a real bug is still hiding."
+            "These reach other people or need your eyes - a real email, a real "
+            "chat, a real login page, the keys, a scheduled post. They are "
+            "unit-tested but have never been driven end to end by a person. "
+            "Most likely place a real bug is still hiding."
         ),
     ))
 
